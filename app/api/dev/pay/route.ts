@@ -27,5 +27,13 @@ export async function POST(req: NextRequest) {
   }
   await markPaidAndApply(paymentId);
   const fresh = await prisma.payment.findUnique({ where: { id: paymentId } });
-  return NextResponse.json({ ok: true, status: fresh?.status ?? "paid" });
+  const element = await prisma.element.findUnique({
+    where: { id: payment.elementId },
+    select: { symbol: true },
+  });
+  return NextResponse.json({
+    ok: true,
+    status: fresh?.status ?? "paid",
+    elementSymbol: element?.symbol ?? null,
+  });
 }

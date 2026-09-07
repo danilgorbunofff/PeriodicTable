@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { FAMILY_FILL } from "../lib/familyFill";
 import type { ElementNode } from "../lib/elements";
 import { cameraInteract } from "../lib/cameraInteract";
@@ -9,8 +10,9 @@ export type TileClaim = {
   selected?: boolean;
 };
 
-/** Flat porcelain tile — MVP forbids metal/glass/cosmic shaders. */
-export function Tile({
+/** Flat porcelain tile — MVP forbids metal/glass/cosmic shaders (REVIEW P0, Phase 4 demoted).
+ * Premium signal = tiny ELITE / EXOTIC caption only. */
+function TileInner({
   el,
   claim,
   onSelect,
@@ -29,6 +31,7 @@ export function Tile({
         onSelect?.(el);
       }}
       title={`${el.symbol} ${el.name} · ${claimed ? `#1 $${price}` : "Unclaimed · $5"}`}
+      aria-label={`${el.symbol} ${el.name}, ${claimed ? `claimed, leader pays $${price}` : "unclaimed"}`}
       className="tile-lift group relative rounded-lg border border-hairline shadow-[0_2px_7px_rgba(31,43,62,.12)] hover:shadow-lg cursor-pointer flex flex-col items-center justify-center leading-none"
       style={{ background: bg, width: 48, height: 52 }}
     >
@@ -51,6 +54,13 @@ export function Tile({
           EXOTIC
         </span>
       )}
+      {el.tier === "CULTURAL_ELITE" && (
+        <span className="text-[6px] font-bold tracking-widest text-muted">
+          ELITE
+        </span>
+      )}
     </button>
   );
 }
+
+export const Tile = memo(TileInner);

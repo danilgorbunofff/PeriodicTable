@@ -32,6 +32,8 @@ export type ElementDetail = {
     title: string;
     pitch: string;
     logo: string;
+    preview?: string | null;
+    siteUrl?: string;
     amount: number;
     clicks: number;
     rank: number;

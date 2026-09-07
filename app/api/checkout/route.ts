@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { validateTopUp, joinMin } from "@/lib/pricing";
 import { validateCheckoutInput } from "@/lib/validate";
 import { createWhopCheckoutSession, whopEnabled } from "@/lib/whop";
+import { rateLimit } from "@/lib/rateLimit";
+import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
+import { paymentsLiveServer } from "@/lib/flags";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +16,38 @@ type Body = {
   path?: "take" | "join";
   email?: string;
   idempotencyKey: string;
+  honeypot?: string;
+  attest?: boolean | string;
+  turnstileToken?: string;
 };
 
 export async function POST(req: NextRequest) {
+  if (!paymentsLiveServer()) {
+    return NextResponse.json({ error: "Payments are paused — join the waitlist.", waitlist: true }, { status: 403 });
+  }
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "0.0.0.0";
+  // Abuse: 5 checkout attempts / IP / hour (spec 03). 429, never 500.
+  if (!rateLimit(`checkout:${ip}`, 5, 3_600_000)) {
+    return NextResponse.json({ error: "Too many checkout attempts. Try again later." }, { status: 429 });
+  }
   let body: Body;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  if (honeypotCaught(body.honeypot)) {
+    return NextResponse.json({ error: "Something went wrong. Try again." }, { status: 400 });
+  }
+  if (!attestValid(body.attest)) {
+    return NextResponse.json({ error: "Please confirm you own or may promote this URL.", field: "attest" }, { status: 400 });
+  }
+  if (!(await verifyTurnstile(body.turnstileToken, ip))) {
+    return NextResponse.json({ error: "Bot check failed. Try again." }, { status: 400 });
   }
 
   const { elementSym, amountUsd, idempotencyKey } = body;
@@ -44,8 +71,7 @@ export async function POST(req: NextRequest) {
     orderBy: { amountUsd: "desc" },
     select: { amountUsd: true, startupId: true },
   });
-  const leaderTotal = stakes[0]?.amountUsd;
-  void leaderTotal;
+  const leaderTotal = stakes[0]?.amountUsd as number | undefined;
 
   const input = validateCheckoutInput({
     url: body.startup?.url,
@@ -62,8 +88,15 @@ export async function POST(req: NextRequest) {
   const myStake = stakes.find((s) => s.startupId === existing?.id);
   const isNewHere = !myStake;
 
-  const vErr = validateTopUp(amountUsd, isNewHere ? undefined : myStake!.amountUsd, isNewHere);
-  if (vErr) return NextResponse.json({ error: vErr }, { status: 409 });
+  const vErr = validateTopUp(amountUsd, leaderTotal, isNewHere);
+  if (vErr) {
+    // 409 = price moved / minimum not met. Include live takeLead so the modal
+    // can show "Price moved to $X — continue?" instead of charging stale.
+    return NextResponse.json(
+      { error: vErr, takeLead: leaderTotal != null ? leaderTotal + 1 : joinMin() },
+      { status: 409 }
+    );
+  }
   if (isNewHere && amountUsd < joinMin()) {
     return NextResponse.json({ error: `First stake on ${element.symbol} is $${joinMin()}+.` }, { status: 409 });
   }

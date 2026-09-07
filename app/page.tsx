@@ -14,6 +14,8 @@ import { TerritoryView } from "../components/TerritoryView";
 import { HowItWorks, CheckoutMock, BoardMock } from "../components/Modals";
 import { Modal } from "../components/Modal";
 import { ToastHost, useToast } from "../components/Toast";
+import { FooterBar } from "../components/FooterBar";
+import { track } from "../lib/analytics";
 
 type Tile = {
   symbol: string;
@@ -61,22 +63,39 @@ function HomeInner() {
     }
   }
 
-  // Deep links: /?paid=SYM (post-checkout success), /?unsub=done|unknown.
+  // Deep links: /?paid=SYM (post-checkout success), /?unsub=done|unknown,
+  // /?el=SYM&stake=N&email=E (outbid reclaim prefill from email).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paid = params.get("paid");
     const unsub = params.get("unsub");
+    const elParam = params.get("el");
+    const stakeParam = params.get("stake");
     if (paid) {
       if (paid !== "1") openSymbol(paid);
       toast("Payment confirmed — you're live! 🎉");
+      track("checkout_paid", { element: paid });
       // Refresh every cached endpoint so tiles/ranks reflect the new stake.
       mutateTiles();
       mutateStats();
       mutateActivity();
     }
+    if (elParam) {
+      const found = ELEMENTS.find((e) => e.symbol === elParam);
+      if (found) {
+        setSelected(found);
+        const reclaimAmt = stakeParam ? parseInt(stakeParam, 10) : NaN;
+        if (Number.isInteger(reclaimAmt) && reclaimAmt >= 1) {
+          setCheckoutEl(found);
+          setCheckoutAmt(reclaimAmt);
+          toast(`Reclaim ${elParam} for $${reclaimAmt} — past stake still counts.`);
+          track("reclaim_click", { element: elParam, amount: reclaimAmt });
+        }
+      }
+    }
     if (unsub === "done") toast("You're unsubscribed. Past stake still counts.");
     if (unsub === "unknown") toast("Already unsubscribed or unknown link.");
-    if (paid || unsub) window.history.replaceState({}, "", window.location.pathname);
+    if (paid || unsub || elParam) window.history.replaceState({}, "", window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -91,6 +110,12 @@ function HomeInner() {
   const openSymbol = useCallback((symbol: string) => {
     const el = ELEMENTS.find((e) => e.symbol === symbol);
     if (el) setSelected(el);
+  }, []);
+
+  const onSelectTile = useCallback((el: ElementNode) => {
+    track("tile_click", { element: el.symbol });
+    setSelected(el);
+    track("drawer_open", { element: el.symbol });
   }, []);
 
   useEffect(() => {
@@ -108,8 +133,10 @@ function HomeInner() {
   }, [searchOpen, checkoutEl, selected, mobileRailOpen, mobileActivityOpen, expandOpen]);
 
   const onPick = (p: SearchPick) => {
+    track("search_submit", { element: p.symbol });
     openSymbol(p.symbol);
     setSearchOpen(false);
+    track("drawer_open", { element: p.symbol });
   };
 
   return (
@@ -119,7 +146,7 @@ function HomeInner() {
           <PeriodicGrid
             claims={claims}
             selectedId={selected?.id ?? null}
-            onSelect={setSelected}
+            onSelect={onSelectTile}
           />
         </div>
       </TableCamera>
@@ -248,6 +275,7 @@ function HomeInner() {
         onClose={() => setCheckoutEl(null)}
         onDone={(m) => toast(m)}
       />
+      <FooterBar />
     </div>
   );
 }

@@ -73,23 +73,22 @@ export function verifyWhopSignature(rawBody: string, signature: string | null): 
 }
 
 /** Extract our paymentId from Whop payload metadata (checks both plan and checkout session levels). */
-export function paymentIdFromWhopPayload(payload: any): string | null {
-  const md =
-    payload?.data?.plan?.metadata ??
-    payload?.data?.metadata ??
-    payload?.metadata ??
-    null;
-  const pid = md?.paymentId ?? null;
+export function paymentIdFromWhopPayload(payload: unknown): string | null {
+  const p = payload as {
+    data?: { plan?: { metadata?: { paymentId?: unknown } }; metadata?: { paymentId?: unknown }; payment?: { status?: unknown }; checkout_session?: { status?: unknown }; status?: unknown };
+    metadata?: { paymentId?: unknown };
+  } | null;
+  const md = p?.data?.plan?.metadata ?? p?.data?.metadata ?? p?.metadata ?? null;
+  const pid = (md as { paymentId?: unknown } | null)?.paymentId ?? null;
   return typeof pid === "string" && pid.length > 0 ? pid : null;
 }
 
 /** Only treat payments as successful when Whop reports a paid/completed state. */
-export function whopPayloadIsPaid(payload: any): boolean {
-  const statuses = [
-    payload?.data?.status,
-    payload?.data?.payment?.status,
-    payload?.data?.checkout_session?.status,
-  ].filter(Boolean);
+export function whopPayloadIsPaid(payload: unknown): boolean {
+  const p = payload as {
+    data?: { status?: unknown; payment?: { status?: unknown }; checkout_session?: { status?: unknown } };
+  } | null;
+  const statuses = [p?.data?.status, p?.data?.payment?.status, p?.data?.checkout_session?.status].filter(Boolean);
   if (statuses.length === 0) return true; // membership.paid-style events without status fields
   return statuses.some((s) => s === "succeeded" || s === "completed" || s === "paid");
 }

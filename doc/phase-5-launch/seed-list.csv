@@ -1,0 +1,13 @@
+domain,title,pitch,symbol,amount_usd,city
+aurum.fi,Aurum,Gold-grade treasury for onchain teams.,Au,88,Singapore
+acme.dev,Acme,Instant infra for ambitious startups.,C,50,Berlin
+beta.acme.dev,Acme Beta,Second seat on carbon — climbing.,C,24,Berlin
+gamma.tools,Gamma,"Third seat, watching the crown.",C,9,Oslo
+waferly.io,Waferly,Chip-grade CI that never flakes.,Si,34,Prague
+aurum.fi,Aurum,Gold-grade treasury for onchain teams.,Pt,42,Singapore
+darkpool.gg,Darkpool,Stealth infra for funds that move quietly.,DM,66,Zurich
+hydro.dev,Hydro,The lightest edge runtime.,H,12,Austin
+hydro.dev,Hydro,The lightest edge runtime.,He,10,Austin
+ferrous.cloud,Ferrous,Ironclad Postgres hosting.,Fe,21,Toronto
+hydro.dev,Hydro,The lightest edge runtime.,O,15,Austin
+darkpool.gg,Darkpool,Stealth infra for funds that move quietly.,U,39,Zurich

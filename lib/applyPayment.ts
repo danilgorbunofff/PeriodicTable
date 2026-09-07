@@ -39,6 +39,19 @@ export async function markPaidAndApply(paymentId: string, providerRef?: string):
         winnerDomain: result.info.newLeader.domain,
         winnerAmount: result.info.newLeader.amountUsd,
       });
+    } else if (victim) {
+      // Unsubscribed / no email → log suppression for debugging (spec 02 acceptance).
+      const { prisma: prismaClient } = await import("./prisma");
+      await prismaClient.emailLog.create({
+        data: {
+          to: result.info.oldLeader.domain,
+          template: "outbid",
+          elementSymbol: result.element.symbol,
+          amountUsd: Math.max(1, result.info.newLeader.amountUsd + 1 - result.info.oldLeader.amountUsd),
+          status: "suppressed",
+          detail: "no email on file (unsubscribed or never provided)",
+        },
+      });
     }
   }
 
@@ -47,9 +60,10 @@ export async function markPaidAndApply(paymentId: string, providerRef?: string):
     where: { id: payment.startupId },
     select: { email: true, unsubToken: true, domain: true },
   });
-  if (payer?.email && payment.email) {
+  const receiptTo = payment.email ?? payer?.email ?? null;
+  if (receiptTo && payer) {
     await sendReceiptEmail({
-      to: payer.email,
+      to: receiptTo,
       unsubToken: payer.unsubToken,
       elementSymbol: result.element.symbol,
       elementName: await prisma.element

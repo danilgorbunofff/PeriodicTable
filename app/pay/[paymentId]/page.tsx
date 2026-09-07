@@ -10,12 +10,13 @@ export default function DevPayPage() {
 
   async function run(outcome: "pay" | "fail") {
     setBusy(true);
-    await fetch("/api/dev/pay", {
+    const res = await fetch("/api/dev/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paymentId: params.paymentId, outcome }),
     });
-    if (outcome === "pay") router.push("/?paid=1");
+    const json = (await res.json().catch(() => ({}))) as { elementSymbol?: string };
+    if (outcome === "pay") router.push(json.elementSymbol ? `/?paid=${json.elementSymbol}` : "/?paid=1");
     else setBusy(false);
   }
 

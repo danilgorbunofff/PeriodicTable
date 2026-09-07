@@ -131,3 +131,14 @@ model EmailLog {
 
   @@index([createdAt(sort: Desc)])
 }
+
+model Report {
+  id        String   @id @default(cuid())
+  stakeId   String?
+  domain    String?
+  reason    String   @db.VarChar(280)
+  ipHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}

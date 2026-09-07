@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import useSWR from "swr";
 import { ChunkyButton } from "./ChunkyButton";
 import { Avatar } from "./Avatar";
@@ -7,6 +7,8 @@ import type { ElementNode } from "../lib/elements";
 import { fetcher, type ElementDetail } from "../lib/api";
 import { FAMILY_FILL } from "../lib/familyFill";
 import { relTime } from "../lib/relTime";
+import { previewFor, faviconFor } from "../lib/screenshots";
+import { track } from "../lib/analytics";
 
 export function TerritoryView({
   el,
@@ -27,6 +29,8 @@ export function TerritoryView({
   });
   const rows = data?.stakes ?? [];
   const [hover, setHover] = useState<string | null>(null);
+  const [reported, setReported] = useState<string | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const top = rows[0];
   const takeLead = data?.prices.takeLead ?? (top ? top.amount + 1 : 5);
   const joinMin = data?.prices.joinMin ?? 5;
@@ -105,8 +109,21 @@ export function TerritoryView({
                 href={r.stakeId ? `/go/${r.stakeId}` : `/s/${encodeURIComponent(r.domain)}`}
                 target="_blank"
                 rel="sponsored nofollow noopener"
-                onMouseEnter={() => setHover(r.domain)}
-                onMouseLeave={() => setHover(null)}
+                onClick={() => track("go_click", { element: el.symbol, domain: r.domain })}
+                onMouseEnter={() => {
+                  if (hoverTimer.current) clearTimeout(hoverTimer.current);
+                  // Prefetch preview on row hover (debounce 150ms per spec).
+                  hoverTimer.current = setTimeout(() => {
+                    const src = previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain });
+                    const img = new Image();
+                    img.src = src;
+                    setHover(r.domain);
+                  }, 150);
+                }}
+                onMouseLeave={() => {
+                  if (hoverTimer.current) clearTimeout(hoverTimer.current);
+                  setHover(null);
+                }}
                 className={`relative block px-3 py-2 rounded-2xl no-underline ${i === 0 ? "bg-goldwash" : "hover:bg-icy"}`}
               >
                 <div className="flex items-center gap-2">
@@ -116,9 +133,40 @@ export function TerritoryView({
                       <span className="ml-auto text-sm font-extrabold text-money whitespace-nowrap">${r.amount}</span>
                 </div>
                 <div className="text-xs text-muted truncate pl-[38px]">{r.pitch}</div>
+                <div className="pl-[38px] mt-0.5 flex items-center gap-2">
+                  <span className="text-[11px] text-live font-bold">🟢 {r.clicks} clicks delivered</span>
+                  <button
+                    aria-label={`Report ${r.domain}`}
+                    title="Report listing"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      fetch("/api/report", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ stakeId: r.stakeId, reason: "reported from drawer" }),
+                      }).catch(() => undefined);
+                      setReported(r.domain);
+                    }}
+                    className="text-[11px] text-muted hover:text-ink underline"
+                  >
+                    {reported === r.domain ? "reported ✓" : "report"}
+                  </button>
+                </div>
                 {hover === r.domain && (
                   <div className="absolute left-0 -translate-x-[108%] top-0 w-64 bg-white rounded-card shadow-card p-3 z-[var(--z-preview)] hidden md:block">
-                    <div className="bg-icy rounded-xl h-24 grid place-items-center text-xs text-muted">loading preview…</div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain })}
+                      alt={`${r.domain} preview`}
+                      loading="lazy"
+                      sizes="256px"
+                      onError={(e) => {
+                        const t = e.currentTarget;
+                        if (!t.src.includes("s2/favicons")) t.src = faviconFor(r.domain, 128);
+                      }}
+                      className="rounded-xl h-24 w-full object-cover bg-icy"
+                    />
                     <div className="mt-2 text-sm font-bold">{r.domain}</div>
                     <div className="text-xs text-muted">{r.pitch}</div>
                     <div className="text-xs mt-1">🔗 <span className="text-money font-bold">{r.domain}</span></div>

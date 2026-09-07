@@ -24,9 +24,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const plausibleDomain = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
   return (
     <html lang="en">
       <body className={`${display.variable} ${body.variable} font-sans antialiased`}>
+        {plausibleDomain ? (
+          <script defer data-domain={plausibleDomain} src="https://plausible.io/js/script.js" />
+        ) : null}
         {children}
       </body>
     </html>

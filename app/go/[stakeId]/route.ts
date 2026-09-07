@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { rateLimit } from "@/lib/rateLimit";
+import { shouldCountClick, hashIp } from "@/lib/clicks";
 
 export const dynamic = "force-dynamic";
-
-const BOTS = /bot|crawl|spider|slurp|headless|preview|curl|wget|python-requests/i;
 
 export async function GET(req: NextRequest, { params }: { params: { stakeId: string } }) {
   const { stakeId } = params;
@@ -25,14 +22,8 @@ export async function GET(req: NextRequest, { params }: { params: { stakeId: str
     "0.0.0.0";
   const ua = req.headers.get("user-agent") ?? "";
 
-  const isBot = BOTS.test(ua);
-  const perStakeOk = rateLimit(`s:${stakeId}:${ip}`, 1, 10_000);
-  const perIpOk = rateLimit(`ip:${ip}`, 30, 3_600_000);
-
-  if (!isBot && perStakeOk && perIpOk) {
-    const ipHash = createHash("sha256")
-      .update(`${ip}:${process.env.CLICK_SALT ?? "ptl-dev-salt"}`)
-      .digest("hex");
+  if (shouldCountClick(stakeId, ip, ua)) {
+    const ipHash = hashIp(ip);
     try {
       await prisma.$transaction([
         prisma.clickEvent.create({

@@ -13,7 +13,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sym:
     include: {
       stakes: {
         orderBy: { amountUsd: "desc" },
-        include: { startup: { select: { domain: true, title: true, pitch: true, logoUrl: true } } },
+        include: {
+          startup: { select: { domain: true, title: true, pitch: true, logoUrl: true, previewImgUrl: true, url: true } },
+        },
       },
     },
   });
@@ -28,6 +30,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sym:
     title: s.startup.title,
     pitch: s.startup.pitch,
     logo: s.startup.logoUrl,
+    preview: s.startup.previewImgUrl ?? null,
+    siteUrl: s.startup.url,
     amount: s.amountUsd,
     clicks: s.clicksDelivered,
     rank: i + 1,

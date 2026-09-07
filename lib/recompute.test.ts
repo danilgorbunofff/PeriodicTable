@@ -8,8 +8,10 @@ import { reclaimFor } from "./pricing";
 const prisma = new PrismaClient();
 const T1 = 9999;
 const T2 = 9998;
+const hasDb = !!process.env.DATABASE_URL;
 
 beforeAll(async () => {
+  if (!hasDb) return;
   // clean any residue from earlier runs so amounts start at zero
   await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2] } } });
   await prisma.activityLog.deleteMany({ where: { elementSymbol: { in: ["TST1", "TST2"] } } });
@@ -26,6 +28,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (!hasDb) {
+    await prisma.$disconnect().catch(() => undefined);
+    return;
+  }
   // delete stakes first (FK), then test elements + startups; also clear any
   // residue from earlier failed runs
   await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2] } } });
@@ -44,7 +50,7 @@ async function freshStartup(domain: string) {
   });
 }
 
-describe("applyStakeTx — canonical flow", () => {
+describe.skipIf(!hasDb)("applyStakeTx — canonical flow", () => {
   it("A $20 → B $21 → A reclaims $2 → A is #1 at $22, dethrone detected", async () => {
     const A = (await freshStartup("test-a.dev")).id;
     const B = (await freshStartup("test-b.dev")).id;
@@ -76,7 +82,7 @@ describe("applyStakeTx — canonical flow", () => {
   });
 });
 
-describe("applyStakeTx — self top-up while #1", () => {
+describe.skipIf(!hasDb)("applyStakeTx — self top-up while #1", () => {
   it("keeps crown, moat grows, no dethrone", async () => {
     const A = (await freshStartup("test-a.dev")).id;
     await applyStakeTx({ elementId: T2, startupId: A, addUsd: 10, kind: "join" });
@@ -88,7 +94,7 @@ describe("applyStakeTx — self top-up while #1", () => {
   });
 });
 
-describe("applyStakeTx — concurrent top-ups", () => {
+describe.skipIf(!hasDb)("applyStakeTx — concurrent top-ups", () => {
   it("exactly one leader, pool = sum", async () => {
     const A = (await freshStartup("test-a.dev")).id;
     const B = (await freshStartup("test-b.dev")).id;
