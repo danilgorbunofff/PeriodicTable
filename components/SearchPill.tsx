@@ -1,9 +1,13 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import useSWR from "swr";
 import { ELEMENTS } from "../lib/elements";
-import { MOCK_STAKES } from "../mocks/startups";
+import { fetcher } from "../lib/api";
+import { Avatar } from "./Avatar";
 
 export type SearchPick = { symbol: string; elementName: string; domain?: string };
+
+type ApiHit = { type: "startup" | "element"; symbol: string; elementName: string; domain: string | null; title: string | null; logo: string | null; amount: number };
 
 export function SearchPill({
   open,
@@ -15,19 +19,23 @@ export function SearchPill({
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim().toLowerCase()), 200);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const { data: apiHits } = useSWR<ApiHit[]>(
+    open && debounced.length >= 2 ? `/api/search?q=${encodeURIComponent(debounced)}` : null,
+    fetcher,
+    { keepPreviousData: true }
+  );
+
   const query = q.trim().toLowerCase();
-  const stakeHits = (query
-    ? MOCK_STAKES.filter(
-        (s) =>
-          s.domain.toLowerCase().includes(query) ||
-          s.title.toLowerCase().includes(query) ||
-          s.symbol.toLowerCase() === query ||
-          s.elementName.toLowerCase().includes(query)
-      )
-    : MOCK_STAKES.slice(0, 5)
-  ).slice(0, 8);
+  const stakeHits = useMemo(() => apiHits?.filter((h) => h.type === "startup" && h.domain) ?? [], [apiHits]);
 
   const elHits = useMemo(
     () =>
@@ -41,6 +49,20 @@ export function SearchPill({
     [query]
   );
 
+  const results = useMemo<SearchPick[]>(
+    () => [
+      ...stakeHits.map((s) => ({ symbol: s.symbol, elementName: s.elementName, domain: s.domain ?? undefined })),
+      ...elHits
+        .filter((e) => !stakeHits.some((s) => s.symbol === e.symbol))
+        .map((e) => ({ symbol: e.symbol, elementName: e.name })),
+    ],
+    [stakeHits, elHits]
+  );
+
+  useEffect(() => {
+    setActive(0);
+  }, [q]);
+
   if (!open) return null;
 
   return (
@@ -51,12 +73,28 @@ export function SearchPill({
         autoFocus
         value={q}
         onChange={(e) => setQ(e.target.value)}
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="search-results"
+        aria-activedescendant={results[active] ? `search-hit-${active}` : undefined}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
+          if (e.key === "Escape") {
+            onClose();
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActive((i) => (results.length ? (i + 1) % results.length : 0));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActive((i) => (results.length ? (i - 1 + results.length) % results.length : 0));
+            return;
+          }
           if (e.key === "Enter") {
-            const first = stakeHits[0];
-            if (first) onPick({ symbol: first.symbol, elementName: first.elementName, domain: first.domain });
-            else if (elHits[0]) onPick({ symbol: elHits[0].symbol, elementName: elHits[0].name });
+            const pick = results[active] ?? results[0];
+            if (pick) onPick(pick);
           }
         }}
         placeholder="find your startup..."
@@ -65,42 +103,52 @@ export function SearchPill({
       <button
         aria-label="Search"
         onClick={() => {
-          const first = stakeHits[0];
-          if (first) onPick({ symbol: first.symbol, elementName: first.elementName, domain: first.domain });
+          const pick = results[active] ?? results[0];
+          if (pick) onPick(pick);
         }}
         className="w-9 h-9 rounded-full bg-visit text-white grid place-items-center text-sm"
       >
         →
       </button>
       {query || stakeHits.length > 0 ? (
-        <div className="absolute top-full mt-2 left-0 w-[360px] max-w-[calc(100vw-3rem)] bg-white rounded-card shadow-card p-2 max-h-72 overflow-auto z-[var(--z-preview)]">
-          {stakeHits.map((s) => (
+        <div id="search-results" role="listbox" className="absolute top-full mt-2 left-0 w-[360px] max-w-[calc(100vw-3rem)] bg-white rounded-card shadow-card p-2 max-h-72 overflow-auto z-[var(--z-preview)]">
+          {stakeHits.map((s, i) => (
             <button
-              key={s.domain + s.symbol}
-              onClick={() => onPick({ symbol: s.symbol, elementName: s.elementName, domain: s.domain })}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-2xl hover:bg-icy text-left"
+              id={`search-hit-${i}`}
+              key={s.domain}
+              role="option"
+              aria-selected={active === i}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => onPick({ symbol: s.symbol, elementName: s.elementName, domain: s.domain ?? undefined })}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-2xl text-left ${active === i ? "bg-icy" : ""}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.logo} alt="" className="w-5 h-5 rounded-full" />
+              <Avatar src={s.logo ?? undefined} domain={s.domain ?? ""} size={20} rounded="rounded-full" />
               <span className="text-sm font-bold">{s.domain}</span>
               <span className="text-xs text-muted ml-auto">{s.symbol} {s.elementName}</span>
               <span className="text-xs font-extrabold text-money">${s.amount}</span>
             </button>
           ))}
-          {elHits.map((e) => (
-            <button
-              key={e.id}
-              onClick={() => onPick({ symbol: e.symbol, elementName: e.name })}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-2xl hover:bg-icy text-left"
-            >
-              <span className="text-sm font-extrabold w-8">{e.symbol}</span>
-              <span className="text-xs text-muted">{e.name}</span>
-              <span className="text-xs text-muted ml-auto">from $5</span>
-            </button>
-          ))}
-          {query && stakeHits.length === 0 && elHits.length === 0 && (
+          {elHits.map((e, i) => {
+            const idx = stakeHits.length + i;
+            return (
+              <button
+                id={`search-hit-${idx}`}
+                key={e.id}
+                role="option"
+                aria-selected={active === idx}
+                onMouseEnter={() => setActive(idx)}
+                onClick={() => onPick({ symbol: e.symbol, elementName: e.name })}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-2xl text-left ${active === idx ? "bg-icy" : ""}`}
+              >
+                <span className="text-sm font-extrabold w-8">{e.symbol}</span>
+                <span className="text-xs text-muted">{e.name}</span>
+                <span className="text-xs text-muted ml-auto">from $5</span>
+              </button>
+            );
+          })}
+          {query && stakeHits.length === 0 && elHits.length === 0 && debounced.length >= 2 && apiHits?.length === 0 && (
             <div className="px-3 py-2 text-sm text-muted">
-              No startup found — claim {q.trim()} on C?
+              No startup found — try a different name or symbol.
             </div>
           )}
         </div>

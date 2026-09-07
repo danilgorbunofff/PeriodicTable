@@ -34,9 +34,41 @@ body {
   filter: drop-shadow(0 28px 38px rgba(0, 0, 0, 0.42));
 }
 
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes modal-backdrop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-modal-in {
+  animation: modal-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-modal-backdrop {
+  animation: modal-backdrop 180ms ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tile-lift {
     transition: none !important;
+  }
+  .animate-modal-in,
+  .animate-modal-backdrop {
+    animation: none !important;
   }
 }
 

@@ -139,20 +139,29 @@ Hover tooltip: dark pill `Symbol · Name · #1 $X` or `Unclaimed · $5`.
 - Eyebrow `THE TABLE · LIVE`
 - Title: globe/flask + **Table Order**
 - Gold sub `TOP 10 · MOST SPENT`
-- #1 gold-wash row: crown, logo, domain, `{n} elements · 👑 {c}`, money
-- #2… list: rank, logo, domain, `{n} elements · 👑 {c}`, money
-- Footer muted `total staked across every element · click one to stake`
-- Top-right expand ⤢
-- Click row → pan to that startup’s top element + open territory **or** profile (pick: territory of their biggest stake)
+- #1 row: peach pill `#1` (bg `sale` #F18B42), logo, domain, `{n} elements · 👑 {c}`, money
+- #2… list: plain rank text (no pill), logo, domain, `{n} elements · 👑 {c}`, money
+- Footer muted `total staked across every element · click one for details`
+- Top-right expand ⤢ → opens a `size="lg"` fullscreen modal (see “Expand modal” below)
+- Every row is `<a target="_blank">` → opens that startup’s `/s/{domain}` profile page in a **new tab** (does not pan the table or close the rail)
 
 ### Right rail — Territory (094107 / 094130)
 - Same shell (white, ~380–420px, large radius on left, shadow). Not a full-bleed drawer that eats the table.
 - Header: eyebrow + ⤢ + ✕
 - Title `C Carbon` (symbol then name)
 - Unclaimed: `BE THE FIRST · $5` · icy card with `?` · CTA `Be the first — from $5` · micro `plant your flag · rank is your total stake`
-- Claimed: gold `10 bidding · #1 pays $50` · gold-wash #1 · quiet #2…N · sticky CTA `Claim a spot — for $51` · micro `rank is your total stake · top up to climb`
+- Claimed: gold `10 bidding · #1 pays $50` · **every** row gets a peach rank pill (`#1`, `#2`, `#3`…, not just the leader) · sticky CTA `Claim a spot — for $51` · micro `rank is your total stake · top up to climb`
 - **No** “or join from $5” link
 - ✕ returns to World Order (desktop)
+- Every bidder row is `<a target="_blank">` → opens `/s/{domain}` in a **new tab** (hover-preview card still shows on `mouseenter`; its “View profile →” is now plain text since the whole row is already the link)
+
+### Expand modal — World Order / Territory (cream leaderboard header)
+Matches worldmap.lol’s “Country Leaderboard” / “World Order” modal treatment. Triggered by the rail’s ⤢ button; renders in `<Modal size="lg">` (fixed `max-w-[460px] h-[min(720px,85vh)]`, single Modal-supplied ✕, no double header).
+- Full-bleed cream/gold gradient band at the top (`linear-gradient(180deg,#FFEFC1,#FFCE4B)`, bled to the dialog edges via `-mx-6 -mt-6` so it reaches the rounded corners)
+- White rounded-2xl avatar chip on the left: `⚗️` for World Order, element-colored symbol chip for Territory
+- Eyebrow (`text-ink/60`, e.g. `the table · live` / `CLAIMED TERRITORY`), bold title (`text-ink`, e.g. `Table Order` / `C Carbon`), subtitle stat line (`text-ink/70`, e.g. `{n} bidding · ${total} staked`)
+- Below the header: the same row list as the compact rail (peach-pill rank rules unchanged: #1-only for World Order, all ranks for Territory), each row still an `<a target="_blank">`
+- Compact-mode-only stat lines (e.g. the `{n} bidding · #1 pays $X` line) are hidden when expanded since that info now lives in the header subtitle
 
 ### Hover preview (094120)
 - Left of rail, white card.
@@ -183,6 +192,7 @@ Hover tooltip: dark pill `Symbol · Name · #1 $X` or `Unclaimed · $5`.
 - **By Element:** domain + `C Carbon` + money
 - **Crowns:** domain + `{n} seats · $X · 👑 {c}` + crown count right
 - **Early Adopter:** domain + first-claimer medals right
+- Header/tabs unchanged (plain white, out of scope for the cream-header restyle); every row across all 3 tabs is an `<a target="_blank">` → opens `/s/{domain}` in a new tab (same new-tab convention as World Order/Territory rows)
 
 ### Profile `/s/[domain]` (095559–095625) — light theme
 - `bg #EFF5FC`. Back `← the table`. Wordmark top-right.

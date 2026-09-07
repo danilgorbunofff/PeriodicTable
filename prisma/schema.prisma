@@ -1,0 +1,133 @@
+// periodictable.lol — Phase 2 ledger schema (ROADMAP §9)
+// Element ids: 1..118 real, -1 Hbar, 0 Ps, 119 Uue, 999 DM (no autoincrement — inserted explicitly)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChemicalFamily {
+  ALKALI_METAL
+  ALKALINE_EARTH
+  TRANSITION_METAL
+  POST_TRANSITION_METAL
+  METALLOID
+  REACTIVE_NONMETAL
+  HALOGEN
+  NOBLE_GAS
+  LANTHANIDE
+  ACTINIDE
+  EXOTIC_THEORETICAL
+}
+
+enum PrestigeTier {
+  STANDARD
+  CULTURAL_ELITE
+  EXOTIC
+}
+
+model Element {
+  id              Int            @id // 1..118, -1 Hbar, 0 Ps, 119 Uue, 999 DM
+  symbol          String         @unique
+  name            String
+  atomicMass      String
+  gridRow         Int
+  gridCol         Int
+  family          ChemicalFamily
+  tier            PrestigeTier   @default(STANDARD)
+  totalPoolUsd    Int            @default(0)
+  stakeCount      Int            @default(0)
+  currentLeaderId String?
+  stakes          Stake[]
+
+  @@index([family])
+  @@index([tier])
+}
+
+model Startup {
+  id            String   @id @default(cuid())
+  domain        String   @unique
+  title         String   @db.VarChar(32)
+  pitch         String   @db.VarChar(140)
+  url           String
+  linkType      String   @default("product") // product | social
+  logoUrl       String
+  previewImgUrl String?
+  email         String? // notification target for outbid/receipt
+  unsubToken    String   @default(cuid()) // GET /api/unsubscribe?token=... clears email
+  claimedAt     DateTime @default(now())
+  stakes        Stake[]
+}
+
+model Stake {
+  id              String   @id @default(cuid())
+  elementId       Int
+  element         Element  @relation(fields: [elementId], references: [id])
+  startupId       String
+  startup         Startup  @relation(fields: [startupId], references: [id])
+  amountUsd       Int // cumulative total, integer dollars
+  clicksDelivered Int      @default(0)
+  rank            Int      @default(99)
+  isLeader        Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+
+  @@unique([elementId, startupId])
+  @@index([elementId, amountUsd(sort: Desc)])
+}
+
+model Payment {
+  id             String    @id @default(cuid())
+  stakeId        String
+  elementId      Int
+  startupId      String
+  amountUsd      Int
+  path           String    @default("take") // take | join
+  provider       String    // whop | dev
+  providerRef    String?   @unique // provider session/charge id — nullable until paid
+  idempotencyKey String    @unique
+  status         String    @default("pending") // pending | paid | failed | refunded
+  email          String?   // payer email captured at checkout
+  createdAt      DateTime  @default(now())
+  paidAt         DateTime?
+
+  @@index([startupId, status])
+}
+
+model ActivityLog {
+  id            String   @id @default(cuid())
+  domain        String
+  elementSymbol String
+  amountUsd     Int
+  kind          String   @default("stake") // stake | reclaim | join
+  city          String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}
+
+model ClickEvent {
+  id        String   @id @default(cuid())
+  stakeId   String
+  ipHash    String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([stakeId, createdAt])
+}
+
+model EmailLog {
+  id            String   @id @default(cuid())
+  to            String
+  template      String // outbid | receipt
+  elementSymbol String?
+  amountUsd     Int?
+  status        String @default("sent") // sent | suppressed | error
+  detail        String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}

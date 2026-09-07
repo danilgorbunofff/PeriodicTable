@@ -39,6 +39,8 @@ export function TableCamera({
     x: number;
     y: number;
   } | null>(null);
+  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinch = useRef<{ dist: number; mx: number; my: number } | null>(null);
 
   const apply = useCallback((next: Cam, animate = false) => {
     camRef.current = next;
@@ -200,6 +202,20 @@ export function TableCamera({
   }, [zoomAt, fit, apply]);
 
   const onPointerDown = (e: React.PointerEvent) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      drag.current = null;
+      cameraInteract.dragging = true;
+      setAnim(false);
+      const pts = Array.from(pointers.current.values());
+      pinch.current = {
+        dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+        mx: (pts[0].x + pts[1].x) / 2,
+        my: (pts[0].y + pts[1].y) / 2,
+      };
+      return;
+    }
     if (e.button !== 0) return;
     cameraInteract.dragging = false;
     drag.current = {
@@ -208,10 +224,34 @@ export function TableCamera({
       x: camRef.current.x,
       y: camRef.current.y,
     };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pointers.current.size === 2 && pinch.current) {
+      const pts = Array.from(pointers.current.values());
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+      const mx = (pts[0].x + pts[1].x) / 2;
+      const my = (pts[0].y + pts[1].y) / 2;
+      const factor = dist / pinch.current.dist;
+      dirty.current = true;
+      const { x, y, scale } = camRef.current;
+      const next = clamp(scale * factor, MIN, MAX);
+      const dx = mx - pinch.current.mx;
+      const dy = my - pinch.current.my;
+      apply(
+        {
+          x: mx - ((mx - x) / scale) * next + dx,
+          y: my - ((my - y) / scale) * next + dy,
+          scale: next,
+        },
+        false
+      );
+      pinch.current = { dist, mx, my };
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.px;
@@ -225,7 +265,9 @@ export function TableCamera({
     apply({ ...camRef.current, x: d.x + dx, y: d.y + dy }, false);
   };
 
-  const endDrag = () => {
+  const endDrag = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
     drag.current = null;
     window.setTimeout(() => {
       cameraInteract.dragging = false;
@@ -266,6 +308,16 @@ export function TableCamera({
         >
           {children}
         </div>
+      </div>
+
+      <div className="absolute bottom-[70px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] hidden sm:flex items-center gap-3 rounded-full bg-white/95 backdrop-blur px-3.5 py-1.5 text-[11px] font-bold text-muted shadow-float pointer-events-none">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-[3px] bg-white shadow-[inset_0_0_0_1px_#E4EBF3]" /> unclaimed
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: "#FDE68A" }} /> claimed
+        </span>
+        <span className="flex items-center gap-1.5">👑 contested</span>
       </div>
 
       <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-[var(--z-cards)] flex items-center gap-2 pointer-events-none">
