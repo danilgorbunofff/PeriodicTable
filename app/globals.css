@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* DESIGN-SYSTEM §2/§7 — stage, z-scale, motion */
+:root {
+  --z-table: 10;
+  --z-tooltip: 30;
+  --z-cards: 40;
+  --z-rail: 50;
+  --z-preview: 60;
+  --z-modal: 70;
+  --z-toast: 80;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: #05070a;
+  color: #1f2b3e;
+}
+
+.stage-shell {
+  background:
+    radial-gradient(circle at 52% 44%, rgba(42, 91, 126, 0.32), transparent 42%),
+    linear-gradient(180deg, #05070a 0%, #07131d 48%, #173d58 100%);
+}
+
+.periodic-object {
+  filter: drop-shadow(0 28px 38px rgba(0, 0, 0, 0.42));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-lift {
+    transition: none !important;
+  }
+}
+
+.tile-lift {
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.tile-lift:hover {
+  transform: scale(1.04);
+}

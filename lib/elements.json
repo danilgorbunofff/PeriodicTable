@@ -1,0 +1,1222 @@
+[
+ {
+  "id": 1,
+  "symbol": "H",
+  "name": "Hydrogen",
+  "atomicMass": "1.008",
+  "gridRow": 1,
+  "gridCol": 1,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 2,
+  "symbol": "He",
+  "name": "Helium",
+  "atomicMass": "4.003",
+  "gridRow": 1,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 3,
+  "symbol": "Li",
+  "name": "Lithium",
+  "atomicMass": "6.94",
+  "gridRow": 2,
+  "gridCol": 1,
+  "family": "ALKALI_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 4,
+  "symbol": "Be",
+  "name": "Beryllium",
+  "atomicMass": "9.012",
+  "gridRow": 2,
+  "gridCol": 2,
+  "family": "ALKALINE_EARTH",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 5,
+  "symbol": "B",
+  "name": "Boron",
+  "atomicMass": "10.81",
+  "gridRow": 2,
+  "gridCol": 13,
+  "family": "METALLOID",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 6,
+  "symbol": "C",
+  "name": "Carbon",
+  "atomicMass": "12.011",
+  "gridRow": 2,
+  "gridCol": 14,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "CULTURAL_ELITE"
+ },
+ {
+  "id": 7,
+  "symbol": "N",
+  "name": "Nitrogen",
+  "atomicMass": "14.007",
+  "gridRow": 2,
+  "gridCol": 15,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 8,
+  "symbol": "O",
+  "name": "Oxygen",
+  "atomicMass": "15.999",
+  "gridRow": 2,
+  "gridCol": 16,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 9,
+  "symbol": "F",
+  "name": "Fluorine",
+  "atomicMass": "18.998",
+  "gridRow": 2,
+  "gridCol": 17,
+  "family": "HALOGEN",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 10,
+  "symbol": "Ne",
+  "name": "Neon",
+  "atomicMass": "20.180",
+  "gridRow": 2,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 11,
+  "symbol": "Na",
+  "name": "Sodium",
+  "atomicMass": "22.990",
+  "gridRow": 3,
+  "gridCol": 1,
+  "family": "ALKALI_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 12,
+  "symbol": "Mg",
+  "name": "Magnesium",
+  "atomicMass": "24.305",
+  "gridRow": 3,
+  "gridCol": 2,
+  "family": "ALKALINE_EARTH",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 13,
+  "symbol": "Al",
+  "name": "Aluminium",
+  "atomicMass": "26.982",
+  "gridRow": 3,
+  "gridCol": 13,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 14,
+  "symbol": "Si",
+  "name": "Silicon",
+  "atomicMass": "28.085",
+  "gridRow": 3,
+  "gridCol": 14,
+  "family": "METALLOID",
+  "tier": "CULTURAL_ELITE"
+ },
+ {
+  "id": 15,
+  "symbol": "P",
+  "name": "Phosphorus",
+  "atomicMass": "30.974",
+  "gridRow": 3,
+  "gridCol": 15,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 16,
+  "symbol": "S",
+  "name": "Sulfur",
+  "atomicMass": "32.06",
+  "gridRow": 3,
+  "gridCol": 16,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 17,
+  "symbol": "Cl",
+  "name": "Chlorine",
+  "atomicMass": "35.45",
+  "gridRow": 3,
+  "gridCol": 17,
+  "family": "HALOGEN",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 18,
+  "symbol": "Ar",
+  "name": "Argon",
+  "atomicMass": "39.948",
+  "gridRow": 3,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 19,
+  "symbol": "K",
+  "name": "Potassium",
+  "atomicMass": "39.098",
+  "gridRow": 4,
+  "gridCol": 1,
+  "family": "ALKALI_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 20,
+  "symbol": "Ca",
+  "name": "Calcium",
+  "atomicMass": "40.078",
+  "gridRow": 4,
+  "gridCol": 2,
+  "family": "ALKALINE_EARTH",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 21,
+  "symbol": "Sc",
+  "name": "Scandium",
+  "atomicMass": "44.956",
+  "gridRow": 4,
+  "gridCol": 3,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 22,
+  "symbol": "Ti",
+  "name": "Titanium",
+  "atomicMass": "47.867",
+  "gridRow": 4,
+  "gridCol": 4,
+  "family": "TRANSITION_METAL",
+  "tier": "CULTURAL_ELITE"
+ },
+ {
+  "id": 23,
+  "symbol": "V",
+  "name": "Vanadium",
+  "atomicMass": "50.942",
+  "gridRow": 4,
+  "gridCol": 5,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 24,
+  "symbol": "Cr",
+  "name": "Chromium",
+  "atomicMass": "51.996",
+  "gridRow": 4,
+  "gridCol": 6,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 25,
+  "symbol": "Mn",
+  "name": "Manganese",
+  "atomicMass": "54.938",
+  "gridRow": 4,
+  "gridCol": 7,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 26,
+  "symbol": "Fe",
+  "name": "Iron",
+  "atomicMass": "55.845",
+  "gridRow": 4,
+  "gridCol": 8,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 27,
+  "symbol": "Co",
+  "name": "Cobalt",
+  "atomicMass": "58.933",
+  "gridRow": 4,
+  "gridCol": 9,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 28,
+  "symbol": "Ni",
+  "name": "Nickel",
+  "atomicMass": "58.693",
+  "gridRow": 4,
+  "gridCol": 10,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 29,
+  "symbol": "Cu",
+  "name": "Copper",
+  "atomicMass": "63.546",
+  "gridRow": 4,
+  "gridCol": 11,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 30,
+  "symbol": "Zn",
+  "name": "Zinc",
+  "atomicMass": "65.38",
+  "gridRow": 4,
+  "gridCol": 12,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 31,
+  "symbol": "Ga",
+  "name": "Gallium",
+  "atomicMass": "69.723",
+  "gridRow": 4,
+  "gridCol": 13,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 32,
+  "symbol": "Ge",
+  "name": "Germanium",
+  "atomicMass": "72.630",
+  "gridRow": 4,
+  "gridCol": 14,
+  "family": "METALLOID",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 33,
+  "symbol": "As",
+  "name": "Arsenic",
+  "atomicMass": "74.922",
+  "gridRow": 4,
+  "gridCol": 15,
+  "family": "METALLOID",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 34,
+  "symbol": "Se",
+  "name": "Selenium",
+  "atomicMass": "78.971",
+  "gridRow": 4,
+  "gridCol": 16,
+  "family": "REACTIVE_NONMETAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 35,
+  "symbol": "Br",
+  "name": "Bromine",
+  "atomicMass": "79.904",
+  "gridRow": 4,
+  "gridCol": 17,
+  "family": "HALOGEN",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 36,
+  "symbol": "Kr",
+  "name": "Krypton",
+  "atomicMass": "83.798",
+  "gridRow": 4,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 37,
+  "symbol": "Rb",
+  "name": "Rubidium",
+  "atomicMass": "85.468",
+  "gridRow": 5,
+  "gridCol": 1,
+  "family": "ALKALI_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 38,
+  "symbol": "Sr",
+  "name": "Strontium",
+  "atomicMass": "87.62",
+  "gridRow": 5,
+  "gridCol": 2,
+  "family": "ALKALINE_EARTH",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 39,
+  "symbol": "Y",
+  "name": "Yttrium",
+  "atomicMass": "88.906",
+  "gridRow": 5,
+  "gridCol": 3,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 40,
+  "symbol": "Zr",
+  "name": "Zirconium",
+  "atomicMass": "91.224",
+  "gridRow": 5,
+  "gridCol": 4,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 41,
+  "symbol": "Nb",
+  "name": "Niobium",
+  "atomicMass": "92.906",
+  "gridRow": 5,
+  "gridCol": 5,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 42,
+  "symbol": "Mo",
+  "name": "Molybdenum",
+  "atomicMass": "95.95",
+  "gridRow": 5,
+  "gridCol": 6,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 43,
+  "symbol": "Tc",
+  "name": "Technetium",
+  "atomicMass": "98",
+  "gridRow": 5,
+  "gridCol": 7,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 44,
+  "symbol": "Ru",
+  "name": "Ruthenium",
+  "atomicMass": "101.07",
+  "gridRow": 5,
+  "gridCol": 8,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 45,
+  "symbol": "Rh",
+  "name": "Rhodium",
+  "atomicMass": "102.91",
+  "gridRow": 5,
+  "gridCol": 9,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 46,
+  "symbol": "Pd",
+  "name": "Palladium",
+  "atomicMass": "106.42",
+  "gridRow": 5,
+  "gridCol": 10,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 47,
+  "symbol": "Ag",
+  "name": "Silver",
+  "atomicMass": "107.87",
+  "gridRow": 5,
+  "gridCol": 11,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 48,
+  "symbol": "Cd",
+  "name": "Cadmium",
+  "atomicMass": "112.41",
+  "gridRow": 5,
+  "gridCol": 12,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 49,
+  "symbol": "In",
+  "name": "Indium",
+  "atomicMass": "114.82",
+  "gridRow": 5,
+  "gridCol": 13,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 50,
+  "symbol": "Sn",
+  "name": "Tin",
+  "atomicMass": "118.71",
+  "gridRow": 5,
+  "gridCol": 14,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 51,
+  "symbol": "Sb",
+  "name": "Antimony",
+  "atomicMass": "121.76",
+  "gridRow": 5,
+  "gridCol": 15,
+  "family": "METALLOID",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 52,
+  "symbol": "Te",
+  "name": "Tellurium",
+  "atomicMass": "127.60",
+  "gridRow": 5,
+  "gridCol": 16,
+  "family": "METALLOID",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 53,
+  "symbol": "I",
+  "name": "Iodine",
+  "atomicMass": "126.90",
+  "gridRow": 5,
+  "gridCol": 17,
+  "family": "HALOGEN",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 54,
+  "symbol": "Xe",
+  "name": "Xenon",
+  "atomicMass": "131.29",
+  "gridRow": 5,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 55,
+  "symbol": "Cs",
+  "name": "Caesium",
+  "atomicMass": "132.91",
+  "gridRow": 6,
+  "gridCol": 1,
+  "family": "ALKALI_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 56,
+  "symbol": "Ba",
+  "name": "Barium",
+  "atomicMass": "137.33",
+  "gridRow": 6,
+  "gridCol": 2,
+  "family": "ALKALINE_EARTH",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 57,
+  "symbol": "La",
+  "name": "Lanthanum",
+  "atomicMass": "138.91",
+  "gridRow": 9,
+  "gridCol": 4,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 58,
+  "symbol": "Ce",
+  "name": "Cerium",
+  "atomicMass": "140.12",
+  "gridRow": 9,
+  "gridCol": 5,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 59,
+  "symbol": "Pr",
+  "name": "Praseodymium",
+  "atomicMass": "140.91",
+  "gridRow": 9,
+  "gridCol": 6,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 60,
+  "symbol": "Nd",
+  "name": "Neodymium",
+  "atomicMass": "144.24",
+  "gridRow": 9,
+  "gridCol": 7,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 61,
+  "symbol": "Pm",
+  "name": "Promethium",
+  "atomicMass": "145",
+  "gridRow": 9,
+  "gridCol": 8,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 62,
+  "symbol": "Sm",
+  "name": "Samarium",
+  "atomicMass": "150.36",
+  "gridRow": 9,
+  "gridCol": 9,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 63,
+  "symbol": "Eu",
+  "name": "Europium",
+  "atomicMass": "151.96",
+  "gridRow": 9,
+  "gridCol": 10,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 64,
+  "symbol": "Gd",
+  "name": "Gadolinium",
+  "atomicMass": "157.25",
+  "gridRow": 9,
+  "gridCol": 11,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 65,
+  "symbol": "Tb",
+  "name": "Terbium",
+  "atomicMass": "158.93",
+  "gridRow": 9,
+  "gridCol": 12,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 66,
+  "symbol": "Dy",
+  "name": "Dysprosium",
+  "atomicMass": "162.50",
+  "gridRow": 9,
+  "gridCol": 13,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 67,
+  "symbol": "Ho",
+  "name": "Holmium",
+  "atomicMass": "164.93",
+  "gridRow": 9,
+  "gridCol": 14,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 68,
+  "symbol": "Er",
+  "name": "Erbium",
+  "atomicMass": "167.26",
+  "gridRow": 9,
+  "gridCol": 15,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 69,
+  "symbol": "Tm",
+  "name": "Thulium",
+  "atomicMass": "168.93",
+  "gridRow": 9,
+  "gridCol": 16,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 70,
+  "symbol": "Yb",
+  "name": "Ytterbium",
+  "atomicMass": "173.05",
+  "gridRow": 9,
+  "gridCol": 17,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 71,
+  "symbol": "Lu",
+  "name": "Lutetium",
+  "atomicMass": "174.97",
+  "gridRow": 9,
+  "gridCol": 18,
+  "family": "LANTHANIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 72,
+  "symbol": "Hf",
+  "name": "Hafnium",
+  "atomicMass": "178.49",
+  "gridRow": 6,
+  "gridCol": 4,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 73,
+  "symbol": "Ta",
+  "name": "Tantalum",
+  "atomicMass": "180.95",
+  "gridRow": 6,
+  "gridCol": 5,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 74,
+  "symbol": "W",
+  "name": "Tungsten",
+  "atomicMass": "183.84",
+  "gridRow": 6,
+  "gridCol": 6,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 75,
+  "symbol": "Re",
+  "name": "Rhenium",
+  "atomicMass": "186.21",
+  "gridRow": 6,
+  "gridCol": 7,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 76,
+  "symbol": "Os",
+  "name": "Osmium",
+  "atomicMass": "190.23",
+  "gridRow": 6,
+  "gridCol": 8,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 77,
+  "symbol": "Ir",
+  "name": "Iridium",
+  "atomicMass": "192.22",
+  "gridRow": 6,
+  "gridCol": 9,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 78,
+  "symbol": "Pt",
+  "name": "Platinum",
+  "atomicMass": "195.08",
+  "gridRow": 6,
+  "gridCol": 10,
+  "family": "TRANSITION_METAL",
+  "tier": "CULTURAL_ELITE"
+ },
+ {
+  "id": 79,
+  "symbol": "Au",
+  "name": "Gold",
+  "atomicMass": "196.97",
+  "gridRow": 6,
+  "gridCol": 11,
+  "family": "TRANSITION_METAL",
+  "tier": "CULTURAL_ELITE"
+ },
+ {
+  "id": 80,
+  "symbol": "Hg",
+  "name": "Mercury",
+  "atomicMass": "200.59",
+  "gridRow": 6,
+  "gridCol": 12,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 81,
+  "symbol": "Tl",
+  "name": "Thallium",
+  "atomicMass": "204.38",
+  "gridRow": 6,
+  "gridCol": 13,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 82,
+  "symbol": "Pb",
+  "name": "Lead",
+  "atomicMass": "207.2",
+  "gridRow": 6,
+  "gridCol": 14,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 83,
+  "symbol": "Bi",
+  "name": "Bismuth",
+  "atomicMass": "208.98",
+  "gridRow": 6,
+  "gridCol": 15,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 84,
+  "symbol": "Po",
+  "name": "Polonium",
+  "atomicMass": "209",
+  "gridRow": 6,
+  "gridCol": 16,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 85,
+  "symbol": "At",
+  "name": "Astatine",
+  "atomicMass": "210",
+  "gridRow": 6,
+  "gridCol": 17,
+  "family": "HALOGEN",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 86,
+  "symbol": "Rn",
+  "name": "Radon",
+  "atomicMass": "222",
+  "gridRow": 6,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 87,
+  "symbol": "Fr",
+  "name": "Francium",
+  "atomicMass": "223",
+  "gridRow": 7,
+  "gridCol": 1,
+  "family": "ALKALI_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 88,
+  "symbol": "Ra",
+  "name": "Radium",
+  "atomicMass": "226",
+  "gridRow": 7,
+  "gridCol": 2,
+  "family": "ALKALINE_EARTH",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 89,
+  "symbol": "Ac",
+  "name": "Actinium",
+  "atomicMass": "227",
+  "gridRow": 10,
+  "gridCol": 4,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 90,
+  "symbol": "Th",
+  "name": "Thorium",
+  "atomicMass": "232.04",
+  "gridRow": 10,
+  "gridCol": 5,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 91,
+  "symbol": "Pa",
+  "name": "Protactinium",
+  "atomicMass": "231.04",
+  "gridRow": 10,
+  "gridCol": 6,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 92,
+  "symbol": "U",
+  "name": "Uranium",
+  "atomicMass": "238.03",
+  "gridRow": 10,
+  "gridCol": 7,
+  "family": "ACTINIDE",
+  "tier": "CULTURAL_ELITE"
+ },
+ {
+  "id": 93,
+  "symbol": "Np",
+  "name": "Neptunium",
+  "atomicMass": "237",
+  "gridRow": 10,
+  "gridCol": 8,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 94,
+  "symbol": "Pu",
+  "name": "Plutonium",
+  "atomicMass": "244",
+  "gridRow": 10,
+  "gridCol": 9,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 95,
+  "symbol": "Am",
+  "name": "Americium",
+  "atomicMass": "243",
+  "gridRow": 10,
+  "gridCol": 10,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 96,
+  "symbol": "Cm",
+  "name": "Curium",
+  "atomicMass": "247",
+  "gridRow": 10,
+  "gridCol": 11,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 97,
+  "symbol": "Bk",
+  "name": "Berkelium",
+  "atomicMass": "247",
+  "gridRow": 10,
+  "gridCol": 12,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 98,
+  "symbol": "Cf",
+  "name": "Californium",
+  "atomicMass": "251",
+  "gridRow": 10,
+  "gridCol": 13,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 99,
+  "symbol": "Es",
+  "name": "Einsteinium",
+  "atomicMass": "252",
+  "gridRow": 10,
+  "gridCol": 14,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 100,
+  "symbol": "Fm",
+  "name": "Fermium",
+  "atomicMass": "257",
+  "gridRow": 10,
+  "gridCol": 15,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 101,
+  "symbol": "Md",
+  "name": "Mendelevium",
+  "atomicMass": "258",
+  "gridRow": 10,
+  "gridCol": 16,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 102,
+  "symbol": "No",
+  "name": "Nobelium",
+  "atomicMass": "259",
+  "gridRow": 10,
+  "gridCol": 17,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 103,
+  "symbol": "Lr",
+  "name": "Lawrencium",
+  "atomicMass": "266",
+  "gridRow": 10,
+  "gridCol": 18,
+  "family": "ACTINIDE",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 104,
+  "symbol": "Rf",
+  "name": "Rutherfordium",
+  "atomicMass": "267",
+  "gridRow": 7,
+  "gridCol": 4,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 105,
+  "symbol": "Db",
+  "name": "Dubnium",
+  "atomicMass": "268",
+  "gridRow": 7,
+  "gridCol": 5,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 106,
+  "symbol": "Sg",
+  "name": "Seaborgium",
+  "atomicMass": "269",
+  "gridRow": 7,
+  "gridCol": 6,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 107,
+  "symbol": "Bh",
+  "name": "Bohrium",
+  "atomicMass": "270",
+  "gridRow": 7,
+  "gridCol": 7,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 108,
+  "symbol": "Hs",
+  "name": "Hassium",
+  "atomicMass": "277",
+  "gridRow": 7,
+  "gridCol": 8,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 109,
+  "symbol": "Mt",
+  "name": "Meitnerium",
+  "atomicMass": "278",
+  "gridRow": 7,
+  "gridCol": 9,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 110,
+  "symbol": "Ds",
+  "name": "Darmstadtium",
+  "atomicMass": "281",
+  "gridRow": 7,
+  "gridCol": 10,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 111,
+  "symbol": "Rg",
+  "name": "Roentgenium",
+  "atomicMass": "282",
+  "gridRow": 7,
+  "gridCol": 11,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 112,
+  "symbol": "Cn",
+  "name": "Copernicium",
+  "atomicMass": "285",
+  "gridRow": 7,
+  "gridCol": 12,
+  "family": "TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 113,
+  "symbol": "Nh",
+  "name": "Nihonium",
+  "atomicMass": "286",
+  "gridRow": 7,
+  "gridCol": 13,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 114,
+  "symbol": "Fl",
+  "name": "Flerovium",
+  "atomicMass": "289",
+  "gridRow": 7,
+  "gridCol": 14,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 115,
+  "symbol": "Mc",
+  "name": "Moscovium",
+  "atomicMass": "290",
+  "gridRow": 7,
+  "gridCol": 15,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 116,
+  "symbol": "Lv",
+  "name": "Livermorium",
+  "atomicMass": "293",
+  "gridRow": 7,
+  "gridCol": 16,
+  "family": "POST_TRANSITION_METAL",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 117,
+  "symbol": "Ts",
+  "name": "Tennessine",
+  "atomicMass": "294",
+  "gridRow": 7,
+  "gridCol": 17,
+  "family": "HALOGEN",
+  "tier": "STANDARD"
+ },
+ {
+  "id": 118,
+  "symbol": "Og",
+  "name": "Oganesson",
+  "atomicMass": "294",
+  "gridRow": 7,
+  "gridCol": 18,
+  "family": "NOBLE_GAS",
+  "tier": "STANDARD"
+ },
+ {
+  "id": -1,
+  "symbol": "Hbar",
+  "name": "Antihydrogen",
+  "atomicMass": "Theoretical",
+  "gridRow": 2,
+  "gridCol": 7,
+  "family": "EXOTIC_THEORETICAL",
+  "tier": "EXOTIC"
+ },
+ {
+  "id": 0,
+  "symbol": "Ps",
+  "name": "Positronium",
+  "atomicMass": "Theoretical",
+  "gridRow": 2,
+  "gridCol": 8,
+  "family": "EXOTIC_THEORETICAL",
+  "tier": "EXOTIC"
+ },
+ {
+  "id": 119,
+  "symbol": "Uue",
+  "name": "Ununennium",
+  "atomicMass": "Theoretical",
+  "gridRow": 2,
+  "gridCol": 9,
+  "family": "EXOTIC_THEORETICAL",
+  "tier": "EXOTIC"
+ },
+ {
+  "id": 999,
+  "symbol": "DM",
+  "name": "Dark Matter",
+  "atomicMass": "Theoretical",
+  "gridRow": 2,
+  "gridCol": 10,
+  "family": "EXOTIC_THEORETICAL",
+  "tier": "EXOTIC"
+ }
+]
