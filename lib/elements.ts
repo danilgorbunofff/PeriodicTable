@@ -1187,7 +1187,7 @@ export const ELEMENTS: ElementNode[] = [
   "name": "Antihydrogen",
   "atomicMass": "Theoretical",
   "gridRow": 2,
-  "gridCol": 7,
+  "gridCol": 8,
   "family": "EXOTIC_THEORETICAL",
   "tier": "EXOTIC"
  },
@@ -1197,7 +1197,7 @@ export const ELEMENTS: ElementNode[] = [
   "name": "Positronium",
   "atomicMass": "Theoretical",
   "gridRow": 2,
-  "gridCol": 8,
+  "gridCol": 9,
   "family": "EXOTIC_THEORETICAL",
   "tier": "EXOTIC"
  },
@@ -1207,7 +1207,7 @@ export const ELEMENTS: ElementNode[] = [
   "name": "Ununennium",
   "atomicMass": "Theoretical",
   "gridRow": 2,
-  "gridCol": 9,
+  "gridCol": 10,
   "family": "EXOTIC_THEORETICAL",
   "tier": "EXOTIC"
  },
@@ -1217,7 +1217,7 @@ export const ELEMENTS: ElementNode[] = [
   "name": "Dark Matter",
   "atomicMass": "Theoretical",
   "gridRow": 2,
-  "gridCol": 10,
+  "gridCol": 11,
   "family": "EXOTIC_THEORETICAL",
   "tier": "EXOTIC"
  }

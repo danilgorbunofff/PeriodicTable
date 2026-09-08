@@ -7,7 +7,7 @@ const TILE_WIDTH = 48;
 const TILE_HEIGHT = 52;
 const GRID_GAP = 6;
 const EXOTIC_POD = {
-  left: 6 * (TILE_WIDTH + GRID_GAP) - 14,
+  left: 7 * (TILE_WIDTH + GRID_GAP) - 14,
   top: TILE_HEIGHT + GRID_GAP - 14,
   width: 4 * TILE_WIDTH + 3 * GRID_GAP + 28,
   height: TILE_HEIGHT + 28,
@@ -149,6 +149,12 @@ function ExoticPod() {
           vectorEffect="non-scaling-stroke"
         />
         <g transform="translate(9 6.74) scale(.72)">
+          <path
+            fill="#f0fbff"
+            d="M8 0c.44 4.76 3.24 7.56 8 8-4.76.44-7.56 3.24-8 8-.44-4.76-3.24-7.56-8-8 4.76-.44 7.56-3.24 8-8Z"
+          />
+        </g>
+        <g transform="translate(79.5 6.74) scale(.72)">
           <path
             fill="#f0fbff"
             d="M8 0c.44 4.76 3.24 7.56 8 8-4.76.44-7.56 3.24-8 8-.44-4.76-3.24-7.56-8-8 4.76-.44 7.56-3.24 8-8Z"

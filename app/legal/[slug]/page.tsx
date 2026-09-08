@@ -142,7 +142,13 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
             ))}
           </section>
         ))}
-        <div className="text-xs text-mutedink mt-8">About & disclaimer · Rules & payments · Contact</div>
+        <div className="text-xs text-mutedink mt-8">
+          <Link href="/legal/about" className="hover:text-ink hover:underline">About & disclaimer</Link>
+          {" · "}
+          <Link href="/legal/rules" className="hover:text-ink hover:underline">Rules & payments</Link>
+          {" · "}
+          <Link href="/legal/contact" className="hover:text-ink hover:underline">Contact</Link>
+        </div>
       </div>
     </main>
   );

@@ -1,12 +1,12 @@
 "use client";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 import { ChunkyButton } from "./ChunkyButton";
 import { Avatar } from "./Avatar";
+import { Modal } from "./Modal";
 import type { ElementNode } from "../lib/elements";
 import { fetchJson, isElementDetail, type ElementDetail } from "../lib/api";
 import { FAMILY_FILL } from "../lib/familyFill";
-import { previewFor, faviconFor } from "../lib/screenshots";
 import { track } from "../lib/analytics";
 
 type ReportState = { domain: string; state: "pending" | "done" | "error" } | null;
@@ -38,14 +38,20 @@ export function TerritoryView({
   // gets an error panel — never the unclaimed CTA.
   const rows = data?.stakes ?? [];
   const [report, setReport] = useState<ReportState>(null);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Confirm-before-report: the report button only arms this state; nothing
+  // is sent until the user confirms in the modal (no accidental reports).
+  const [confirm, setConfirm] = useState<{ stakeId: string; domain: string } | null>(null);
   const top = rows[0];
   const takeLead = data?.prices.takeLead ?? (top ? top.amount + 1 : 5);
   const joinMin = data?.prices.joinMin ?? 5;
   const totalStaked = data?.pool ?? 0;
+  // Every element (standard + exotic) links to its Wikipedia article.
+  // Titles are single capitalized words ("Carbon") except "Dark Matter" →
+  // canonical article "Dark matter" (exact casing, no redirect hop).
+  const WIKI_OVERRIDES: Record<string, string> = { DM: "Dark_matter" };
+  const wikiUrl = `https://en.wikipedia.org/wiki/${WIKI_OVERRIDES[el.symbol] ?? el.name.replace(/ /g, "_")}`;
 
-  async function sendReport(stakeId: string, domain: string) {
-    if (report?.domain === domain && report.state === "pending") return;
+  async function sendReport(stakeId: string, domain: string) {    if (report?.domain === domain && report.state === "pending") return;
     setReport({ domain, state: "pending" });
     try {
       const res = await fetch("/api/report", {
@@ -70,7 +76,7 @@ export function TerritoryView({
         >
           <div
             className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl text-xl font-display font-bold shadow-card"
-            style={{ background: rows.length ? FAMILY_FILL[el.family] : "#fff" }}
+            style={{ background: FAMILY_FILL[el.family] ?? "#fff" }}
           >
             {el.symbol}
           </div>
@@ -80,6 +86,16 @@ export function TerritoryView({
             </div>
             <h2 className="mt-0.5 font-display text-[27px] leading-none font-bold text-ink">
               {el.symbol} {el.name}
+              <a
+                href={wikiUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`About ${el.name} on Wikipedia`}
+                title={`About ${el.name} on Wikipedia`}
+                className="ml-2 inline-grid h-7 w-7 place-items-center rounded-full bg-icy align-middle font-serif text-[13px] font-bold text-mutedink hover:text-ink"
+              >
+                W
+              </a>
             </h2>
             <div className="mt-1.5 text-xs font-extrabold text-ink/70 whitespace-nowrap">
               {rows.length ? `${rows.length} bidding · $${totalStaked} staked` : "no bids yet · $5 to be the first"}
@@ -105,8 +121,26 @@ export function TerritoryView({
         </div>
       )}
       {!expanded && (
-        <h2 className="font-display text-[28px] font-bold leading-tight mt-1">
-          {el.symbol} <span className="font-semibold">{el.name}</span>
+        <h2 className="font-display text-[28px] font-bold leading-tight mt-1 flex items-center">
+          <span
+            className="mr-2 inline-grid h-9 w-9 shrink-0 place-items-center rounded-xl font-display text-base font-bold text-ink"
+            style={{ background: FAMILY_FILL[el.family] ?? "#fff" }}
+          >
+            {el.symbol}
+          </span>
+          <span className="font-semibold">{el.name}</span>
+          <a
+            href={wikiUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`About ${el.name} on Wikipedia`}
+            title={`About ${el.name} on Wikipedia`}
+            className="ml-2 inline-flex h-7 items-center gap-1.5 rounded-full bg-icy pl-1.5 pr-2.5 align-middle text-[11px] font-bold text-mutedink hover:text-ink"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/wikipedia-globe.png" alt="" aria-hidden="true" className="h-5 w-5 object-contain" />
+            Wiki
+          </a>
         </h2>
       )}
 
@@ -157,23 +191,9 @@ export function TerritoryView({
               return (
               // Bidder actions are siblings, never nested (P2-10): the domain
               // opens the profile, Visit counts the click, Report moderates.
-              // Preview is pure CSS (group-hover) + silent prefetch — no
-              // setState on hover, so the list never re-renders under the mouse.
               <div
                 key={r.domain}
-                className={`group relative block px-3 py-2 rounded-2xl transition-colors ${rankBg}`}
-                onMouseEnter={() => {
-                  if (hoverTimer.current) clearTimeout(hoverTimer.current);
-                  // Prefetch preview on row hover (debounce 150ms per spec).
-                  hoverTimer.current = setTimeout(() => {
-                    const src = previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain });
-                    const img = new Image();
-                    img.src = src;
-                  }, 150);
-                }}
-                onMouseLeave={() => {
-                  if (hoverTimer.current) clearTimeout(hoverTimer.current);
-                }}
+                className={`relative block px-3 py-2 rounded-2xl transition-colors ${rankBg}`}
               >
                 <div className="flex items-center gap-2">
                   <span className={`grid h-7 min-w-[30px] shrink-0 place-items-center rounded-lg ${badgeBg} text-[11px] font-extrabold text-ink`}>#{i + 1}</span>
@@ -204,7 +224,10 @@ export function TerritoryView({
                     aria-label={`Report ${r.domain}`}
                     title="Report listing"
                     disabled={report?.domain === r.domain && report.state === "pending"}
-                    onClick={() => sendReport(r.stakeId, r.domain)}
+                    onClick={() => {
+                      if (report?.domain === r.domain && report.state === "pending") return;
+                      setConfirm({ stakeId: r.stakeId, domain: r.domain });
+                    }}
                     className="text-[11px] text-mutedink hover:text-ink underline disabled:no-underline"
                   >
                     {report?.domain === r.domain
@@ -215,30 +238,6 @@ export function TerritoryView({
                           : "failed — retry?"
                       : "report"}
                   </button>
-                </div>
-                <div
-                  className="absolute left-0 -translate-x-[108%] top-0 w-64 bg-white rounded-card shadow-card p-3 z-[var(--z-preview)] hidden md:block opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-                  aria-hidden="true"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain })}
-                    alt=""
-                    loading="lazy"
-                    sizes="256px"
-                    onError={(e) => {
-                      const t = e.currentTarget;
-                      if (!t.src.includes("s2/favicons")) t.src = faviconFor(r.domain, 128);
-                    }}
-                    className="rounded-xl h-24 w-full object-cover bg-icy"
-                  />
-                  <div className="mt-2 text-sm font-bold">{r.domain}</div>
-                  <div className="text-xs text-mutedink">{r.pitch}</div>
-                  <div className="text-xs mt-1">🔗 <span className="text-moneyink font-bold">{r.domain}</span></div>
-                  <div className="text-xs text-liveink font-bold">🟢 {r.clicks} clicks delivered</div>
-                  <a href={`/s/${encodeURIComponent(r.domain)}`} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-moneyink hover:underline">
-                    View profile →
-                  </a>
                 </div>
               </div>
               );
@@ -259,6 +258,30 @@ export function TerritoryView({
         </>
       )}
       <div className="mt-2 text-[11px] text-mutedink">IUPAC Standard</div>
+      <Modal open={confirm !== null} onClose={() => setConfirm(null)} label="Confirm report" size="md">
+        <h2 className="font-display text-xl font-bold pr-10">Report {confirm?.domain}?</h2>
+        <p className="text-sm text-mutedink mt-2">
+          This flags the listing for operator review (phishing, trademark, malware).
+          Stakes and payments are never touched — only visibility is reviewed.
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            onClick={() => setConfirm(null)}
+            className="h-11 px-5 rounded-full bg-icy text-sm font-bold text-ink hover:bg-hairline [@media(pointer:coarse)]:min-h-[44px]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (confirm) sendReport(confirm.stakeId, confirm.domain);
+              setConfirm(null);
+            }}
+            className="h-11 px-5 rounded-full bg-ink text-sm font-bold text-white [@media(pointer:coarse)]:min-h-[44px]"
+          >
+            Report listing
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

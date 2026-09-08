@@ -5,6 +5,7 @@ import { prisma } from "../../../lib/prisma";
 import { ELEMENTS } from "../../../lib/elements";
 import { FAMILY_FILL } from "../../../lib/familyFill";
 import { Avatar } from "../../../components/Avatar";
+import { ReportListingButton } from "../../../components/ReportListingButton";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +146,9 @@ export default async function Profile({ params }: { params: { domain: string } }
               Visit site ↗
             </a>
             <div className="text-xs text-mutedink mt-1">{domain} · visits are counted</div>
+            <div className="mt-2">
+              <ReportListingButton stakeId={rep.id} domain={domain} />
+            </div>
           </div>
         </div>
 
