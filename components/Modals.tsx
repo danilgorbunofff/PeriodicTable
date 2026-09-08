@@ -377,6 +377,28 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
   const { data: rows, error } = useSWR<BoardRow[]>(open ? `/api/board?tab=${apiTab}` : null, (url: string) =>
     fetchJson(url, isBoardRows)
   );
+  // Podium: top-3 rows carry gold/silver/bronze washes + medal badges; hover
+  // deepens their OWN rank color. #4+ keep the plain look (hover:bg-icy).
+  const rankClass = (i: number) =>
+    i === 0
+      ? "bg-goldwash hover:bg-golddeep"
+      : i === 1
+        ? "bg-silverwash hover:bg-silverdeep"
+        : i === 2
+          ? "bg-bronzewash hover:bg-bronzedeep"
+          : "hover:bg-icy";
+  const rankBadge = (i: number) =>
+    i <= 2 ? (
+      <span
+        className={`grid h-6 min-w-[26px] shrink-0 place-items-center rounded-md ${
+          i === 0 ? "bg-medalgold" : i === 1 ? "bg-medalsilver" : "bg-medalbronze"
+        } text-[11px] font-extrabold text-ink`}
+      >
+        #{i + 1}
+      </span>
+    ) : (
+      <span className="w-6 text-sm">#{i + 1}</span>
+    );
   return (
     <Modal open={open} onClose={onClose} label="The board">
       <h2 className="font-display text-xl font-bold">The <span className="text-money">board</span> 🏆</h2>
@@ -398,8 +420,8 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
           ? [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-[44px] rounded-2xl bg-icy animate-pulse" />)
           : null}
         {tab === "el" && rows?.map((row, i) => (
-          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 rounded-2xl hover:bg-icy text-left no-underline">
-            <span className="w-6 text-sm">{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}</span>
+          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
+            {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
             <span className="text-xs text-mutedink">{row.elementSym} {row.elementName}</span>
@@ -407,8 +429,8 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
           </a>
         ))}
         {tab === "crowns" && rows?.map((row, i) => (
-          <a key={row.domain} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 rounded-2xl hover:bg-icy text-left no-underline">
-            <span className="w-6 text-sm">{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}</span>
+          <a key={row.domain} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
+            {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
             <span className="text-xs text-mutedink whitespace-nowrap">👑 {row.total} {row.total === 1 ? "crown" : "crowns"} · ${row.totalSpent ?? 0}</span>
@@ -416,8 +438,8 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
           </a>
         ))}
         {tab === "early" && rows?.map((row, i) => (
-          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 rounded-2xl hover:bg-icy text-left no-underline">
-            <span className="w-6 text-sm">{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}</span>
+          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
+            {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
             <span className="text-xs text-mutedink">first on {row.elementSym} {row.elementName}</span>

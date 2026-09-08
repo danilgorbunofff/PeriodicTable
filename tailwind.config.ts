@@ -13,7 +13,10 @@ const config: Config = {
         stage: "#05070A",
         stagemid: "#0A1720",
         cardbg: "#FFFFFF",
-        ink: "#1F2B3E",
+        // #1C2739 (was #1F2B3E): clears 4.5:1 on every saturated family fill
+        // (worst 4.69 on #9F7BEF) — tile small text is plain ink; visually
+        // indistinguishable from the old value on white surfaces.
+        ink: "#1C2739",
         muted: "#8494AB",
         // Phase 5 AA text variants (plan remediation §Visual accessibility):
         // base hues are decorative-safe, but fail as small-text foregrounds.
@@ -30,6 +33,18 @@ const config: Config = {
         money: "#B8860B",
         goldwash: "#FFF5DB",
         goldwashedge: "#F5D480",
+        // Medal podium (top-3 rows): static washes + deepened hover variants
+        // + badge fills. All pass ≥4.5 with ink/mutedink/moneyink/liveink text.
+        silverwash: "#EEF2F7", // min 7.6 worst text
+        silveredge: "#D7DEE8",
+        silverdeep: "#DCE5F0", // min 6.72 — silver hover
+        bronzewash: "#F7E9DA", // min 7.17 worst text
+        bronzeedge: "#E8C9A4",
+        bronzedeep: "#EFD6BC", // min 6.11 — bronze hover
+        golddeep: "#F7DC94", // min 6.35 — gold hover
+        medalgold: "#F2C94C", // badge fill, ink text 8.98
+        medalsilver: "#D9E0EA", // badge fill, ink text 10.72
+        medalbronze: "#E8C4A0", // badge fill, ink text 8.71
         sale: "#F18B42", // bg only — pill text uses ink (5.78) for AA
         live: "#59C794",
         visit: "#0F172A",

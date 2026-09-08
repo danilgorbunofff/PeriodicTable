@@ -37,7 +37,6 @@ export function TerritoryView({
   // P1-08: failure is NEVER rendered as business state. Error without data
   // gets an error panel — never the unclaimed CTA.
   const rows = data?.stakes ?? [];
-  const [hover, setHover] = useState<string | null>(null);
   const [report, setReport] = useState<ReportState>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const top = rows[0];
@@ -142,12 +141,27 @@ export function TerritoryView({
             </div>
           )}
           <div className={`flex-1 overflow-auto flex flex-col gap-1 pr-1 ${expanded ? "" : "mt-3"}`}>
-            {rows.map((r, i) => (
+            {rows.map((r, i) => {
+              // Podium: top-3 rows carry gold/silver/bronze washes + medal
+              // badges; hover deepens their OWN rank color (never a cool-gray
+              // step that reads as "rows below are dimmed"). #4+ unchanged.
+              const rankBg =
+                i === 0
+                  ? "bg-goldwash hover:bg-golddeep"
+                  : i === 1
+                    ? "bg-silverwash hover:bg-silverdeep"
+                    : i === 2
+                      ? "bg-bronzewash hover:bg-bronzedeep"
+                      : "hover:bg-icy";
+              const badgeBg = i === 0 ? "bg-medalgold" : i === 1 ? "bg-medalsilver" : i === 2 ? "bg-medalbronze" : "bg-sale";
+              return (
               // Bidder actions are siblings, never nested (P2-10): the domain
               // opens the profile, Visit counts the click, Report moderates.
+              // Preview is pure CSS (group-hover) + silent prefetch — no
+              // setState on hover, so the list never re-renders under the mouse.
               <div
                 key={r.domain}
-                className={`relative block px-3 py-2 rounded-2xl ${i === 0 ? "bg-goldwash" : "hover:bg-icy"}`}
+                className={`group relative block px-3 py-2 rounded-2xl transition-colors ${rankBg}`}
                 onMouseEnter={() => {
                   if (hoverTimer.current) clearTimeout(hoverTimer.current);
                   // Prefetch preview on row hover (debounce 150ms per spec).
@@ -155,16 +169,14 @@ export function TerritoryView({
                     const src = previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain });
                     const img = new Image();
                     img.src = src;
-                    setHover(r.domain);
                   }, 150);
                 }}
                 onMouseLeave={() => {
                   if (hoverTimer.current) clearTimeout(hoverTimer.current);
-                  setHover(null);
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <span className="grid h-7 min-w-[30px] shrink-0 place-items-center rounded-lg bg-sale text-[11px] font-extrabold text-ink">#{i + 1}</span>
+                  <span className={`grid h-7 min-w-[30px] shrink-0 place-items-center rounded-lg ${badgeBg} text-[11px] font-extrabold text-ink`}>#{i + 1}</span>
                   <Avatar src={r.logo} domain={r.domain} size={24} rounded="rounded-full" />
                   <a
                     href={`/s/${encodeURIComponent(r.domain)}`}
@@ -204,31 +216,33 @@ export function TerritoryView({
                       : "report"}
                   </button>
                 </div>
-                {hover === r.domain && (
-                  <div className="absolute left-0 -translate-x-[108%] top-0 w-64 bg-white rounded-card shadow-card p-3 z-[var(--z-preview)] hidden md:block">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain })}
-                      alt={`${r.domain} preview`}
-                      loading="lazy"
-                      sizes="256px"
-                      onError={(e) => {
-                        const t = e.currentTarget;
-                        if (!t.src.includes("s2/favicons")) t.src = faviconFor(r.domain, 128);
-                      }}
-                      className="rounded-xl h-24 w-full object-cover bg-icy"
-                    />
-                    <div className="mt-2 text-sm font-bold">{r.domain}</div>
-                    <div className="text-xs text-mutedink">{r.pitch}</div>
-                    <div className="text-xs mt-1">🔗 <span className="text-moneyink font-bold">{r.domain}</span></div>
-                    <div className="text-xs text-liveink font-bold">🟢 {r.clicks} clicks delivered</div>
-                    <a href={`/s/${encodeURIComponent(r.domain)}`} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-moneyink hover:underline">
-                      View profile →
-                    </a>
-                  </div>
-                )}
+                <div
+                  className="absolute left-0 -translate-x-[108%] top-0 w-64 bg-white rounded-card shadow-card p-3 z-[var(--z-preview)] hidden md:block opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+                  aria-hidden="true"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewFor({ previewImgUrl: r.preview, url: r.siteUrl, domain: r.domain })}
+                    alt=""
+                    loading="lazy"
+                    sizes="256px"
+                    onError={(e) => {
+                      const t = e.currentTarget;
+                      if (!t.src.includes("s2/favicons")) t.src = faviconFor(r.domain, 128);
+                    }}
+                    className="rounded-xl h-24 w-full object-cover bg-icy"
+                  />
+                  <div className="mt-2 text-sm font-bold">{r.domain}</div>
+                  <div className="text-xs text-mutedink">{r.pitch}</div>
+                  <div className="text-xs mt-1">🔗 <span className="text-moneyink font-bold">{r.domain}</span></div>
+                  <div className="text-xs text-liveink font-bold">🟢 {r.clicks} clicks delivered</div>
+                  <a href={`/s/${encodeURIComponent(r.domain)}`} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-moneyink hover:underline">
+                    View profile →
+                  </a>
+                </div>
               </div>
-            ))}
+              );
+            })}
             {error && (
               <div className="rounded-2xl bg-icy p-3 text-sm font-bold text-mutedink">
                 Showing cached standings —{" "}

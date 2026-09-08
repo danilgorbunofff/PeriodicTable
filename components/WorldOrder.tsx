@@ -69,7 +69,17 @@ export function WorldOrder({
           : null}
         {rows.map((r) => {
           const logo = r.logoUrl;
-          const first = r.rank === 1;
+          // Podium: #1 keeps its gold card; #2/#3 mirror it in silver/bronze
+          // (same layout, own wash/edge/badge); hover deepens the OWN rank
+          // color. #4+ keep the plain list look exactly as before.
+          const podium =
+            r.rank === 1
+              ? { border: "border-goldwashedge", bg: "bg-goldwash", hover: "hover:bg-golddeep", badge: "bg-sale" }
+              : r.rank === 2
+                ? { border: "border-silveredge", bg: "bg-silverwash", hover: "hover:bg-silverdeep", badge: "bg-medalsilver" }
+                : r.rank === 3
+                  ? { border: "border-bronzeedge", bg: "bg-bronzewash", hover: "hover:bg-bronzedeep", badge: "bg-medalbronze" }
+                  : null;
           return (
             <a
               key={r.domain}
@@ -77,27 +87,27 @@ export function WorldOrder({
               target="_blank"
               rel="sponsored nofollow noopener"
               className={`grid items-center text-left no-underline transition-colors ${
-                first
-                  ? "mb-1 grid-cols-[34px_32px_1fr_auto] gap-2.5 rounded-[14px] border border-goldwashedge bg-goldwash px-2.5 py-3"
+                podium
+                  ? `mb-1 grid-cols-[34px_32px_1fr_auto] gap-2.5 rounded-[14px] border ${podium.border} ${podium.bg} ${podium.hover} px-2.5 py-3`
                   : "grid-cols-[34px_20px_1fr_auto] gap-2.5 rounded-[9px] border-b border-hairline px-2 py-2.5 hover:bg-icy"
               }`}
             >
-              {first ? (
-                <span className="grid h-7 min-w-[34px] place-items-center rounded-lg bg-sale text-[12px] font-extrabold text-ink">#1</span>
+              {podium ? (
+                <span className={`grid h-7 min-w-[34px] place-items-center rounded-lg ${podium.badge} text-[12px] font-extrabold text-ink`}>#{r.rank}</span>
               ) : (
                 <span className="text-center text-[13.5px] font-display font-bold text-mutedink">#{r.rank}</span>
               )}
               <Avatar
                 src={logo}
                 domain={r.domain}
-                size={first ? 32 : 20}
-                rounded={first ? "rounded-lg" : "rounded-[5px]"}
+                size={podium ? 32 : 20}
+                rounded={podium ? "rounded-lg" : "rounded-[5px]"}
               />
               <span className="min-w-0">
-                <span className={`block truncate font-extrabold text-ink ${first ? "text-base" : "text-sm"}`}>{r.domain}</span>
-                <span className={`${first ? "text-xs" : "text-[11.5px]"} block truncate font-bold text-mutedink`}>{r.elements} elements · 👑 {r.crowns}</span>
+                <span className={`block truncate font-extrabold text-ink ${podium ? "text-base" : "text-sm"}`}>{r.domain}</span>
+                <span className={`${podium ? "text-xs" : "text-[11.5px]"} block truncate font-bold text-mutedink`}>{r.elements} elements · 👑 {r.crowns}</span>
               </span>
-              <span className={`${first ? "text-[19px]" : "text-sm"} whitespace-nowrap font-display font-bold text-moneyink`}>${r.totalSpent}</span>
+              <span className={`${podium ? "text-[19px]" : "text-sm"} whitespace-nowrap font-display font-bold text-moneyink`}>${r.totalSpent}</span>
             </a>
           );
         })}

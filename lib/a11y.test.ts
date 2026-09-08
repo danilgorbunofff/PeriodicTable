@@ -8,6 +8,7 @@ import { join } from "path";
 import tailwindConfig from "../tailwind.config";
 import { cellMap, stepCell, rowEnd } from "./gridNav";
 import { ELEMENTS } from "./elements";
+import { FAMILY_FILL } from "./familyFill";
 
 const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 
@@ -26,26 +27,28 @@ function ratio(a: string, b: string): number {
 describe("text contrast meets WCAG 2.2 AA (4.5:1 small text)", () => {
   const colors = tailwindConfig.theme!.extend!.colors as Record<string, string>;
   // Tiles render 6-8px *-ink text directly on family pastel fills
-  // (components/Tile.tsx) — every ink must pass on every pastel.
-  const FAMILY_PASTELS = [
-    "#F8D6B3",
-    "#F6E3A1",
-    "#B9DDF3",
-    "#DCE3EB",
-    "#C4DDBC",
-    "#F5C6D0",
-    "#BDE4DB",
-    "#C9B6F5",
-    "#F6C2B7",
-    "#C8E6BF",
-    "#F2F7FC",
+  // (components/Tile.tsx) — every ink must pass on every pastel. Imported
+  // dynamically so the test can never drift from the real fills.
+  const FAMILY_PASTELS = Object.values(FAMILY_FILL) as string[];
+  // Medal podium surfaces (rank washes, deepened hovers, badge fills) host
+  // small ink text in TerritoryView / BoardPreview / WorldOrder rows.
+  const PODIUM_SURFACES = [
+    "goldwash",
+    "silverwash",
+    "bronzewash",
+    "golddeep",
+    "silverdeep",
+    "bronzedeep",
+    "medalgold",
+    "medalsilver",
+    "medalbronze",
   ];
   const pairs: [string, string][] = [
-    ["mutedink", "card"],
+    ["mutedink", "cardbg"],
     ["mutedink", "icy"],
-    ["moneyink", "card"],
+    ["moneyink", "cardbg"],
     ["moneyink", "goldwash"],
-    ["liveink", "card"],
+    ["liveink", "cardbg"],
     ["ink", "sale"],
   ];
   for (const [fg, bg] of pairs) {
@@ -53,10 +56,17 @@ describe("text contrast meets WCAG 2.2 AA (4.5:1 small text)", () => {
       expect(ratio(colors[fg], colors[bg])).toBeGreaterThanOrEqual(4.5);
     });
   }
+  // Small text on family pastels is always plain `ink` (Tile.tsx: hue inks
+  // are reserved for white/icy/wash surfaces, where they all pass).
+  for (const pastel of FAMILY_PASTELS) {
+    it(`ink on pastel ${pastel} ≥ 4.5`, () => {
+      expect(ratio(colors.ink, pastel)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
   for (const fg of ["mutedink", "moneyink", "liveink", "ink"]) {
-    for (const pastel of FAMILY_PASTELS) {
-      it(`${fg} on pastel ${pastel} ≥ 4.5`, () => {
-        expect(ratio(colors[fg], pastel)).toBeGreaterThanOrEqual(4.5);
+    for (const surface of PODIUM_SURFACES) {
+      it(`${fg} on ${surface} ≥ 4.5`, () => {
+        expect(ratio(colors[fg], colors[surface])).toBeGreaterThanOrEqual(4.5);
       });
     }
   }

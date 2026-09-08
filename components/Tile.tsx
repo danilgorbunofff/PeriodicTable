@@ -41,13 +41,13 @@ function TileInner({
       <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:block whitespace-nowrap bg-ink text-white text-[10px] font-bold rounded-full px-2 py-0.5 z-[var(--z-tooltip)]">
         {el.symbol} {el.name} · {claimed ? `#1 $${price}` : "Unclaimed · $5"}
       </span>
-      <span className="text-[8px] font-bold text-mutedink">{el.id > 0 ? el.id : "✦"}</span>
+      <span className="text-[8px] font-bold text-ink">{el.id > 0 ? el.id : "✦"}</span>
       <span className="font-display text-[14px] font-bold text-ink">{el.symbol}</span>
       {claimed && claim?.logoUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={claim.logoUrl} alt="" draggable={false} className="mt-0.5 h-[18px] w-[18px] rounded-[5px]" />
       ) : (
-        <span className="mt-0.5 text-[7px] font-extrabold text-moneyink">${price}</span>
+        <span className="mt-0.5 text-[7px] font-extrabold text-ink">${price}</span>
       )}
     </button>
   );
