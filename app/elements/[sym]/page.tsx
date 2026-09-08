@@ -42,18 +42,18 @@ export default async function ElementPage({ params }: { params: { sym: string } 
     return (
       <main className="min-h-screen bg-profilebg text-ink">
         <div className="max-w-3xl mx-auto px-4 py-8">
-          <Link href="/" className="text-sm font-bold text-muted hover:text-ink">← the table</Link>
+          <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
           <h1 className="font-display text-3xl font-bold mt-3">
             {el.name} ({el.symbol}) — startups on the table
           </h1>
-          <p className="text-sm text-muted mt-1">Live standings load with a database connection.</p>
+          <p className="text-sm text-mutedink mt-1">Live standings load with a database connection.</p>
           <Link
             href={`/?el=${encodeURIComponent(el.symbol)}&stake=5`}
             className="mt-4 inline-block bg-cta font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm"
           >
             Claim a spot — from $5
           </Link>
-          <p className="text-[11px] text-muted mt-3">
+          <p className="text-[11px] text-mutedink mt-3">
             Periodic data: IUPAC Standard. Classifications are illustrative, not a chemical statement.
           </p>
         </div>
@@ -74,24 +74,24 @@ export default async function ElementPage({ params }: { params: { sym: string } 
   return (
     <main className="min-h-screen bg-profilebg text-ink">
       <div className="max-w-3xl mx-auto px-4 py-8">
-        <Link href="/" className="text-sm font-bold text-muted hover:text-ink">← the table</Link>
+        <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
         <h1 className="font-display text-3xl font-bold mt-3">
           {el?.name ?? element.symbol} ({element.symbol}) — startups on the table
         </h1>
-        <p className="text-sm text-muted mt-1">
+        <p className="text-sm text-mutedink mt-1">
           {element.stakeCount} stakers · ${element.totalPoolUsd} pool · take #1 for ${takeLead}
         </p>
         <table className="mt-4 w-full bg-white rounded-2xl overflow-hidden text-sm">
           <tbody>
             {element.stakes.map((s, i) => (
               <tr key={s.id} className="border-b last:border-0 border-icy">
-                <td className="px-4 py-2 font-bold text-muted">#{i + 1}</td>
+                <td className="px-4 py-2 font-bold text-mutedink">#{i + 1}</td>
                 <td className="px-4 py-2 font-bold">{s.startup.domain}</td>
-                <td className="px-4 py-2 text-money font-extrabold text-right">${s.amountUsd}</td>
+                <td className="px-4 py-2 text-moneyink font-extrabold text-right">${s.amountUsd}</td>
               </tr>
             ))}
             {element.stakes.length === 0 && (
-              <tr><td className="px-4 py-3 text-muted">No bids yet — be the first for $5.</td></tr>
+              <tr><td className="px-4 py-3 text-mutedink">No bids yet — be the first for $5.</td></tr>
             )}
           </tbody>
         </table>
@@ -101,7 +101,7 @@ export default async function ElementPage({ params }: { params: { sym: string } 
         >
           Claim a spot — for ${takeLead}
         </Link>
-        <p className="text-[11px] text-muted mt-3">
+        <p className="text-[11px] text-mutedink mt-3">
           Periodic data: IUPAC Standard. Classifications are illustrative, not a chemical statement.
         </p>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />

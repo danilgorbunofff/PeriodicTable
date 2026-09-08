@@ -7,7 +7,13 @@
                     "build":  "next build",
                     "start":  "next start",
                     "lint":  "next lint",
-                    "test":  "vitest run"
+                    "typecheck":  "tsc --noEmit",
+                    "test":  "vitest run",
+                    "test:ci":  "vitest run --maxWorkers=4",
+                    "check-prod-env":  "node scripts/check-prod-env.mjs",
+                    "audit:prod":  "node scripts/audit-prod.mjs",
+                    "db:migrate":  "prisma migrate dev",
+                    "db:deploy":  "prisma migrate deploy"
                 },
     "dependencies":  {
                          "@prisma/client":  "^6.19.3",
@@ -36,5 +42,9 @@
                      },
     "prisma":  {
                    "seed":  "tsx prisma/seed.ts"
-               }
+               },
+    "overrides":  {
+                     "postcss":  "$postcss",
+                     "deepmerge-ts":  "^8.0.2"
+                 }
 }

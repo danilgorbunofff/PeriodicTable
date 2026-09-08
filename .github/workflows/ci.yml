@@ -1,0 +1,110 @@
+# Phase 0 baseline gate: install → schema → lint/type → tests (DB, no skip) →
+# audit → prod-env check → production build. Live payments stay off: this
+# workflow never sets PAYMENTS_LIVE=true or real provider secrets.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ptl_ci
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:55433/ptl_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npx prisma format --check
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: unit + integration tests (must not skip DB tests)
+        run: |
+          set -o pipefail
+          # maxWorkers=4: 16 suites × Serializable txns oversubscribe small CI
+          # Postgres; the cap keeps contention production-shaped.
+          npm run test:ci 2>&1 | tee /tmp/test.log
+          if grep -E "[1-9][0-9]* skipped|skipped:? [1-9][0-9]*" /tmp/test.log; then
+            echo "ci: database integration tests skipped — failing closed."
+            exit 1
+          fi
+      - run: npm run audit:prod
+      - name: production-config gate fails closed without secrets
+        run: |
+          if VERCEL_ENV=production NODE_ENV=production node scripts/check-prod-env.mjs; then
+            echo "ci: check-prod-env passed without prod secrets — failing closed."
+            exit 1
+          fi
+      - name: production-config gate passes with complete config
+        run: |
+          VERCEL_ENV=production NODE_ENV=production \
+            DATABASE_URL="$DATABASE_URL" \
+            WHOP_API_KEY=ci WHOP_WEBHOOK_SECRET=ci \
+            NEXT_PUBLIC_APP_URL=https://ci.example.com \
+            TURNSTILE_SECRET=ci CLICK_SALT=ci-random-value CRON_SECRET=ci \
+            RESEND_API_KEY=ci EMAIL_FROM=ci@example.com \
+            node scripts/check-prod-env.mjs
+      - name: production build (with database — no hidden Prisma errors)
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/build.log
+          if grep -iE "prisma.*(error|P1001|P1012|P2002|P2021|P2025|P3000|migration failed)|missing.*DATABASE_URL|invalid.*DATABASE_URL" /tmp/build.log; then
+            echo "ci: production build emitted Prisma configuration errors."
+            exit 1
+          fi
+      - name: seed release fixture data
+        run: |
+          npx tsx prisma/seed.ts
+          npx tsx prisma/launch-seed.ts
+      - name: release rehearsal — live money flows
+        env:
+          WHOP_WEBHOOK_SECRET: ci-rehearse-secret
+          ADMIN_TOKEN: ci-rehearse-admin
+          CRON_SECRET: ci-rehearse-cron
+          RESERVATION_TTL_MS: 2000
+        run: |
+          npm run start -- -p 3100 > /tmp/rehearse-server.log 2>&1 &
+          echo $! > /tmp/rehearse.pid
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3100/ && break
+            sleep 2
+          done
+          BASE_URL=http://localhost:3100 \
+            ADMIN_TOKEN=ci-rehearse-admin \
+            WHOP_WEBHOOK_SECRET=ci-rehearse-secret \
+            bash scripts/rehearse-release.sh live
+          kill $(cat /tmp/rehearse.pid) || true
+      - name: release rehearsal — paused payments + waitlist
+        env:
+          PAYMENTS_LIVE: "false"
+          NEXT_PUBLIC_PAYMENTS_LIVE: "false"
+        run: |
+          npm run start -- -p 3101 > /tmp/rehearse-paused.log 2>&1 &
+          echo $! > /tmp/rehearse-paused.pid
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3101/ && break
+            sleep 2
+          done
+          BASE_URL=http://localhost:3101 bash scripts/rehearse-release.sh paused
+          kill $(cat /tmp/rehearse-paused.pid) || true

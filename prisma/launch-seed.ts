@@ -1,9 +1,12 @@
 /* Launch seed (Phase 5, spec 01-seed-instrument.md): 8–12 friendly startups
  * across marquee elements + contested C ladder ($50/$24/$9) + 72h activity backlog.
- * Idempotent: upserts startups/stakes by (element,startup), backfills activity.
+ * Idempotent append-only: upserts startups/stakes by (element,startup), never
+ * mutates existing stakes, re-runs converge. Ranking reuses shared rankStakes +
+ * assertLedgerInvariants (lib/pricing.ts); historical ts preserved by design.
  * Usage: DATABASE_URL=... tsx prisma/launch-seed.ts
  */
 import { PrismaClient } from "@prisma/client";
+import { rankStakes, assertLedgerInvariants } from "../lib/pricing";
 
 const prisma = new PrismaClient();
 const H = 3600_000;
@@ -37,15 +40,18 @@ const STAKES: SeedStake[] = [
 ];
 
 async function recompute(elementId: number) {
-  const stakes = await prisma.stake.findMany({ where: { elementId }, orderBy: { amountUsd: "desc" } });
-  let pool = 0;
-  let leader: string | null = null;
-  for (let i = 0; i < stakes.length; i++) {
-    pool += stakes[i].amountUsd;
-    await prisma.stake.update({ where: { id: stakes[i].id }, data: { rank: i + 1, isLeader: i === 0 } });
-    if (i === 0) leader = stakes[i].startupId;
+  const stakes = await prisma.stake.findMany({ where: { elementId } });
+  const ranked = rankStakes(stakes);
+  const pool = ranked.reduce((sum, s) => sum + s.amountUsd, 0);
+  const leader = ranked.length > 0 ? ranked[0].startupId : null;
+  assertLedgerInvariants(
+    ranked.map((r) => ({ id: r.id, startupId: r.startupId, amountUsd: r.amountUsd, rank: r.rank, isLeader: r.isLeader })),
+    { totalPoolUsd: pool, stakeCount: ranked.length, currentLeaderId: leader }
+  );
+  for (const r of ranked) {
+    await prisma.stake.update({ where: { id: r.id }, data: { rank: r.rank, isLeader: r.isLeader } });
   }
-  await prisma.element.update({ where: { id: elementId }, data: { totalPoolUsd: pool, stakeCount: stakes.length, currentLeaderId: leader } });
+  await prisma.element.update({ where: { id: elementId }, data: { totalPoolUsd: pool, stakeCount: ranked.length, currentLeaderId: leader } });
 }
 
 async function main() {
@@ -81,6 +87,26 @@ async function main() {
   }
   const ids = await prisma.stake.findMany({ distinct: ["elementId"], select: { elementId: true } });
   for (const { elementId } of ids) await recompute(elementId);
+  for (const { elementId } of ids) {
+    const first = await prisma.stake.findFirst({
+      where: { elementId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    if (first) {
+      await prisma.firstClaim.upsert({
+        where: { elementId },
+        create: {
+          elementId,
+          startupId: first.startupId,
+          stakeId: first.id,
+          claimedAt: first.createdAt,
+          source: "seed",
+          confidence: "MEDIUM",
+        },
+        update: {},
+      });
+    }
+  }
   const [elements, startups, stakes] = await Promise.all([
     prisma.element.count(),
     prisma.startup.count(),

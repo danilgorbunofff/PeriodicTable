@@ -43,8 +43,13 @@ export function TableCamera({
   const pinch = useRef<{ dist: number; mx: number; my: number } | null>(null);
 
   const apply = useCallback((next: Cam, animate = false) => {
+    // Phase 5: reduced motion kills camera transitions, not just tiles.
+    const reduced =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     camRef.current = next;
-    setAnim(animate);
+    setAnim(reduced ? false : animate);
     setCam(next);
   }, []);
 
@@ -162,8 +167,19 @@ export function TableCamera({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Phase 5 (P2-11): camera shortcuts yield to overlays, to any focused
+      // interactive control, and to handlers that already consumed the key
+      // (e.g. grid arrow navigation stopPropagation).
+      if (e.defaultPrevented) return;
+      if (document.body.hasAttribute("data-modal-open")) return;
       const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+      if (
+        t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.tagName === "SELECT" ||
+        t.isContentEditable ||
+        !!t.closest?.('button, a, [role="button"], [role="option"], [role="gridcell"], select, input, textarea')
+      )
         return;
       const vp = viewportRef.current;
       if (!vp) return;
@@ -310,7 +326,7 @@ export function TableCamera({
         </div>
       </div>
 
-      <div className="absolute bottom-[70px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] hidden sm:flex items-center gap-3 rounded-full bg-white/95 backdrop-blur px-3.5 py-1.5 text-[11px] font-bold text-muted shadow-float pointer-events-none">
+      <div className="absolute bottom-[70px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] hidden sm:flex items-center gap-3 rounded-full bg-white/95 backdrop-blur px-3.5 py-1.5 text-[11px] font-bold text-mutedink shadow-float pointer-events-none">
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-[3px] bg-white shadow-[inset_0_0_0_1px_#E4EBF3]" /> unclaimed
         </span>
@@ -328,7 +344,7 @@ export function TableCamera({
         >
           −
         </IconBtn>
-        <span className="text-[11px] font-extrabold text-muted px-1 whitespace-nowrap drop-shadow-[0_1px_8px_rgba(0,0,0,.8)]">
+        <span className="text-[11px] font-extrabold text-mutedink px-1 whitespace-nowrap drop-shadow-[0_1px_8px_rgba(0,0,0,.8)]">
           drag to pan · scroll to zoom
         </span>
         <IconBtn

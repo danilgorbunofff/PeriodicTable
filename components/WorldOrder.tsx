@@ -1,17 +1,8 @@
 "use client";
-import { useMemo } from "react";
-import useSWR from "swr";
 import { Card } from "./Card";
 import { Avatar } from "./Avatar";
-import { fetcher } from "../lib/api";
-
-type Tile = {
-  symbol: string;
-  name: string;
-  pool: number;
-  count: number;
-  leader: { domain: string; logoUrl: string; amount: number } | null;
-};
+import useSWR from "swr";
+import { fetchJson, isTableOrderRows, type TableOrderRow } from "../lib/api";
 
 export function WorldOrder({
   onClose,
@@ -23,29 +14,12 @@ export function WorldOrder({
   /** Rendered inside the fullscreen-ish expand overlay: swap in the worldmap.lol-style cream header, drop own controls, and let the parent shell scroll instead. */
   expanded?: boolean;
 }) {
-  const { data: tiles, error } = useSWR<Tile[]>("/api/elements", fetcher, { refreshInterval: 30000 });
-
-  const rows = useMemo(() => {
-    const byDomain: Record<string, { total: number; elements: Set<string>; crowns: number; logo: string }> = {};
-    for (const t of tiles ?? []) {
-      if (!t.leader) continue;
-      const d = byDomain[t.leader.domain] ?? {
-        total: 0,
-        elements: new Set<string>(),
-        crowns: 0,
-        logo: t.leader.logoUrl,
-      };
-      d.crowns += 1;
-      d.total += t.leader.amount;
-      d.elements.add(t.symbol);
-      d.logo = t.leader.logoUrl;
-      byDomain[t.leader.domain] = d;
-    }
-    return Object.entries(byDomain)
-      .map(([domain, data]) => ({ domain, ...data }))
-      .sort((a, b) => b.total - a.total)
-      .map((row, i) => ({ ...row, rank: i + 1 }));
-  }, [tiles]);
+  // Server-computed Table Order (Phase 4, P1-10): ALL stakes summed per
+  // startup — the client no longer awards the wrong users from leader rows.
+  const { data, error } = useSWR<TableOrderRow[]>("/api/table-order", (url: string) => fetchJson(url, isTableOrderRows), {
+    refreshInterval: 30000,
+  });
+  const rows = (data ?? []).map((r, i) => ({ ...r, rank: i + 1 }));
 
   return (
     <div className={`flex flex-col ${expanded ? "h-full" : ""}`}>
@@ -64,29 +38,29 @@ export function WorldOrder({
       ) : (
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-[11px] tracking-[.14em] text-muted font-extrabold uppercase">the table · live</div>
+            <div className="text-[11px] tracking-[.14em] text-mutedink font-extrabold uppercase">the table · live</div>
             <h2 className="mt-0.5 font-display text-[27px] leading-none font-bold">⚗️ Table Order</h2>
-            <div className="mt-1.5 text-xs font-extrabold text-money">TOP 10 · MOST SPENT</div>
+            <div className="mt-1.5 text-xs font-extrabold text-moneyink">TOP 10 · MOST SPENT</div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {onClose && (
-              <button aria-label="Close" title="Close" onClick={onClose} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-muted hover:text-ink">✕</button>
+              <button aria-label="Close" title="Close" onClick={onClose} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">✕</button>
             )}
             {onExpand && (
-              <button aria-label="Expand" title="Expand" onClick={onExpand} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-muted hover:text-ink">⤢</button>
+              <button aria-label="Expand" title="Expand" onClick={onExpand} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">⤢</button>
             )}
           </div>
         </div>
       )}
       <div className={`flex flex-col overflow-auto pr-1 ${expanded ? "flex-1" : "mt-4 max-h-[44vh]"}`}>
         {error && (
-          <div className="rounded-xl bg-icy p-3 text-sm font-bold text-muted">Couldn&apos;t load standings.</div>
+          <div className="rounded-xl bg-icy p-3 text-sm font-bold text-mutedink">Couldn&apos;t load standings.</div>
         )}
-        {!tiles && !error
+        {!data && !error
           ? [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-[52px] rounded-xl bg-icy animate-pulse mb-1" />)
           : null}
         {rows.map((r) => {
-          const logo = r.logo;
+          const logo = r.logoUrl;
           const first = r.rank === 1;
           return (
             <a
@@ -101,9 +75,9 @@ export function WorldOrder({
               }`}
             >
               {first ? (
-                <span className="grid h-7 min-w-[34px] place-items-center rounded-lg bg-sale text-[12px] font-extrabold text-white">#1</span>
+                <span className="grid h-7 min-w-[34px] place-items-center rounded-lg bg-sale text-[12px] font-extrabold text-ink">#1</span>
               ) : (
-                <span className="text-center text-[13.5px] font-display font-bold text-muted">#{r.rank}</span>
+                <span className="text-center text-[13.5px] font-display font-bold text-mutedink">#{r.rank}</span>
               )}
               <Avatar
                 src={logo}
@@ -113,14 +87,14 @@ export function WorldOrder({
               />
               <span className="min-w-0">
                 <span className={`block truncate font-extrabold text-ink ${first ? "text-base" : "text-sm"}`}>{r.domain}</span>
-                <span className={`${first ? "text-xs" : "text-[11.5px]"} block truncate font-bold text-muted`}>{r.elements.size} elements · 👑 {r.crowns}</span>
+                <span className={`${first ? "text-xs" : "text-[11.5px]"} block truncate font-bold text-mutedink`}>{r.elements} elements · 👑 {r.crowns}</span>
               </span>
-              <span className={`${first ? "text-[19px]" : "text-sm"} whitespace-nowrap font-display font-bold text-money`}>${r.total}</span>
+              <span className={`${first ? "text-[19px]" : "text-sm"} whitespace-nowrap font-display font-bold text-moneyink`}>${r.totalSpent}</span>
             </a>
           );
         })}
       </div>
-      <div className="mt-2 shrink-0 text-center text-[11px] font-bold text-muted whitespace-nowrap">total staked across every element · click one for details</div>
+      <div className="mt-2 shrink-0 text-center text-[11px] font-bold text-mutedink whitespace-nowrap">total staked across every element · click one for details</div>
     </div>
   );
 }

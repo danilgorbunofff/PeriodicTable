@@ -1,54 +1,66 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchShotBytes } from "@/lib/screenshots";
+import { jobAuth } from "@/lib/jobs";
+import { claimDueOutbox, processOutboxRowById } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
-/** Screenshot persist job (Phase 4, spec 02).
- * Called after Payment.paid (best-effort, never blocks checkout) or via cron:
- *   POST /api/jobs/screenshot { secret?, domain?, limit? }
- * MVP stores the Microlink shot URL directly as previewImgUrl (no R2/S3 yet);
- * binary fetch is only a reachability probe with retries. Backfill: POST { backfill: true }.
+/**
+ * Preview worker (Phase 6, P1-14/P1-15): persists Startup.previewImgUrl from
+ * PREVIEW_GENERATE outbox rows (enqueued automatically on every paid stake).
+ *
+ * - Authenticated on every production invocation (P1-15) — no body-shape
+ *   bypasses.
+ * - Bounded: at most 10 targets per invocation, 20s global deadline,
+ *   8s per-target probe (inside persistPreview).
+ * - Retry state lives on the outbox row (attempts/nextAttemptAt/lastError).
+ * - `backfill: true` enqueues rows for preview-less startups (bounded 50),
+ *   then processes the due batch.
+ *
+ * Retention/privacy policy: previews are public homepage screenshots of
+ * public listings, stored as remote image URLs (no bytes retained). Hiding a
+ * listing clears its preview (see the moderate endpoint); the row's payload
+ * keeps only the startup id + source URL.
  */
 export async function POST(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  let body: { secret?: string; domain?: string; limit?: number; backfill?: boolean } = {};
+  let body: { secret?: string; limit?: number; backfill?: boolean } = {};
   try {
     body = await req.json();
   } catch {
     body = {};
   }
-  if (cronSecret && body.secret !== cronSecret && req.headers.get("authorization") !== `Bearer ${cronSecret}`) {
-    // Allow unauthenticated single-domain refreshes in dev; cron must auth in prod.
-    if (process.env.NODE_ENV === "production" && !body.domain) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = jobAuth(req, body.secret ?? null);
+  if (denied) return denied;
+
+  if (body.backfill) {
+    const missing = await prisma.startup.findMany({
+      where: { previewImgUrl: null, moderationState: "VISIBLE" },
+      select: { id: true, url: true },
+      take: 50,
+    });
+    for (const s of missing) {
+      await prisma.outboxEvent.upsert({
+        where: { dedupeKey: `preview-${s.id}` },
+        create: { type: "PREVIEW_GENERATE", dedupeKey: `preview-${s.id}`, payload: { startupId: s.id, url: s.url } },
+        update: {},
+      });
     }
   }
 
-  const limit = Math.min(Math.max(body.limit ?? 20, 1), 100);
-  const targets = body.domain
-    ? await prisma.startup.findMany({ where: { domain: body.domain } })
-    : body.backfill
-      ? await prisma.startup.findMany({ where: { previewImgUrl: null }, take: limit })
-      : await prisma.startup.findMany({
-          where: { previewImgUrl: null },
-          orderBy: { claimedAt: "desc" },
-          take: limit,
-        });
-
+  const deadline = Date.now() + 20_000;
+  const limit = Math.min(Math.max(body.limit ?? 5, 1), 10);
+  const claimed = await claimDueOutbox(limit);
   let updated = 0;
-  for (const s of targets) {
-    // Retry x3 with fallback to favicon (spec): probe reachability, then store shot URL.
-    let ok = false;
-    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-      const bytes = await fetchShotBytes(s.url);
-      ok = !!bytes;
-    }
-    if (ok) {
-      const shot = `https://image.microlink.io/?url=${encodeURIComponent(s.url)}&viewport.width=1200&viewport.height=675&embed=screenshot.url`;
-      await prisma.startup.update({ where: { id: s.id }, data: { previewImgUrl: shot } });
-      updated++;
-    }
+  let failed = 0;
+  for (const { id } of claimed) {
+    if (Date.now() >= deadline) break;
+    // Preview rows only — other types belong to the outbox worker.
+    const row = await prisma.outboxEvent.findUnique({ where: { id } });
+    if (!row || row.type !== "PREVIEW_GENERATE") continue;
+    const out = await processOutboxRowById(id);
+    if (out === "completed") updated++;
+    else if (out === "failed") failed++;
   }
-  return NextResponse.json({ ok: true, checked: targets.length, updated });
+  return NextResponse.json({ ok: true, checked: claimed.length, updated, failed });
 }

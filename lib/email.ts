@@ -29,14 +29,28 @@ async function logEmail(row: {
   });
 }
 
-async function deliver(to: string, subject: string, html: string): Promise<"sent" | "logged" | "error"> {
+async function deliver(
+  to: string,
+  subject: string,
+  html: string,
+  headers?: { unsubToken?: string }
+): Promise<"sent" | "logged" | "error"> {
   if (!process.env.RESEND_API_KEY) return "logged";
   try {
+    // RFC 8058 one-click unsubscribe (P1-18): POST endpoint + headers. The
+    // token is opaque; no email address ever appears in a URL.
+    const unsubUrl = headers?.unsubToken ? `${APP_URL}/api/unsubscribe?token=${headers.unsubToken}` : null;
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        ...(unsubUrl
+          ? {
+              "List-Unsubscribe": `<${unsubUrl}>`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            }
+          : {}),
       },
       body: JSON.stringify({
         from: process.env.EMAIL_FROM ?? "periodictable.lol <hi@periodictable.lol>",
@@ -44,6 +58,7 @@ async function deliver(to: string, subject: string, html: string): Promise<"sent
         subject,
         html,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return "error";
     return "sent";
@@ -70,10 +85,12 @@ export async function sendOutbidEmail(p: OutbidEmailParams) {
     winnerDomain: p.winnerDomain,
     winnerAmount: p.winnerAmount,
     reclaim,
-    reclaimUrl: `${APP_URL}/?el=${p.elementSymbol}&stake=${reclaim}&email=${encodeURIComponent(p.to)}`,
+    // No email address in URLs (P1-18): the homepage prefill needs only
+    // element + amount; the receipt email is addressed by the envelope.
+    reclaimUrl: `${APP_URL}/?el=${p.elementSymbol}&stake=${reclaim}`,
     unsubUrl: `${APP_URL}/api/unsubscribe?token=${p.unsubToken}`,
   });
-  const status = await deliver(p.to, subject, html);
+  const status = await deliver(p.to, subject, html, { unsubToken: p.unsubToken });
   await logEmail({
     to: p.to,
     template: "outbid",
@@ -105,7 +122,7 @@ export async function sendReceiptEmail(p: ReceiptEmailParams) {
     manageUrl: `${APP_URL}/s/${encodeURIComponent(p.domain)}`,
     unsubUrl: `${APP_URL}/api/unsubscribe?token=${p.unsubToken}`,
   });
-  const status = await deliver(p.to, subject, html);
+  const status = await deliver(p.to, subject, html, { unsubToken: p.unsubToken });
   await logEmail({
     to: p.to,
     template: "receipt",

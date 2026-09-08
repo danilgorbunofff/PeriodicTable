@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { shouldCountClick, hashIp } from "@/lib/clicks";
+import { clientIp } from "@/lib/ip";
 
 export const dynamic = "force-dynamic";
 
@@ -15,14 +16,15 @@ export async function GET(req: NextRequest, { params }: { params: { stakeId: str
   if (!stake || !stake.startup?.url) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
+  // Hidden listings never send traffic to the destination (takedown brake).
+  if (stake.startup.moderationState === "HIDDEN") {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
 
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "0.0.0.0";
+  const ip = clientIp(req.headers);
   const ua = req.headers.get("user-agent") ?? "";
 
-  if (shouldCountClick(stakeId, ip, ua)) {
+  if (await shouldCountClick(stakeId, ip, ua)) {
     const ipHash = hashIp(ip);
     try {
       await prisma.$transaction([

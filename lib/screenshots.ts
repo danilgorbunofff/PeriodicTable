@@ -19,9 +19,35 @@ export function previewFor(params: { previewImgUrl?: string | null; url?: string
   return faviconFor(params.domain, 128);
 }
 
+/**
+ * Bounded single-probe preview persist (Phase 2 outbox drain + Phase 6 worker).
+ * Returns true when a shot URL was stored. Throws on probe failure so the
+ * caller can back off (outbox retry) — never swallows into silent success.
+ */
+export async function persistPreview(input: {
+  startupId: string;
+  url: string;
+  store: (startupId: string, previewImgUrl: string) => Promise<unknown>;
+}): Promise<boolean> {
+  const bytes = await fetchShotBytes(input.url);
+  if (!bytes) throw new Error("preview probe failed");
+  await input.store(input.startupId, shotUrlFor(input.url));
+  return true;
+}
+
 /** Best-effort persist: fetch the shot and return bytes for upload, or null to keep fallback. */
 export async function fetchShotBytes(url: string, timeoutMs = 8000): Promise<Uint8Array | null> {
   try {
+    // Fetch-time SSRF guard (Phase 6): validation blocks these at intake, but
+    // legacy rows predate it — never fetch non-public hosts.
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+    const { isPublicHost } = await import("./validate");
+    if (!isPublicHost(host)) return null;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(shotUrlFor(url), { signal: ctrl.signal });

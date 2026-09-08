@@ -8,7 +8,7 @@ export function IcyInput({
   return (
     <input
       {...props}
-      className={`w-full bg-icy rounded-2xl px-4 h-12 text-ink placeholder:text-muted outline-none focus:ring-2 focus:ring-cta ${className}`}
+      className={`w-full bg-icy rounded-2xl px-4 h-12 text-ink placeholder:text-mutedink outline-none focus:ring-2 focus:ring-cta ${className}`}
     />
   );
 }

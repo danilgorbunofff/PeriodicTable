@@ -1,18 +1,20 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { takeLeadPrice, joinMin, reclaimFor } from "@/lib/pricing";
+import { apiJson, apiError } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ sym: string }> }) {
-  const { sym } = await params;
-  const symbol = decodeURIComponent(sym);
+export async function GET(req: NextRequest, { params }: { params: { sym: string } }) {
+  const symbol = decodeURIComponent(params.sym);
 
   const element = await prisma.element.findUnique({
     where: { symbol },
     include: {
       stakes: {
-        orderBy: { amountUsd: "desc" },
+        // Hidden bidders are excluded from display; aggregates still count all.
+        where: { startup: { moderationState: { not: "HIDDEN" } } },
+        orderBy: [{ amountUsd: "desc" }, { createdAt: "asc" }, { id: "asc" }],
         include: {
           startup: { select: { domain: true, title: true, pitch: true, logoUrl: true, previewImgUrl: true, url: true } },
         },
@@ -20,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sym:
     },
   });
 
-  if (!element) return NextResponse.json({ error: "Element not found" }, { status: 404 });
+  if (!element) return apiError("Element not found", { status: 404, code: "NOT_FOUND" });
 
   const leaderTotal = element.stakes[0]?.amountUsd;
 
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sym:
     reclaim = reclaimFor(leaderTotal, mine?.amountUsd);
   }
 
-  return NextResponse.json(
+  return apiJson(
     {
       symbol: element.symbol,
       name: element.name,

@@ -1,14 +1,14 @@
 /* Integration test — requires DATABASE_URL. Uses isolated test elements
    (9999 TEST1 / 9998 TEST2) created and cleaned up by the suite. */
+import { hasTestDb, testPrisma } from "./testDb"; // must stay first: pins DATABASE_URL before lib singletons bind
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PrismaClient } from "@prisma/client";
 import { applyStakeTx } from "./recompute";
 import { reclaimFor } from "./pricing";
 
-const prisma = new PrismaClient();
+const prisma = testPrisma();
 const T1 = 9999;
 const T2 = 9998;
-const hasDb = !!process.env.DATABASE_URL;
+const hasDb = hasTestDb;
 
 beforeAll(async () => {
   if (!hasDb) return;
@@ -37,6 +37,7 @@ afterAll(async () => {
   await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2] } } });
   await prisma.stake.deleteMany({ where: { startup: { domain: { in: ["test-a.dev", "test-b.dev"] } }, elementId: { gte: 9000 } } });
   await prisma.activityLog.deleteMany({ where: { elementSymbol: { in: ["TST1", "TST2"] } } });
+  await prisma.firstClaim.deleteMany({ where: { elementId: { in: [T1, T2] } } });
   await prisma.element.deleteMany({ where: { id: { in: [T1, T2] } } });
   await prisma.startup.deleteMany({ where: { domain: { in: ["test-a.dev", "test-b.dev"] } } });
   await prisma.$disconnect();

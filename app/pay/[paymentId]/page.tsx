@@ -7,17 +7,25 @@ export default function DevPayPage() {
   const params = useParams<{ paymentId: string }>();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   async function run(outcome: "pay" | "fail") {
     setBusy(true);
+    setStatus(null);
     const res = await fetch("/api/dev/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paymentId: params.paymentId, outcome }),
     });
-    const json = (await res.json().catch(() => ({}))) as { elementSymbol?: string };
-    if (outcome === "pay") router.push(json.elementSymbol ? `/?paid=${json.elementSymbol}` : "/?paid=1");
-    else setBusy(false);
+    const json = (await res.json().catch(() => ({}))) as { elementSymbol?: string; status?: string; error?: string };
+    // Only a confirmed paid payment leaves this page (P2-03). Failures and
+    // terminal states report their actual status instead.
+    if (res.ok && json.status === "paid") {
+      router.push(json.elementSymbol ? `/?paid=${json.elementSymbol}` : "/?paid=1");
+      return;
+    }
+    setStatus(json.error ?? (json.status ? `Payment is ${json.status}.` : "Payment failed — you can retry."));
+    setBusy(false);
   }
 
   return (
@@ -86,8 +94,11 @@ export default function DevPayPage() {
           </button>
         </div>
         <p style={{ fontSize: 12, color: "#999", marginTop: 14, textAlign: "center" }}>
-          Failure keeps the payment pending — you can retry.
+          A failed simulation marks the payment failed — retry from the table with a new checkout.
         </p>
+        {status && (
+          <p style={{ fontSize: 13, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{status}</p>
+        )}
       </div>
     </main>
   );

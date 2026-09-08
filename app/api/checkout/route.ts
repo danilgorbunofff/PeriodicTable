@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PaymentPath, PaymentProvider, PaymentStatus, ReservationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { validateTopUp, joinMin } from "@/lib/pricing";
+import { classifyAndValidate, joinMin } from "@/lib/pricing";
 import { validateCheckoutInput } from "@/lib/validate";
-import { createWhopCheckoutSession, whopEnabled } from "@/lib/whop";
-import { rateLimit } from "@/lib/rateLimit";
+import { createWhopCheckoutSession, getProviderMode, whopPartiallyConfigured } from "@/lib/whop";
+import { rateLimitAsync } from "@/lib/rateStore";
+import { clientIp } from "@/lib/ip";
 import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
 import { paymentsLiveServer } from "@/lib/flags";
+import { findOrCreateCheckoutStartup, fingerprintCheckout } from "@/lib/startups";
+import { getActiveReservation, releaseExpiredReservations, reservationConflict, RESERVATION_TTL_MS } from "@/lib/reservations";
+import { withTxnRetry } from "@/lib/txn";
+import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -21,16 +27,87 @@ type Body = {
   turnstileToken?: string;
 };
 
-export async function POST(req: NextRequest) {
-  if (!paymentsLiveServer()) {
+/** Resume (or create) the provider session for a pending payment (P1-04).
+ * Returns a usable checkout URL, or null when the provider is down
+ * (caller returns retryable 502 — never a dead dev URL for Whop payments). */
+async function resumeCheckoutUrl(
+  payment: {
+    id: string;
+    amountUsd: number;
+    provider: PaymentProvider;
+    providerCheckoutUrl: string | null;
+    elementId: number;
+    startupId: string;
+    email: string | null;
+  },
+  origin: string
+): Promise<string | null> {
+  if (payment.providerCheckoutUrl) return payment.providerCheckoutUrl;
+  if (getProviderMode() === "dev") {
+    const url = `/pay/${payment.id}`;
+    await prisma.payment.update({ where: { id: payment.id }, data: { providerCheckoutUrl: url } });
+    return url;
+  }
+  const element = await prisma.element.findUniqueOrThrow({ where: { id: payment.elementId } });
+  const startup = await prisma.startup.findUniqueOrThrow({ where: { id: payment.startupId } });
+  const session = await createWhopCheckoutSession({
+    paymentId: payment.id,
+    amountUsd: payment.amountUsd,
+    title: startup.title,
+    elementSymbol: element.symbol,
+    email: payment.email,
+    redirectAfterPaid: `${origin}/?paid=${element.symbol}`,
+  });
+  if (!session) return null;
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { providerRef: session.providerRef, providerCheckoutUrl: session.checkoutUrl },
+  });
+  return session.checkoutUrl;
+}
+
+/** Shared idempotent-replay branch (P1-03): used on lookup hits AND on
+ * unique-race recovery when a concurrent insert won. */
+async function idempotentReplay(
+  byKey: {
+    id: string;
+    amountUsd: number;
+    provider: PaymentProvider;
+    providerCheckoutUrl: string | null;
+    elementId: number;
+    startupId: string;
+    email: string | null;
+    status: PaymentStatus;
+    requestFingerprint: string | null;
+  },
+  fingerprint: string,
+  origin: string
+) {
+  if (byKey.requestFingerprint && byKey.requestFingerprint !== fingerprint) {
+    return NextResponse.json(
+      { error: "This idempotency key was already used for a different checkout.", code: "IDEMPOTENCY_CONFLICT" },
+      { status: 409 }
+    );
+  }
+  if (byKey.status === PaymentStatus.PENDING) {
+    const checkoutUrl = await resumeCheckoutUrl(byKey, origin);
+    if (!checkoutUrl) {
+      return NextResponse.json({ error: "Payment provider unavailable. Try again." }, { status: 502 });
+    }
+    return NextResponse.json({ paymentId: byKey.id, status: "pending", checkoutUrl });
+  }
+  return NextResponse.json({ paymentId: byKey.id, status: byKey.status.toLowerCase() });
+}
+
+export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
     return NextResponse.json({ error: "Payments are paused — join the waitlist.", waitlist: true }, { status: 403 });
   }
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "0.0.0.0";
+  if (whopPartiallyConfigured()) {
+    console.warn("checkout: partial Whop configuration (key without secret or vice versa) — running in dev provider mode");
+  }
+  const ip = clientIp(req.headers);
   // Abuse: 5 checkout attempts / IP / hour (spec 03). 429, never 500.
-  if (!rateLimit(`checkout:${ip}`, 5, 3_600_000)) {
+  if (!(await rateLimitAsync(`checkout:${ip}`, 5, 3_600_000))) {
     return NextResponse.json({ error: "Too many checkout attempts. Try again later." }, { status: 429 });
   }
   let body: Body;
@@ -62,17 +139,6 @@ export async function POST(req: NextRequest) {
   }
   const email = typeof body.email === "string" && body.email.includes("@") ? body.email.trim() : null;
 
-  const element = await prisma.element.findUnique({ where: { symbol: elementSym } });
-  if (!element) return NextResponse.json({ error: "Element not found." }, { status: 404 });
-
-  // Re-validate pricing against the LIVE leaderboard (client quote can be stale).
-  const stakes = await prisma.stake.findMany({
-    where: { elementId: element.id },
-    orderBy: { amountUsd: "desc" },
-    select: { amountUsd: true, startupId: true },
-  });
-  const leaderTotal = stakes[0]?.amountUsd as number | undefined;
-
   const input = validateCheckoutInput({
     url: body.startup?.url,
     linkType: body.startup?.linkType,
@@ -81,88 +147,191 @@ export async function POST(req: NextRequest) {
   });
   if (!input.ok) return NextResponse.json({ error: input.error, field: input.field }, { status: 400 });
 
-  // Identity: prefer explicit domain, else derive from URL; a startup is "new"
-  // on this element when it has no stake there yet.
-  const domain = (body.startup?.domain ?? input.domain).toLowerCase();
-  const existing = await prisma.startup.findUnique({ where: { domain } });
-  const myStake = stakes.find((s) => s.startupId === existing?.id);
-  const isNewHere = !myStake;
+  // Identity (Phase 1): canonical domain comes ONLY from the validated
+  // URL/handle. A caller-provided startup.domain is ignored.
+  const domain = input.domain.toLowerCase();
+  const fingerprint = fingerprintCheckout({ elementSym, domain, amountUsd, email });
 
-  const vErr = validateTopUp(amountUsd, leaderTotal, isNewHere);
-  if (vErr) {
-    // 409 = price moved / minimum not met. Include live takeLead so the modal
-    // can show "Price moved to $X — continue?" instead of charging stale.
-    return NextResponse.json(
-      { error: vErr, takeLead: leaderTotal != null ? leaderTotal + 1 : joinMin() },
-      { status: 409 }
-    );
-  }
-  if (isNewHere && amountUsd < joinMin()) {
-    return NextResponse.json({ error: `First stake on ${element.symbol} is $${joinMin()}+.` }, { status: 409 });
-  }
-
-  // Upsert startup identity
-  const startup = await prisma.startup.upsert({
-    where: { domain },
-    create: {
-      domain,
-      title: (body.startup?.title ?? input.title ?? domain).slice(0, 32),
-      pitch: (body.startup?.pitch ?? input.pitch ?? "").slice(0, 140),
-      url: input.url,
-      linkType: input.linkType,
-      logoUrl: `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-      ...(email ? { email } : {}),
-    },
-    update: {
-      ...(email ? { email } : {}),
-      url: input.url,
-      linkType: input.linkType,
-    },
-  });
-
-  const path: "take" | "join" | "stake" =
-    isNewHere && leaderTotal != null && amountUsd > leaderTotal ? "take" : isNewHere ? "join" : "stake";
-
-  // Idempotency: same key returns the original payment without creating a duplicate.
+  // Idempotency FIRST (P1-03): resolve the key before any mutable operation.
+  // Matching retries return the stored payment (+ resumable URL); key reuse
+  // with a different payload is rejected.
   const byKey = await prisma.payment.findUnique({ where: { idempotencyKey } });
   if (byKey) {
-    return NextResponse.json({
-      paymentId: byKey.id,
-      status: byKey.status,
-      ...(byKey.status === "pending" ? { checkoutUrl: `/pay/${byKey.id}` } : {}),
-    });
+    return await idempotentReplay(byKey, fingerprint, req.nextUrl.origin);
   }
 
-  const payment = await prisma.payment.create({
-    data: {
-      stakeId: "pending",
-      elementId: element.id,
-      startupId: startup.id,
-      amountUsd,
-      path,
-      provider: whopEnabled() ? "whop" : "dev",
-      idempotencyKey,
-      ...(email ? { email } : {}),
-    },
+  const element = await prisma.element.findUnique({ where: { symbol: elementSym } });
+  if (!element) return NextResponse.json({ error: "Element not found." }, { status: 404 });
+
+  const existing = await prisma.startup.findUnique({ where: { domain } });
+
+  // Locked quote (P0-05): re-read the leaderboard under a per-element
+  // advisory lock, re-validate the price, check reservations, and create the
+  // payment (+ reservation) atomically. Retries outside the lock may be stale.
+  //
+  // Unique-race recovery (P1-03): two concurrent checkouts can both miss the
+  // idempotency lookup or both see a free element. The loser gets P2002; the
+  // aborted tx is discarded and the winner's row is replayed — never a 500.
+  let quoted;
+  try {
+    quoted = await withTxnRetry(() =>
+      prisma.$transaction(
+        async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${element.id})`;
+    await releaseExpiredReservations(tx);
+
+    const stakes = await tx.stake.findMany({
+      where: { elementId: element.id },
+      orderBy: [{ amountUsd: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { amountUsd: true, startupId: true },
+    });
+    const leaderTotal = stakes[0]?.amountUsd as number | undefined;
+    const leaderStartupId = stakes[0]?.startupId as string | undefined;
+    const myStake = existing ? stakes.find((s) => s.startupId === existing.id) : undefined;
+    const isNewHere = !myStake;
+    const myPriorTotal = myStake ? (myStake.amountUsd as number) : 0;
+    const existingTotals = stakes.map((s) => s.amountUsd as number);
+
+    // Phase 3: single classify+validate source (pre-check ran unlocked; this
+    // re-runs authoritatively under the lock).
+    const classified = classifyAndValidate({ amount: amountUsd, leaderTotal, isNewHere, myPriorTotal, existingTotals });
+    if (!classified.ok) {
+      return {
+        ok: false as const,
+        status: 409,
+        body: {
+          error: classified.error,
+          code: classified.code,
+          takeLead: leaderTotal != null ? leaderTotal + 1 : joinMin(),
+        },
+      };
+    }
+    const path: PaymentPath =
+      classified.path === "TAKE"
+        ? PaymentPath.TAKE
+        : classified.path === "JOIN"
+          ? PaymentPath.JOIN
+          : classified.path === "RECLAIM"
+            ? PaymentPath.RECLAIM
+            : PaymentPath.STAKE;
+
+    // Reservation conflict (one ACTIVE take quote per element).
+    const active = await getActiveReservation(tx, element.id);
+    const conflict = reservationConflict({
+      reservation: active,
+      myStartupId: existing?.id ?? null,
+      myPriorTotal,
+      addUsd: amountUsd,
+    });
+    if (conflict.conflict) {
+      return {
+        ok: false as const,
+        status: 409,
+        body: {
+          error: `This element has a held take quote at $${conflict.reservedTotal}. Refresh for a new quote.`,
+          code: "RESERVATION_CONFLICT",
+          reservedTotal: conflict.reservedTotal,
+          expiresAt: conflict.expiresAt.toISOString(),
+        },
+      };
+    }
+
+    // Ownership (Phase 1): existing profiles are IMMUTABLE here.
+    const { startup } = await findOrCreateCheckoutStartup(
+      {
+        domain,
+        title: input.title,
+        pitch: input.pitch,
+        url: input.url,
+        linkType: input.linkType,
+        email,
+      },
+      tx
+    );
+
+    const payment = await tx.payment.create({
+      data: {
+        elementId: element.id,
+        startupId: startup.id,
+        amountUsd,
+        path,
+        provider: getProviderMode() === "whop" ? PaymentProvider.WHOP : PaymentProvider.DEV,
+        idempotencyKey,
+        requestFingerprint: fingerprint,
+        ...(email ? { email } : {}),
+      },
+    });
+
+    // Contested takes hold a short-lived guaranteed quote (P0-05). Empty-tile
+    // first claims need no reservation — concurrent $5 joins must succeed.
+    // NOTE: no P2002 catch here — a unique violation inside an interactive
+    // transaction poisons the whole tx. The residual insert race is handled
+    // by the outer P2002 recovery below (abort + 409).
+    let reservation: { reservedTotal: number; expiresAt: string } | null = null;
+    if (path === PaymentPath.TAKE && leaderTotal != null) {
+      const reservedTotal = leaderTotal + 1;
+      const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS);
+      await tx.claimReservation.create({
+        data: {
+          elementId: element.id,
+          startupId: startup.id,
+          paymentId: payment.id,
+          quotedLeaderTotal: leaderTotal,
+          quotedLeaderStartupId: leaderStartupId ?? null,
+          reservedTotal,
+          status: ReservationStatus.ACTIVE,
+          expiresAt,
+        },
+      });
+      reservation = { reservedTotal, expiresAt: expiresAt.toISOString() };
+    }
+
+    return { ok: true as const, payment, startupTitle: startup.title, reservation };
+        },
+        { isolationLevel: "Serializable" }
+      )
+    );
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") {
+      // Lost a unique race (duplicate key or duplicate ACTIVE quote): replay
+      // the winner instead of 500ing (P1-03).
+      const winner = await prisma.payment.findUnique({ where: { idempotencyKey } });
+      if (winner) return await idempotentReplay(winner, fingerprint, req.nextUrl.origin);
+      const current = await getActiveReservation(prisma, element.id);
+      return NextResponse.json(
+        {
+          error: "This element just received a held take quote. Refresh for a new quote.",
+          code: "RESERVATION_CONFLICT",
+          ...(current ? { reservedTotal: current.reservedTotal, expiresAt: current.expiresAt.toISOString() } : {}),
+        },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
+
+  if (!quoted.ok) return NextResponse.json(quoted.body, { status: quoted.status });
+
+  await audit({
+    action: "CHECKOUT_STARTED",
+    startupId: quoted.payment.startupId,
+    elementId: element.id,
+    paymentId: quoted.payment.id,
+    detail: `${quoted.payment.path} $${amountUsd}`,
   });
 
-  if (whopEnabled()) {
-    const session = await createWhopCheckoutSession({
-      paymentId: payment.id,
-      amountUsd,
-      title: startup.title,
-      elementSymbol: element.symbol,
-      email,
-      redirectAfterPaid: `${req.nextUrl.origin}/?paid=${element.symbol}`,
-    });
-    if (session) {
-      await prisma.payment.update({ where: { id: payment.id }, data: { providerRef: session.providerRef } });
-      return NextResponse.json({ paymentId: payment.id, checkoutUrl: session.checkoutUrl, provider: "whop" });
-    }
-    // Whop API failed — keep the pending payment; client shows a retryable error.
+  const checkoutUrl = await resumeCheckoutUrl(quoted.payment, req.nextUrl.origin);
+  if (!checkoutUrl) {
+    // Provider session creation failed — the pending payment stays retryable
+    // via the same idempotency key; no dead URL is handed out (P1-04).
     return NextResponse.json({ error: "Payment provider unavailable. Try again." }, { status: 502 });
   }
-
-  // Dev simulator path (no Whop keys): /pay/[paymentId] applies on "pay".
-  return NextResponse.json({ paymentId: payment.id, checkoutUrl: `/pay/${payment.id}`, provider: "dev" });
+  return NextResponse.json({
+    paymentId: quoted.payment.id,
+    checkoutUrl,
+    provider: getProviderMode(),
+    ...(quoted.reservation
+      ? { reservation: { ...quoted.reservation, guaranteedTake: true } }
+      : {}),
+  });
 }

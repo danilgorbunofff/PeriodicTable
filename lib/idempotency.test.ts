@@ -28,8 +28,13 @@ describe("whop payload helpers", () => {
     expect(whopPayloadIsPaid({ data: { status: "completed" } })).toBe(true);
     expect(whopPayloadIsPaid({ data: { payment: { status: "paid" } } })).toBe(true);
     expect(whopPayloadIsPaid({ data: { status: "failed" } })).toBe(false);
-    // membership.paid-style events without status fields default to paid
+    // Phase 2 (P0-03, fail-closed): allowlisted event types count without status fields…
     expect(whopPayloadIsPaid({ event: "membership.paid" })).toBe(true);
+    // …but statusless, unlisted events must NOT apply a stake.
+    expect(whopPayloadIsPaid({ event: "something.else" })).toBe(false);
+    expect(whopPayloadIsPaid({})).toBe(false);
+    expect(whopPayloadIsPaid({ data: { status: "pending" } })).toBe(false);
+    expect(whopPayloadIsPaid({ data: { status: "refunded" } })).toBe(false);
   });
   it("rejects bad signatures without secret", () => {
     const prev = process.env.WHOP_WEBHOOK_SECRET;
@@ -84,11 +89,17 @@ describe("click rate limiting (spec 03: 1/IP/stake/10s, 30/IP/hr)", () => {
 });
 
 describe("double-delivery guard (static contract)", () => {
-  it("markPaidAndApply uses a conditional pending→paid updateMany (single-winner)", () => {
-    const src = readFileSync(join(__dirname, "applyPayment.ts"), "utf8");
-    // The idempotent claim must filter on status:"pending" and check claimed.count === 0.
-    expect(src).toMatch(/updateMany\(\{[\s\S]*where:[\s\S]*id:\s*paymentId,[\s\S]*status:\s*"pending"/);
-    expect(src).toMatch(/claimed\.count\s*===\s*0/);
+  it("settlePayment dedupes on provider event id (single-winner)", () => {
+    const src = readFileSync(join(__dirname, "settle.ts"), "utf8");
+    // The event claim must precede settlement and short-circuit duplicates.
+    expect(src).toMatch(/providerEvent\.findUnique\(\{[\s\S]*providerEventId:\s*event\.eventId/);
+    expect(src).toMatch(/outcome:\s*"duplicate"/);
+  });
+  it("settlePayment commits paid-transition and stake atomically", () => {
+    const src = readFileSync(join(__dirname, "settle.ts"), "utf8");
+    expect(src).toMatch(/pg_advisory_xact_lock/);
+    expect(src).toMatch(/applyStakeTx\([\s\S]*,\s*tx\s*\)/);
+    expect(src).toMatch(/enqueueOutbox/);
   });
   it("checkout route dedupes on idempotencyKey before creating a payment", () => {
     const src = readFileSync(join(__dirname, "..", "app", "api", "checkout", "route.ts"), "utf8");

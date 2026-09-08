@@ -1,5 +1,9 @@
-// periodictable.lol — Phase 2 ledger schema (ROADMAP §9)
-// Element ids: 1..118 real, -1 Hbar, 0 Ps, 119 Uue, 999 DM (no autoincrement — inserted explicitly)
+// periodictable.lol — Phase 2 ledger schema (ROADMAP §9) + Phase 1 remediation
+// (ownership, reservations, durable work). Element ids: 1..118 real, -1 Hbar,
+// 0 Ps, 119 Uue, 999 DM (no autoincrement — inserted explicitly).
+//
+// Enum labels stay lowercase (@map) so existing rows convert without rewrites
+// and wire JSON keeps its contract; TypeScript uses the enum members.
 
 generator client {
   provider = "prisma-client-js"
@@ -30,81 +34,309 @@ enum PrestigeTier {
   EXOTIC
 }
 
+// Payment lifecycle. CANCELED is reserved for Phase 2 (expired reservations).
+enum PaymentStatus {
+  PENDING  @map("pending")
+  PAID     @map("paid")
+  FAILED   @map("failed")
+  REFUNDED @map("refunded")
+  CANCELED @map("canceled")
+}
+
+// Which ladder position the payment bought. RECLAIM is written by Phase 2+.
+enum PaymentPath {
+  TAKE    @map("take")
+  JOIN    @map("join")
+  STAKE   @map("stake")
+  RECLAIM @map("reclaim")
+}
+
+enum PaymentProvider {
+  WHOP @map("whop")
+  DEV  @map("dev")
+}
+
+// Short-lived take-lead quote guarantees (Phase 2 acquires/consumes these).
+enum ReservationStatus {
+  ACTIVE   @map("active")
+  CONSUMED @map("consumed")
+  EXPIRED  @map("expired")
+  CANCELED @map("canceled")
+}
+
+// Public visibility of a startup listing (Phase 6 moderation consumes this).
+enum ModerationState {
+  VISIBLE  @map("visible")
+  HIDDEN   @map("hidden")
+  UNLISTED @map("unlisted")
+}
+
+enum ReportStatus {
+  OPEN      @map("open")
+  TRIAGED   @map("triaged")
+  ACTIONED  @map("actioned")
+  DISMISSED @map("dismissed")
+}
+
+// Webhook/event processing outcome (Phase 2: every provider delivery is recorded).
+enum ProviderEventOutcome {
+  RECEIVED  @map("received")
+  APPLIED   @map("applied")
+  DUPLICATE @map("duplicate")
+  IGNORED   @map("ignored")
+  FAILED    @map("failed")
+  ERROR     @map("error")
+}
+
 model Element {
-  id              Int            @id // 1..118, -1 Hbar, 0 Ps, 119 Uue, 999 DM
-  symbol          String         @unique
+  id              Int                @id // 1..118, -1 Hbar, 0 Ps, 119 Uue, 999 DM
+  symbol          String             @unique
   name            String
   atomicMass      String
   gridRow         Int
   gridCol         Int
   family          ChemicalFamily
-  tier            PrestigeTier   @default(STANDARD)
-  totalPoolUsd    Int            @default(0)
-  stakeCount      Int            @default(0)
+  tier            PrestigeTier       @default(STANDARD)
+  totalPoolUsd    Int                @default(0)
+  stakeCount      Int                @default(0)
   currentLeaderId String?
+  leader          Startup?           @relation("ElementLeader", fields: [currentLeaderId], references: [id])
   stakes          Stake[]
+  payments        Payment[]
+  reservations    ClaimReservation[]
+  firstClaim      FirstClaim?
+  auditLogs       AuditLog[]
 
   @@index([family])
   @@index([tier])
 }
 
 model Startup {
-  id            String   @id @default(cuid())
-  domain        String   @unique
-  title         String   @db.VarChar(32)
-  pitch         String   @db.VarChar(140)
-  url           String
-  linkType      String   @default("product") // product | social
-  logoUrl       String
-  previewImgUrl String?
-  email         String? // notification target for outbid/receipt
-  unsubToken    String   @default(cuid()) // GET /api/unsubscribe?token=... clears email
-  claimedAt     DateTime @default(now())
-  stakes        Stake[]
+  id              String             @id @default(cuid())
+  domain          String             @unique
+  title           String             @db.VarChar(32)
+  pitch           String             @db.VarChar(140)
+  url             String
+  linkType        String             @default("product") // product | social
+  logoUrl         String
+  previewImgUrl   String?
+  email           String? // notification target for outbid/receipt
+  unsubToken      String             @unique @default(cuid()) // GET /api/unsubscribe?token=... clears email
+  claimedAt       DateTime           @default(now())
+  moderationState ModerationState    @default(VISIBLE)
+  moderatedBy     String?
+  moderatedReason String?
+  moderatedAt     DateTime?
+  restoredAt      DateTime?
+  stakes          Stake[]
+  ledElements     Element[]          @relation("ElementLeader")
+  payments        Payment[]
+  reservations    ClaimReservation[]
+  manageTokens    ManageToken[]
+  manageSessions  ManageSession[]
+  firstClaims     FirstClaim[]
+  reports         Report[]
+  auditLogs       AuditLog[]
 }
 
 model Stake {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
   elementId       Int
-  element         Element  @relation(fields: [elementId], references: [id])
+  element         Element      @relation(fields: [elementId], references: [id])
   startupId       String
-  startup         Startup  @relation(fields: [startupId], references: [id])
+  startup         Startup      @relation(fields: [startupId], references: [id])
   amountUsd       Int // cumulative total, integer dollars
-  clicksDelivered Int      @default(0)
-  rank            Int      @default(99)
-  isLeader        Boolean  @default(false)
-  updatedAt       DateTime @updatedAt
+  clicksDelivered Int          @default(0)
+  rank            Int          @default(99)
+  isLeader        Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  payments        Payment[]
+  clickEvents     ClickEvent[]
+  reports         Report[]
+  firstClaim      FirstClaim?
 
   @@unique([elementId, startupId])
   @@index([elementId, amountUsd(sort: Desc)])
 }
 
 model Payment {
-  id             String    @id @default(cuid())
-  stakeId        String
-  elementId      Int
-  startupId      String
-  amountUsd      Int
-  path           String    @default("take") // take | join
-  provider       String    // whop | dev
-  providerRef    String?   @unique // provider session/charge id — nullable until paid
-  idempotencyKey String    @unique
-  status         String    @default("pending") // pending | paid | failed | refunded
-  email          String?   // payer email captured at checkout
-  createdAt      DateTime  @default(now())
-  paidAt         DateTime?
+  id                  String             @id @default(cuid())
+  stakeId             String?
+  stake               Stake?             @relation(fields: [stakeId], references: [id])
+  elementId           Int
+  element             Element            @relation(fields: [elementId], references: [id])
+  startupId           String
+  startup             Startup            @relation(fields: [startupId], references: [id])
+  amountUsd           Int
+  path                PaymentPath        @default(TAKE)
+  provider            PaymentProvider
+  providerRef         String?            @unique // provider session/charge id — nullable until paid
+  providerEventId     String?            @unique // last applied provider event (Phase 2 replay guard)
+  providerAmount      Int? // provider-reported amount for audit (Phase 2 validates)
+  providerCurrency    String? // provider-reported currency for audit (Phase 2 validates)
+  providerCheckoutUrl String? // resumable provider session URL (Phase 2 writes)
+  idempotencyKey      String             @unique
+  requestFingerprint  String? // sha256 of canonical request (Phase 2 binds retries)
+  status              PaymentStatus      @default(PENDING)
+  email               String? // payer email captured at checkout
+  createdAt           DateTime           @default(now())
+  paidAt              DateTime?
+  appliedAt           DateTime? // stake durably applied (Phase 2 sets atomically with paid)
+  failedAt            DateTime?
+  reservations        ClaimReservation[]
+  auditLogs           AuditLog[]
+  providerEvents      ProviderEvent[]
+  activityLogs        ActivityLog[]
 
   @@index([startupId, status])
 }
 
+// Guaranteed take-lead quote: one ACTIVE reservation per element (enforced by
+// a partial unique index in the migration — Prisma has no partial indexes).
+// Phase 2 acquires/consumes these; Phase 1 only defines the record.
+model ClaimReservation {
+  id                    String            @id @default(cuid())
+  elementId             Int
+  element               Element           @relation(fields: [elementId], references: [id])
+  startupId             String
+  startup               Startup           @relation(fields: [startupId], references: [id])
+  paymentId             String            @unique
+  payment               Payment           @relation(fields: [paymentId], references: [id])
+  quotedLeaderTotal     Int // leader total at quote time (0 when tile was empty)
+  quotedLeaderStartupId String? // who led at quote time (null when tile was empty)
+  reservedTotal         Int // guaranteed winning total (leader + 1, or 5 on empty)
+  status                ReservationStatus @default(ACTIVE)
+  expiresAt             DateTime
+  createdAt             DateTime          @default(now())
+  consumedAt            DateTime?
+
+  @@index([elementId, status])
+  @@index([expiresAt])
+}
+
+// Email magic-link management: hashed one-time token per request. Delivery is
+// via email in production; the raw token is returned by the API in
+// non-production only (see lib/manage.ts).
+model ManageToken {
+  id         String    @id @default(cuid())
+  startupId  String
+  startup    Startup   @relation(fields: [startupId], references: [id])
+  email      String // target notification address the link was sent to
+  tokenHash  String    @unique // sha256 hex of the opaque token
+  purpose    String    @default("profile-manage")
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([startupId])
+}
+
+// Verified management session, minted by consuming a ManageToken. The raw
+// token lives in an httpOnly cookie; only the hash is stored.
+model ManageSession {
+  id        String   @id @default(cuid())
+  startupId String
+  startup   Startup  @relation(fields: [startupId], references: [id])
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([startupId])
+}
+
+model WaitlistEntry {
+  id        String   @id @default(cuid())
+  email     String   @unique // normalized lowercase
+  domain    String? // normalized optional interest
+  source    String   @default("checkout-paused")
+  consentAt DateTime @default(now())
+  createdAt DateTime @default(now())
+}
+
+// Durable outbox for receipt/outbid email, preview generation, analytics.
+// Phase 6 processes these; financial transactions only enqueue.
+model OutboxEvent {
+  id            String    @id @default(cuid())
+  type          String // RECEIPT_EMAIL | OUTBID_EMAIL | PREVIEW_GENERATE | ...
+  payload       Json
+  dedupeKey     String    @unique
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  completedAt   DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([nextAttemptAt])
+  @@index([type, completedAt])
+}
+
+// Immutable first-claimer record per element (Early Adopter board source).
+// source: 'ledger' (runtime) | 'backfill' (migration) | 'seed' (demo data).
+model FirstClaim {
+  elementId  Int      @id
+  element    Element  @relation(fields: [elementId], references: [id])
+  startupId  String
+  startup    Startup  @relation(fields: [startupId], references: [id])
+  stakeId    String?  @unique
+  stake      Stake?   @relation(fields: [stakeId], references: [id])
+  claimedAt  DateTime
+  source     String
+  confidence String // HIGH | MEDIUM
+  createdAt  DateTime @default(now())
+}
+
+// Append-only audit trail for profile, payment-adjacent, moderation, and
+// management mutations. action is an open vocabulary (new actions must not
+// require a migration); state machines use enums, not this log.
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String // STARTUP_CREATED | CHECKOUT_STARTED | PROFILE_UPDATED | ...
+  startupId String?
+  startup   Startup? @relation(fields: [startupId], references: [id])
+  actorType String   @default("system") // system | owner | operator
+  actorRef  String?
+  elementId Int?
+  element   Element? @relation(fields: [elementId], references: [id])
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([startupId, createdAt])
+  @@index([createdAt(sort: Desc)])
+}
+
+// Every provider delivery, recorded with its processing outcome (Phase 2).
+// providerEventId is globally unique ("{provider}:{event-id}") so replays and
+// cross-payment mismatches are deterministic.
+model ProviderEvent {
+  id              String               @id @default(cuid())
+  provider        PaymentProvider
+  providerEventId String               @unique
+  eventType       String
+  paymentId       String?
+  payment         Payment?             @relation(fields: [paymentId], references: [id])
+  outcome         ProviderEventOutcome @default(RECEIVED)
+  detail          String?
+  payload         Json?
+  createdAt       DateTime             @default(now())
+
+  @@index([paymentId, createdAt])
+}
+
 model ActivityLog {
-  id            String   @id @default(cuid())
-  domain        String
-  elementSymbol String
-  amountUsd     Int
-  kind          String   @default("stake") // stake | reclaim | join
-  city          String?
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  domain         String
+  elementSymbol  String
+  amountUsd      Int // legacy: cumulative total (kept); prefer delta/result fields
+  deltaUsd       Int? // payment delta for this event (Phase 3+; null = pre-Phase-3 history)
+  resultTotalUsd Int? // resulting cumulative total after this event
+  kind           String   @default("stake") // stake | reclaim | join
+  city           String?
+  paymentId      String?
+  payment        Payment? @relation(fields: [paymentId], references: [id])
+  createdAt      DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
 }
@@ -112,6 +344,7 @@ model ActivityLog {
 model ClickEvent {
   id        String   @id @default(cuid())
   stakeId   String
+  stake     Stake    @relation(fields: [stakeId], references: [id])
   ipHash    String
   userAgent String?
   createdAt DateTime @default(now())
@@ -125,7 +358,7 @@ model EmailLog {
   template      String // outbid | receipt
   elementSymbol String?
   amountUsd     Int?
-  status        String @default("sent") // sent | suppressed | error
+  status        String   @default("sent") // sent | suppressed | error
   detail        String?
   createdAt     DateTime @default(now())
 
@@ -133,12 +366,20 @@ model EmailLog {
 }
 
 model Report {
-  id        String   @id @default(cuid())
-  stakeId   String?
-  domain    String?
-  reason    String   @db.VarChar(280)
-  ipHash    String?
-  createdAt DateTime @default(now())
+  id         String       @id @default(cuid())
+  stakeId    String?
+  stake      Stake?       @relation(fields: [stakeId], references: [id])
+  startupId  String?
+  startup    Startup?     @relation(fields: [startupId], references: [id])
+  domain     String?
+  reason     String       @db.VarChar(280)
+  status     ReportStatus @default(OPEN)
+  reviewedBy String?
+  reviewedAt DateTime?
+  note       String?      @db.VarChar(500) // operator triage detail (P1-20 runbook)
+  ipHash     String?
+  createdAt  DateTime     @default(now())
 
+  @@index([status, createdAt])
   @@index([createdAt(sort: Desc)])
 }

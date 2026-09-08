@@ -1,22 +1,33 @@
-import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { apiJson } from "@/lib/route";
+import type { StatsResponse } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-let cache: { at: number; data: { elementsLive: number; totalBids: number; onSale: number } } | null = null;
+let cache: { at: number; data: StatsResponse } | null = null;
 const TTL = 30_000;
 
+/**
+ * Homepage stats with exact quantities and units (Phase 4, P1-09):
+ * total tiles, claimed tiles, unclaimed tiles, total stake rows, and total
+ * staked USD (summed — not a row count wearing a dollar sign).
+ */
 export async function GET() {
   if (cache && Date.now() - cache.at < TTL) {
-    return NextResponse.json(cache.data);
+    return apiJson(cache.data);
   }
-  const [elementsLive, stakes] = await Promise.all([
+  const [elementsTotal, claimedElements, pool] = await Promise.all([
     prisma.element.count(),
-    prisma.stake.findMany({ select: { startupId: true }, distinct: ["startupId"] }),
+    prisma.element.count({ where: { stakeCount: { gt: 0 } } }),
+    prisma.stake.aggregate({ _count: { _all: true }, _sum: { amountUsd: true } }),
   ]);
-  const totalBids = await prisma.stake.count();
-  const onSale = stakes.length;
-  const data = { elementsLive, totalBids, onSale };
+  const data: StatsResponse = {
+    elementsTotal,
+    claimedElements,
+    unclaimedElements: elementsTotal - claimedElements,
+    stakeCount: pool._count._all,
+    totalStakedUsd: pool._sum.amountUsd ?? 0,
+  };
   cache = { at: Date.now(), data };
-  return NextResponse.json(data);
+  return apiJson(data);
 }

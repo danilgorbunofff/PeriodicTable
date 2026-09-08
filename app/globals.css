@@ -70,6 +70,17 @@ body {
   .animate-modal-backdrop {
     animation: none !important;
   }
+  /* Phase 5: all nonessential movement — camera transitions are forced off
+     in JS (TableCamera), ping/feedback loops die here. */
+  .animate-ping {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .tile-lift {

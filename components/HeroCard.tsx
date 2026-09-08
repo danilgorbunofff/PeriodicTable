@@ -27,7 +27,7 @@ export function HeroCard({
         </ChunkyButton>
         <IconBtn label="Board" onClick={onBoard}>🏆</IconBtn>
         <IconBtn label="How it works" onClick={onHow}>i</IconBtn>
-        <IconBtn label="Search" active={searchOpen} onClick={onSearchToggle}>🔍</IconBtn>
+        <IconBtn label="Search" active={searchOpen} onClick={onSearchToggle} id="chrome-search-toggle">🔍</IconBtn>
       </div>
     </Card>
   );

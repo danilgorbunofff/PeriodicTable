@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import useSWR from "swr";
-import { fetcher, type Claim, type ActivityRow } from "../lib/api";
+import { fetchJson, isStatsResponse, isActivityRows, type Claim, type ActivityRow, type StatsResponse } from "../lib/api";
 import { PeriodicGrid } from "../components/PeriodicGrid";
 import { TableCamera } from "../components/TableCamera";
 import { ELEMENTS, ElementNode } from "../lib/elements";
@@ -11,7 +11,7 @@ import { StatsCard } from "../components/StatsCard";
 import { ActivityCard } from "../components/ActivityCard";
 import { WorldOrder, RailShell } from "../components/WorldOrder";
 import { TerritoryView } from "../components/TerritoryView";
-import { HowItWorks, CheckoutMock, BoardMock } from "../components/Modals";
+import { HowItWorks, CheckoutPreview, BoardPreview } from "../components/Modals";
 import { Modal } from "../components/Modal";
 import { ToastHost, useToast } from "../components/Toast";
 import { FooterBar } from "../components/FooterBar";
@@ -42,13 +42,11 @@ function HomeInner() {
   const [expandOpen, setExpandOpen] = useState(false);
 
   // live table data (30s poll)
-  const { data: tiles, mutate: mutateTiles } = useSWR<Tile[]>("/api/elements", fetcher, { refreshInterval: 30000 });
-  const { data: statsData, mutate: mutateStats } = useSWR<{ elementsLive: number; totalBids: number; onSale: number }>(
-    "/api/stats",
-    fetcher,
-    { refreshInterval: 30000 }
-  );
-  const { data: activity, mutate: mutateActivity } = useSWR<ActivityRow[]>("/api/activity?limit=6", fetcher, {
+  const { data: tiles, mutate: mutateTiles } = useSWR<Tile[]>("/api/elements", fetchJson, { refreshInterval: 30000 });
+  const { data: statsData, mutate: mutateStats } = useSWR<StatsResponse>("/api/stats", (url: string) => fetchJson(url, isStatsResponse), {
+    refreshInterval: 30000,
+  });
+  const { data: activity, mutate: mutateActivity } = useSWR<ActivityRow[]>("/api/activity?limit=6", (url: string) => fetchJson(url, isActivityRows), {
     refreshInterval: 30000,
   });
 
@@ -99,8 +97,8 @@ function HomeInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const claimedCount = statsData?.onSale ?? 0;
-  const totalBids = statsData?.totalBids ?? 0;
+  const claimedCount = statsData?.claimedElements ?? 0;
+  const totalStakedUsd = statsData?.totalStakedUsd ?? 0;
 
   const openStake = useCallback((el: ElementNode, amount: number) => {
     setCheckoutEl(el);
@@ -121,6 +119,8 @@ function HomeInner() {
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Phase 5: open modals own Escape (see Modal) — never double-handle.
+      if (document.body.hasAttribute("data-modal-open")) return;
       if (expandOpen) setExpandOpen(false);
       else if (searchOpen) setSearchOpen(false);
       else if (checkoutEl) setCheckoutEl(null);
@@ -140,7 +140,7 @@ function HomeInner() {
   };
 
   return (
-    <div className="stage-shell relative h-screen overflow-hidden text-ink">
+    <div id="app-root" className="stage-shell relative h-screen overflow-hidden text-ink">
       <TableCamera focusId={selected?.id ?? null}>
         <div className="periodic-object p-2">
           <PeriodicGrid
@@ -170,7 +170,7 @@ function HomeInner() {
 
       {/* stats */}
       <div className="absolute right-[18px] top-[18px] z-[var(--z-cards)] hidden sm:block">
-        <StatsCard totalBids={totalBids} claimedCount={claimedCount} elementsLive={statsData?.elementsLive ?? 122} />
+        <StatsCard totalStakedUsd={totalStakedUsd} claimedCount={claimedCount} elementsLive={statsData?.elementsTotal ?? 122} />
       </div>
 
       {/* activity — desktop */}
@@ -246,7 +246,7 @@ function HomeInner() {
       </div>
 
       <HowItWorks open={howOpen} onClose={() => setHowOpen(false)} />
-      <BoardMock open={boardOpen} onClose={() => setBoardOpen(false)} />
+      <BoardPreview open={boardOpen} onClose={() => setBoardOpen(false)} />
       <Modal
         open={expandOpen}
         onClose={() => setExpandOpen(false)}
@@ -267,7 +267,7 @@ function HomeInner() {
           <WorldOrder expanded />
         )}
       </Modal>
-      <CheckoutMock
+      <CheckoutPreview
         el={checkoutEl}
         open={!!checkoutEl}
         amount={checkoutAmt}

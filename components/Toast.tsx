@@ -15,7 +15,8 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[var(--z-toast)] flex flex-col gap-2 items-center">
+      {/* Polite status announcements (Phase 5): toasts are status updates. */}
+      <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[var(--z-toast)] flex flex-col gap-2 items-center">
         {toasts.map((t) => (
           <div key={t.id} className="bg-ink text-white text-sm font-bold rounded-full px-4 py-2 shadow-card">
             {t.msg}

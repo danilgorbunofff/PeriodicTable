@@ -1,36 +1,165 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# periodictable.lol
 
-## Getting Started
+King-of-the-Hill staking ads on a living periodic table — a worldmap.lol twin.
+Every element is an open multi-tenant leaderboard ranked by total stake:
+plant a flag from $5, take the #1 crown at current-leader + $1, top up to reclaim.
 
-First, run the development server:
+- Product authority: `doc/ROADMAP.md`
+- Visual authority: `doc/DESIGN-SYSTEM.md` (wins on any look conflict)
+- Audit + hardening plan: `doc/project-review/plan.md` (payments stay **off** until all release gates pass)
+- Runbooks: `ops/rollback.md`, `ops/takedown.md`
+
+## Stack
+
+Next.js 14 App Router + Tailwind, Prisma 6 + Postgres, Whop (payments),
+Resend (email), Cloudflare Turnstile (bot checks). Hosting: Vercel.
+
+## Local setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci
+cp .env.example .env   # then fill DATABASE_URL (below)
+npx prisma migrate deploy
+npx tsx prisma/seed.ts # 122 elements + demo stakes (optional)
+npm run dev            # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Any Postgres 16 works (Neon/Supabase pooled URI for serverless, local
+`postgres:16-alpine` via Docker for offline work).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Var | Dev | Production |
+|---|---|---|
+| `DATABASE_URL` | required | required |
+| `WHOP_API_KEY` / `WHOP_WEBHOOK_SECRET` | optional (absent = dev pay simulator) | **required** |
+| `NEXT_PUBLIC_APP_URL` | default localhost | **required, https** |
+| `TURNSTILE_SECRET` | optional (absent = checks pass locally) | **required** |
+| `CLICK_SALT` | default dev salt | **required, private random** |
+| `CRON_SECRET` | optional locally | **required** |
+| `RESEND_API_KEY` / `EMAIL_FROM` | optional (absent = emails logged, not sent) | **required** |
+| `PAYMENTS_LIVE` / `NEXT_PUBLIC_PAYMENTS_LIVE` | default live (simulator) | **fail-closed**: payments run only when explicitly `"true"` **and** Whop keys are set |
 
-## Learn More
+Validate production config explicitly (used by CI and the deploy runbook):
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+node scripts/check-prod-env.mjs
+VERCEL_ENV=production NODE_ENV=production node scripts/check-prod-env.mjs
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Database
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npx prisma migrate deploy  # clean deploy / prod (reproducible from repo)
+npx prisma migrate dev --name <change>  # local schema iteration
+npx prisma validate && npx prisma format --check
+```
 
-## Deploy on Vercel
+Baseline: `prisma/migrations/0000_baseline/` (matches `prisma/schema.prisma`
+exactly; verified by `migrate deploy` on an empty DB + seed). Later phases add
+migrations that must preserve existing stakes, payments, clicks, reports, and
+email logs.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command | What |
+|---|---|
+| `npm run dev` / `build` / `start` | run / production-build / serve |
+| `npm run lint` / `npm run typecheck` | ESLint / `tsc --noEmit` |
+| `npm test` | vitest (unit + DB integration; DB tests **must not skip** in CI) |
+| `TEST_DATABASE_URL=… npm test` | run integration tests against a separate local DB |
+
+DB integration tests only run against localhost Postgres (or with
+`VITEST_ALLOW_REMOTE_DB=1`) — they skip anywhere else so fixtures can never
+touch shared data. CI provides an ephemeral Postgres service.
+| `npm run check-prod-env` | fail-closed production config gate |
+| `npm run audit:prod` | prod dependency audit vs `ops/accepted-advisories.json` |
+
+## CI (`.github/workflows/ci.yml`)
+
+Install → `prisma validate/format/generate` → `migrate deploy` on ephemeral
+Postgres → lint → typecheck → tests (fails if any DB test skips) → prod audit
+→ prod-env gate (must fail without secrets, pass with them) → production build
+with a database (must emit no Prisma configuration errors).
+
+## Dependency policy
+
+Transitive security pins live in `package.json#overrides` (`postcss`,
+`deepmerge-ts`). `npm run audit:prod` fails on any unaccepted high/critical
+runtime advisory. `next@14.2.35` (latest 14.x) has one accepted high with a
+recorded rationale + expiry in `ops/accepted-advisories.json`; the breaking
+major upgrade (Next 16 + React 19) is tracked separately and re-audited before
+live payments.
+
+## Payments status: OFF
+
+`lib/flags.ts` + `lib/env.ts` default production payments to **disabled**.
+Do not set `PAYMENTS_LIVE=true` in production until every release gate in
+`doc/project-review/plan.md` is green. Emergency pause: set
+`PAYMENTS_LIVE=false` (+ public mirror) — checkout returns `403 { waitlist: true }`.
+
+## Ownership
+
+Checkout never mutates an existing startup profile: identity is derived
+server-side from the validated URL/handle, and url/title/pitch/link/email
+change only through an email magic-link management session
+(`POST /api/manage/request` → `POST /api/manage/verify` → cookie →
+`PATCH /api/startups/[domain]`). Every mutation writes an `AuditLog` row.
+
+## Payments (take quotes + settlement)
+
+Contested takeovers hold a 15-minute guaranteed quote (`ClaimReservation`,
+one ACTIVE per element). Settlement is atomic: provider-event claim,
+reservation consume, stake + aggregates, paid-transition, and outbox enqueues
+commit in one transaction (`lib/settle.ts`). Webhooks accept paid signals
+only from an explicit allowlist; statusless/unrelated events are ignored and
+recorded, never applied. Same-delivery twice applies once (event-id dedupe).
+
+## Ledger rules
+
+`lib/pricing.ts` is the single source: $5 floor everywhere, contested $5+
+joins land below #1, ties are rejected at checkout, ranks are deterministic
+(amount desc, earliest first). Each stake application takes a per-element
+lock, asserts one leader + exact pool/count + gap-free ranks before commit,
+and logs the payment delta + resulting total + payment id to the activity
+feed. Never catch a unique violation inside a transaction — use upserts or
+abort and replay.
+
+## Read APIs (product truth)
+
+`lib/api.ts` holds every wire contract; `fetchJson` throws structured
+`ApiError` on non-2xx or shape mismatch so failures render as errors, never
+as business state. Rankings are computed server-side (`lib/boards.ts`):
+Table Order sums all stakes, By Element ranks leader single-stakes, Crowns
+count then spend, Early Adopter counts FirstClaim medals. Stats report exact
+units (claimed tiles, stake rows, summed USD). Search startup rows carry
+their destination element + profile URL.
+
+## Operations (jobs, abuse, moderation)
+
+- Workers: `POST /api/jobs/outbox` (receipts, outbid, previews, analytics)
+  and `POST /api/jobs/screenshot` (preview backfill) drain durable outbox
+  rows in bounded, authenticated batches. Every delivery has a dedupe key,
+  exponential backoff, persisted `lastError`, and an operator retry at
+  `POST /api/admin/outbox/retry`. Job auth: `CRON_SECRET` bearer (required
+  in production, always).
+- Abuse: rate limits share atomic storage when `UPSTASH_REDIS_REST_URL` +
+  `TOKEN` are set (memory fallback otherwise); client IPs come from trusted
+  platform headers (`lib/ip.ts`); listing URLs reject credentials, IPs, and
+  non-public hosts; security headers + allowlist CSP ship in `next.config.mjs`.
+- Moderation: `ops/takedown.md` is executable — report queue, triage states,
+  HIDE (all surfaces, stops /go, clears preview) / UNLIST (discovery only) /
+  restore, all audited. Operator endpoints need `ADMIN_TOKEN` bearer.
+  Financial history is never deleted; aggregates keep counting hidden stakes.
+- Email: no addresses in URLs; unsubscribe is POST-first (RFC 8058 headers
+  on outgoing mail, confirm form on GET).
+
+## Accessibility
+
+Remediation Phase 5: modals trap focus, inert the background, own Escape,
+and restore the exact trigger; checkout is a labeled form with described
+errors and polite async announcements; the 122-tile table is one tab stop
+with arrow/Home/End navigation and Escape back to search; small text uses
+AA-passing `*-ink` tokens (verified by `lib/a11y.test.ts` + axe audit);
+touch layouts get 44px targets; reduced motion kills camera/ping/modal
+movement; legal links render on every viewport.

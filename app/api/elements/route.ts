@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { DIRECT_STATES } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 
@@ -7,8 +8,12 @@ export async function GET() {
   const elements = await prisma.element.findMany({
     orderBy: { id: "asc" },
     include: {
+      // Top directly-visible stake owns the tile face. Hidden listings never
+      // do; financial aggregates (pool/count) still count every stake.
       stakes: {
-        where: { isLeader: true },
+        where: { startup: { moderationState: { in: DIRECT_STATES } } },
+        orderBy: { rank: "asc" },
+        take: 1,
         include: { startup: { select: { domain: true, logoUrl: true } } },
       },
     },

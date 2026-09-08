@@ -1,14 +1,16 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { ELEMENTS } from "../lib/elements";
-import { fetcher } from "../lib/api";
+import { fetchJson, isSearchHits, type SearchHit } from "../lib/api";
 import { Avatar } from "./Avatar";
 
 export type SearchPick = { symbol: string; elementName: string; domain?: string };
 
-type ApiHit = { type: "startup" | "element"; symbol: string; elementName: string; domain: string | null; title: string | null; logo: string | null; amount: number };
-
+/**
+ * Search pill (Phase 4, P1-06): server rows carry every rendered field.
+ * Loading / error / empty states are explicit; stale results are never
+ * retained across queries (no keepPreviousData).
+ */
 export function SearchPill({
   open,
   onPick,
@@ -28,46 +30,42 @@ export function SearchPill({
     return () => clearTimeout(t);
   }, [q]);
 
-  const { data: apiHits } = useSWR<ApiHit[]>(
-    open && debounced.length >= 2 ? `/api/search?q=${encodeURIComponent(debounced)}` : null,
-    fetcher,
-    { keepPreviousData: true }
+  const searching = open && debounced.length >= 2;
+  const {
+    data: hits,
+    error,
+    isLoading,
+  } = useSWR<SearchHit[]>(
+    searching ? `/api/search?q=${encodeURIComponent(debounced)}` : null,
+    (url: string) => fetchJson(url, isSearchHits)
   );
 
-  const query = q.trim().toLowerCase();
-  const stakeHits = useMemo(() => apiHits?.filter((h) => h.type === "startup" && h.domain) ?? [], [apiHits]);
+  const results = useMemo<SearchPick[]>(() => {
+    if (!hits) return [];
+    return hits.map((h) =>
+      h.type === "startup"
+        ? { symbol: h.symbol, elementName: h.elementName, domain: h.domain }
+        : { symbol: h.symbol, elementName: h.elementName }
+    );
+  }, [hits]);
 
-  const elHits = useMemo(
-    () =>
-      query
-        ? ELEMENTS.filter(
-            (e) =>
-              e.symbol.toLowerCase().includes(query) ||
-              e.name.toLowerCase().includes(query)
-          ).slice(0, 4)
-        : [],
-    [query]
-  );
-
-  const results = useMemo<SearchPick[]>(
-    () => [
-      ...stakeHits.map((s) => ({ symbol: s.symbol, elementName: s.elementName, domain: s.domain ?? undefined })),
-      ...elHits
-        .filter((e) => !stakeHits.some((s) => s.symbol === e.symbol))
-        .map((e) => ({ symbol: e.symbol, elementName: e.name })),
-    ],
-    [stakeHits, elHits]
-  );
+  const startupHits = useMemo(() => (hits ?? []).filter((h) => h.type === "startup"), [hits]);
+  const elementHits = useMemo(() => (hits ?? []).filter((h) => h.type === "element"), [hits]);
 
   useEffect(() => {
     setActive(0);
-  }, [q]);
+  }, [debounced]);
+
+  useEffect(() => {
+    if (active >= results.length) setActive(0);
+  }, [active, results.length]);
 
   if (!open) return null;
+  const showList = q.trim().length > 0;
 
   return (
     <div className="w-[360px] max-w-[calc(100vw-3rem)] bg-icy rounded-full shadow-float pl-5 pr-2 py-2 flex items-center gap-2">
-      <span className="text-muted text-sm">🔍</span>
+      <span className="text-mutedink text-sm">🔍</span>
       <input
         ref={inputRef}
         autoFocus
@@ -98,7 +96,7 @@ export function SearchPill({
           }
         }}
         placeholder="find your startup..."
-        className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted"
+        className="flex-1 bg-transparent outline-none text-sm placeholder:text-mutedink"
       />
       <button
         aria-label="Search"
@@ -106,53 +104,67 @@ export function SearchPill({
           const pick = results[active] ?? results[0];
           if (pick) onPick(pick);
         }}
-        className="w-9 h-9 rounded-full bg-visit text-white grid place-items-center text-sm"
+        className="w-9 h-9 rounded-full bg-visit text-white grid place-items-center text-sm [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]"
       >
         →
       </button>
-      {query || stakeHits.length > 0 ? (
+      {showList && (
         <div id="search-results" role="listbox" className="absolute top-full mt-2 left-0 w-[360px] max-w-[calc(100vw-3rem)] bg-white rounded-card shadow-card p-2 max-h-72 overflow-auto z-[var(--z-preview)]">
-          {stakeHits.map((s, i) => (
-            <button
-              id={`search-hit-${i}`}
-              key={s.domain}
-              role="option"
-              aria-selected={active === i}
-              onMouseEnter={() => setActive(i)}
-              onClick={() => onPick({ symbol: s.symbol, elementName: s.elementName, domain: s.domain ?? undefined })}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-2xl text-left ${active === i ? "bg-icy" : ""}`}
-            >
-              <Avatar src={s.logo ?? undefined} domain={s.domain ?? ""} size={20} rounded="rounded-full" />
-              <span className="text-sm font-bold">{s.domain}</span>
-              <span className="text-xs text-muted ml-auto">{s.symbol} {s.elementName}</span>
-              <span className="text-xs font-extrabold text-money">${s.amount}</span>
-            </button>
-          ))}
-          {elHits.map((e, i) => {
-            const idx = stakeHits.length + i;
-            return (
-              <button
-                id={`search-hit-${idx}`}
-                key={e.id}
-                role="option"
-                aria-selected={active === idx}
-                onMouseEnter={() => setActive(idx)}
-                onClick={() => onPick({ symbol: e.symbol, elementName: e.name })}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-2xl text-left ${active === idx ? "bg-icy" : ""}`}
-              >
-                <span className="text-sm font-extrabold w-8">{e.symbol}</span>
-                <span className="text-xs text-muted">{e.name}</span>
-                <span className="text-xs text-muted ml-auto">from $5</span>
-              </button>
-            );
-          })}
-          {query && stakeHits.length === 0 && elHits.length === 0 && debounced.length >= 2 && apiHits?.length === 0 && (
-            <div className="px-3 py-2 text-sm text-muted">
+          {isLoading && (
+            <div className="px-3 py-2 text-sm text-mutedink animate-pulse" role="status">Searching…</div>
+          )}
+          {!isLoading && error && (
+            <div className="px-3 py-2 text-sm text-mutedink" role="alert">Search failed — check your connection and retry.</div>
+          )}
+          {!isLoading &&
+            !error &&
+            startupHits.map((s, i) => {
+              if (s.type !== "startup") return null;
+              return (
+                <button
+                  id={`search-hit-${i}`}
+                  key={s.domain}
+                  role="option"
+                  aria-selected={active === i}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => onPick({ symbol: s.symbol, elementName: s.elementName, domain: s.domain })}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-2xl text-left ${active === i ? "bg-icy" : ""}`}
+                >
+                  <Avatar src={s.logoUrl ?? undefined} domain={s.domain} size={20} rounded="rounded-full" />
+                  <span className="text-sm font-bold">{s.domain}</span>
+                  <span className="text-xs text-mutedink ml-auto">{s.symbol} {s.elementName}</span>
+                  <span className="text-xs font-extrabold text-moneyink">${s.amount}</span>
+                </button>
+              );
+            })}
+          {!isLoading &&
+            !error &&
+            elementHits.map((e, i) => {
+              if (e.type !== "element") return null;
+              const idx = startupHits.length + i;
+              return (
+                <button
+                  id={`search-hit-${idx}`}
+                  key={e.symbol}
+                  role="option"
+                  aria-selected={active === idx}
+                  onMouseEnter={() => setActive(idx)}
+                  onClick={() => onPick({ symbol: e.symbol, elementName: e.elementName })}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-2xl text-left ${active === idx ? "bg-icy" : ""}`}
+                >
+                  <span className="text-sm font-extrabold w-8">{e.symbol}</span>
+                  <span className="text-xs text-mutedink">{e.elementName}</span>
+                  <span className="text-xs text-mutedink ml-auto">from $5</span>
+                </button>
+              );
+            })}
+          {!isLoading && !error && searching && (hits ?? []).length === 0 && (
+            <div className="px-3 py-2 text-sm text-mutedink">
               No startup found — try a different name or symbol.
             </div>
           )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

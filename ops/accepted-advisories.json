@@ -1,0 +1,12 @@
+{
+  "accepted": [
+    {
+      "package": "next",
+      "version": "14.2.35",
+      "severity": "high",
+      "reason": "14.2.35 is the latest patched Next 14.x. The remaining advisories require a breaking major upgrade (Next 16 + React 19); that framework migration is tracked separately and must not ride along with money-path changes. Mitigations: Vercel hosting (no self-hosted Image Optimizer/custom server), empty next.config (no remotePatterns/rewrites/i18n), no WebSocket upgrades, no beforeInteractive scripts with untrusted input.",
+      "scheduled": "Framework migration to Next 15/16 before live payments (Phase 7 re-audit).",
+      "expires": "2026-12-31"
+    }
+  ]
+}

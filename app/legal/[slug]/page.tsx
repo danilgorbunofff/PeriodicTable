@@ -34,12 +34,12 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
   return (
     <main className="min-h-screen bg-profilebg text-ink">
       <div className="max-w-2xl mx-auto px-4 py-8">
-        <Link href="/" className="text-sm font-bold text-muted hover:text-ink">← the table</Link>
+        <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
         <h1 className="font-display text-2xl font-bold mt-3">{page.title}</h1>
         {page.body.map((p) => (
-          <p key={p.slice(0, 24)} className="text-sm text-muted mt-2 leading-relaxed">{p}</p>
+          <p key={p.slice(0, 24)} className="text-sm text-mutedink mt-2 leading-relaxed">{p}</p>
         ))}
-        <div className="text-xs text-muted mt-6">About & disclaimer · Rules & payments · Contact</div>
+        <div className="text-xs text-mutedink mt-6">About & disclaimer · Rules & payments · Contact</div>
       </div>
     </main>
   );
