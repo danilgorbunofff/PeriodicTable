@@ -111,7 +111,9 @@ Navy circle `#0F172A`, white arrow. Sits inside the icy search pill on the right
 | Contested | same pastel | ink | **👑** top-right, nothing else |
 | Selected | same | ink | 2px ink/yellow ring + lift `scale(1.04)` |
 
-**Forbidden in MVP:** metal gradients, chrome, carbon weave, trefoils, frosted glass, event-horizon rings, cosmic pulses, diamond crowns, 🌌 crowns. Exotic four tiles use the **same** porcelain language + a tiny `EXOTIC` caption under the symbol if needed.
+**Premium exotic exception:** Hbar, Ps, Uue, and DM may use compact science-led SVG micro-art and element-specific color fields inside the shared exotic capsule. Their 48×52px geometry, number, symbol, price/claim state, tooltip, focus behavior, and selection affordance remain identical in function to standard tiles. Claimed exotic tiles keep their thematic glyph and show the leader logo as a separate small status badge. Ambient motion must be low-amplitude, transform/opacity based, and subordinate to the capsule; hover/focus may intensify it. `prefers-reduced-motion` renders a fully composed static state.
+
+**Still forbidden:** premium finishes on standard MVP tiles, large paint-area shaders, WebGL/canvas effects, uncontrolled glow spill, motion that obscures tile data, diamond crowns, and 🌌 crowns.
 
 Hover tooltip: dark pill `Symbol · Name · #1 $X` or `Unclaimed · $5`.
 
@@ -209,7 +211,7 @@ Matches worldmap.lol’s “Country Leaderboard” / “World Order” modal tre
 ## 7. Motion
 
 - Rail swap 280ms ease. Preview 120ms. Modal 180ms scale+fade.
-- Tile hover lift only. **No** looping exotic shaders.
+- Standard tiles use hover lift only. Exotic tiles may use slow, low-amplitude thematic SVG motion plus a stronger hover/focus response.
 - `prefers-reduced-motion`: cuts lift to color-ring only.
 
 ---

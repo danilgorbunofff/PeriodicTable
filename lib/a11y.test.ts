@@ -168,4 +168,18 @@ describe("form + status contracts (static)", () => {
     expect(grid).toMatch(/tabIndex=\{el\.id === activeId \? 0 : -1\}/);
     expect(grid).toMatch(/chrome-search-toggle/);
   });
+  it("exotic artwork stays decorative while the tile button owns its label", () => {
+    const tile = src("components/Tile.tsx");
+    const glyph = src("components/ExoticGlyph.tsx");
+    expect(tile).toMatch(/aria-label=\{`\$\{el\.symbol\}/);
+    expect(glyph).toMatch(/aria-hidden="true"/);
+    expect(tile).toMatch(/exotic-tile__leader--fallback/);
+    expect(tile).toMatch(/onError=/);
+  });
+  it("exotic animation has a static reduced-motion state", () => {
+    const css = src("app/globals.css");
+    expect(css).toMatch(/prefers-reduced-motion: reduce/);
+    expect(css).toMatch(/\.exotic-tile \.exotic-glyph \*/);
+    expect(css).toMatch(/animation: none !important/);
+  });
 });
