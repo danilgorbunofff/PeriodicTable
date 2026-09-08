@@ -70,6 +70,27 @@ describe("text contrast meets WCAG 2.2 AA (4.5:1 small text)", () => {
       });
     }
   }
+  // Claimed-exotic tile faces: dark gradients host WHITE small text (DM,
+  // Uue) and ink small text on the lighter stops (Ps mid cyan/magenta).
+// Claimed-exotic tile faces come from the themed system
+// (app/globals.css .exotic-tile--{hbar,ps,uue,dm} --exotic-bg-start/end).
+// All four faces are dark and render near-white --exotic-ink text plus a
+// dark text-shadow, so assert white text on each gradient stop.
+  const EXOTIC_FACES = {
+    hbar: { hex: "#8f3209", text: "#FFFFFF" },
+    hbarEnd: { hex: "#321746", text: "#FFFFFF" },
+    ps: { hex: "#126b8b", text: "#FFFFFF" },
+    psEnd: { hex: "#7b287f", text: "#FFFFFF" },
+    uue: { hex: "#542399", text: "#FFFFFF" },
+    uueEnd: { hex: "#22115f", text: "#FFFFFF" },
+    dm: { hex: "#172448", text: "#FFFFFF" },
+    dmEnd: { hex: "#050714", text: "#FFFFFF" },
+  } as const;
+  for (const [name, { hex, text }] of Object.entries(EXOTIC_FACES)) {
+    it(`${text} on exotic face ${name} ≥ 4.5`, () => {
+      expect(ratio(text, hex)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
   it("no small-text class uses the decorative-only base hues", () => {
     // Base muted/money/live hues remain for large display text + decoration;
     // small text must use the *-ink variants. Spot-check high-traffic files.

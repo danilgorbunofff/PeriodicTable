@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { FAMILY_FILL } from "../lib/familyFill";
+import { EXOTIC_STYLES } from "../lib/exoticStyle";
 import type { ElementNode } from "../lib/elements";
 import { cameraInteract } from "../lib/cameraInteract";
 import { getExoticTheme, isExoticSymbol } from "../lib/exoticThemes";
@@ -12,7 +13,11 @@ export type TileClaim = {
   selected?: boolean;
 };
 
-/** Flat porcelain tile — MVP forbids metal/glass/cosmic shaders (REVIEW P0, Phase 4 demoted). */
+/** Flat porcelain tile for standard elements. Exotic tiles always use their
+ *  themed face + glyph (lib/exoticThemes.ts); claimed exotics additionally
+ *  get a unique animated FX treatment per symbol (lib/exoticStyle.ts) —
+ *  transparent glow/beam/shine/star layers composed over the themed face.
+ *  Unclaimed exotics stay unanimated apart from the ambient sheen. */
 function TileInner({
   el,
   claim,
@@ -27,8 +32,10 @@ function TileInner({
 }) {
   const claimed = !!claim;
   const exoticTheme = getExoticTheme(el.symbol);
+  const exoticFx = claimed && el.tier === "EXOTIC" ? EXOTIC_STYLES[el.symbol] : undefined;
   const bg = exoticTheme ? undefined : claimed ? FAMILY_FILL[el.family] ?? "#fff" : "#fff";
   const price = claim?.price ?? 5;
+
   return (
     <button
       onClick={() => {
@@ -45,7 +52,33 @@ function TileInner({
       }`}
       style={{ background: bg, width: 48, height: 52 }}
     >
-      <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:block whitespace-nowrap bg-ink text-white text-[10px] font-bold rounded-full px-2 py-0.5 z-[var(--z-tooltip)]">
+      {exoticFx && (
+        <>
+          <span className="exotic-glow" style={{ "--exotic-glow": exoticFx.glow } as React.CSSProperties} />
+          {exoticFx.beam && (
+            <span
+              className="exotic-beam"
+              style={{ "--exotic-beam-a": exoticFx.beam[0], "--exotic-beam-b": exoticFx.beam[1] } as React.CSSProperties}
+            />
+          )}
+          {exoticFx.shine && <span className="exotic-shine" />}
+          {exoticFx.stars && (
+            <span className="exotic-stars">
+              {[
+                { l: "18%", t: "22%" },
+                { l: "70%", t: "18%", d: "-0.8s" },
+                { l: "42%", t: "62%" },
+                { l: "82%", t: "58%", d: "-1.3s" },
+                { l: "28%", t: "80%", d: "-0.4s" },
+                { l: "62%", t: "84%" },
+              ].map((s, i) => (
+                <span key={i} style={{ left: s.l, top: s.t, animationDelay: s.d ?? "0s" }} />
+              ))}
+            </span>
+          )}
+        </>
+      )}
+      <span className={`pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:block whitespace-nowrap bg-ink text-white text-[10px] font-bold rounded-full px-2 py-0.5 z-[var(--z-tooltip)]`}>
         {el.symbol} {el.name} · {claimed ? `#1 $${price}` : "Unclaimed · $5"}
       </span>
       {exoticTheme && isExoticSymbol(el.symbol) ? (

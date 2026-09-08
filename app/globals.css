@@ -89,6 +89,125 @@ body {
   animation: hero-in 180ms ease-out;
 }
 
+/* ---- Claimed-exotic tiles (unique holo per exotic element) ----
+   All layers are transform/opacity/filter only; every animation is disabled
+   under prefers-reduced-motion (see the block at the bottom). Unclaimed
+   exotics never mount these layers — animation IS the ownership signal. */
+
+/* Base gradient drift — Ps (cyan/magenta duality, side to side). */
+@keyframes exotic-ps-drift {
+  0%,
+  100% {
+    transform: translateX(-6%);
+  }
+  50% {
+    transform: translateX(6%);
+  }
+}
+.animate-exotic-ps {
+  animation: exotic-ps-drift 6s ease-in-out infinite;
+  background-size: 160% 100%;
+}
+
+/* Breathing ambient glow — Hbar / Uue / DM box-shadow pulse. */
+@keyframes exotic-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.exotic-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 10px 2px var(--exotic-glow, rgba(255, 176, 64, 0.8));
+  animation: exotic-glow-pulse 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Face shine sweep — Hbar: a soft light band glides across the tile. */
+@keyframes exotic-shine {
+  0% {
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  60%,
+  100% {
+    transform: translateX(220%) skewX(-18deg);
+  }
+}
+.exotic-shine {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+  animation: exotic-shine 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Rotating conic border beam — Uue. */
+@property --exotic-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes exotic-beam-rotate {
+  to {
+    --exotic-angle: 360deg;
+  }
+}
+.exotic-beam {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--exotic-angle),
+    transparent 0deg,
+    var(--exotic-beam-a, rgba(196, 181, 253, 0.9)) 60deg,
+    transparent 140deg,
+    var(--exotic-beam-b, rgba(124, 58, 237, 0.75)) 200deg,
+    transparent 300deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: exotic-beam-rotate 4s linear infinite;
+  pointer-events: none;
+}
+
+/* Twinkle starfield — DM (void). */
+@keyframes exotic-tile-star {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+.exotic-stars {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.exotic-stars > span {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 9999px;
+  background: #e8eeff;
+  box-shadow: 0 0 4px rgba(170, 180, 255, 0.9);
+  animation: exotic-tile-star 2.2s ease-in-out infinite;
+}
+
 .animate-panel-in {
   animation: panel-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
   transform-origin: bottom center;
@@ -185,6 +304,20 @@ body {
   }
   .exotic-pod__sweep {
     opacity: 0 !important;
+  }
+  /* Claimed-exotic holo layers: freeze (no drift/shine/beam/twinkle/pulse). */
+  .animate-exotic-ps,
+  .exotic-glow,
+  .exotic-shine,
+  .exotic-beam,
+  .exotic-stars > span {
+    animation: none !important;
+  }
+  .exotic-glow {
+    opacity: 0.7 !important;
+  }
+  .exotic-stars > span {
+    opacity: 0.6 !important;
   }
 }
 
