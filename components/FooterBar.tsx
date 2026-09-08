@@ -8,7 +8,7 @@ import Link from "next/link";
  */
 export function FooterBar() {
   return (
-    <div className="absolute z-[var(--z-cards)] bottom-[18px] left-1/2 -translate-x-1/2 max-md:bottom-auto max-md:left-auto max-md:translate-x-0 max-md:top-auto max-md:bottom-[76px] max-md:right-[12px]">
+    <div className="absolute z-[var(--z-cards)] bottom-[18px] left-1/2 -translate-x-1/2 max-md:left-auto max-md:translate-x-0 max-md:bottom-[76px] max-md:right-[12px]">
       <nav aria-label="Legal" className="bg-white/90 backdrop-blur rounded-full shadow-float px-4 py-1.5 text-[11px] font-bold text-mutedink flex gap-3">
         <Link href="/legal/about" className="hover:text-ink">About & disclaimer</Link>
         <span aria-hidden="true">·</span>

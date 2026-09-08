@@ -10,8 +10,7 @@ export type TileClaim = {
   selected?: boolean;
 };
 
-/** Flat porcelain tile — MVP forbids metal/glass/cosmic shaders (REVIEW P0, Phase 4 demoted).
- * Premium signal = tiny ELITE / EXOTIC caption only. */
+/** Flat porcelain tile — MVP forbids metal/glass/cosmic shaders (REVIEW P0, Phase 4 demoted). */
 function TileInner({
   el,
   claim,
@@ -49,19 +48,6 @@ function TileInner({
         <img src={claim.logoUrl} alt="" draggable={false} className="mt-0.5 h-[18px] w-[18px] rounded-[5px]" />
       ) : (
         <span className="mt-0.5 text-[7px] font-extrabold text-moneyink">${price}</span>
-      )}
-      {claim?.contested && (
-        <span className="absolute top-0.5 right-1 text-[10px]">👑</span>
-      )}
-      {el.tier === "EXOTIC" && (
-        <span className="text-[6px] font-bold tracking-widest text-mutedink">
-          EXOTIC
-        </span>
-      )}
-      {el.tier === "CULTURAL_ELITE" && (
-        <span className="text-[6px] font-bold tracking-widest text-mutedink">
-          ELITE
-        </span>
       )}
     </button>
   );

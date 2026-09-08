@@ -105,7 +105,7 @@ export function Modal({
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
-        className={`relative bg-white rounded-card shadow-card w-full p-6 outline-none animate-modal-in ${sizeClass}`}
+        className={`relative bg-white rounded-card w-full p-6 outline-none animate-modal-in shadow-[0_10px_26px_rgba(0,0,0,0.35)] ${sizeClass}`}
       >
         <IconBtn label="Close" onClick={() => onCloseRef.current()} className="absolute top-4 right-4">✕</IconBtn>
         {children}

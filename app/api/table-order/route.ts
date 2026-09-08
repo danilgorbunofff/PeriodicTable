@@ -13,8 +13,10 @@ export async function GET() {
   const stakes = await prisma.stake.findMany({
     where: { startup: { moderationState: "VISIBLE" } },
     select: {
+      id: true,
       amountUsd: true,
       isLeader: true,
+      createdAt: true,
       startup: { select: { domain: true, logoUrl: true } },
       element: { select: { symbol: true } },
     },
@@ -27,6 +29,8 @@ export async function GET() {
       isLeader: s.isLeader,
       elementSymbol: s.element.symbol,
       elementName: s.element.symbol,
+      id: s.id,
+      createdAt: s.createdAt,
     }))
   ).slice(0, 10);
   return apiJson(rows);

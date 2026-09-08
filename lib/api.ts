@@ -84,6 +84,8 @@ export type ActivityRow = {
   kind: string;
   city: string | null;
   createdAt: string;
+  /** Live stake behind this event — rows deep-link via /go/:stakeId when set. */
+  stakeId?: string | null;
 };
 
 /** Element detail from /api/elements/[sym] */
@@ -127,6 +129,8 @@ export type TableOrderRow = {
   totalSpent: number;
   crowns: number;
   elements: number;
+  /** Biggest stake for the domain — rows link via /go/:stakeId. */
+  stakeId?: string;
 };
 
 /** Search hits from /api/search (P1-06). Startup rows carry everything the
@@ -186,7 +190,8 @@ export function isTableOrderRows(v: unknown): v is TableOrderRow[] {
         typeof r.logoUrl === "string" &&
         typeof r.totalSpent === "number" &&
         typeof r.crowns === "number" &&
-        typeof r.elements === "number"
+        typeof r.elements === "number" &&
+        (r.stakeId === undefined || typeof r.stakeId === "string")
     )
   );
 }
@@ -218,7 +223,8 @@ export function isActivityRows(v: unknown): v is ActivityRow[] {
         typeof r.delta === "number" &&
         typeof r.total === "number" &&
         typeof r.kind === "string" &&
-        typeof r.createdAt === "string"
+        typeof r.createdAt === "string" &&
+        (r.stakeId === undefined || r.stakeId === null || typeof r.stakeId === "string")
     )
   );
 }

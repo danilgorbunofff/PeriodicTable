@@ -76,20 +76,21 @@ describe("shape guards", () => {
 describe("aggregateTableOrder (P1-10: ALL stakes summed)", () => {
   it("sums non-leader stakes instead of leaders only", () => {
     const rows = aggregateTableOrder([
-      { domain: "big.dev", logoUrl: "l", amountUsd: 50, isLeader: true, elementSymbol: "C", elementName: "Carbon" },
-      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "C", elementName: "Carbon" },
-      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "Au", elementName: "Gold" },
+      { domain: "big.dev", logoUrl: "l", amountUsd: 50, isLeader: true, elementSymbol: "C", elementName: "Carbon", id: "s1", createdAt: new Date("2024-01-01") },
+      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "C", elementName: "Carbon", id: "s2", createdAt: new Date("2024-01-01") },
+      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "Au", elementName: "Gold", id: "s3", createdAt: new Date("2024-01-02") },
     ]);
     expect(rows[0].domain).toBe("wide.dev");
     expect(rows[0].totalSpent).toBe(60);
     expect(rows[0].crowns).toBe(0);
     expect(rows[0].elements).toBe(2);
+    expect(rows[0].stakeId).toBe("s2");
     expect(rows[1].domain).toBe("big.dev");
   });
   it("tie-breaks by crowns then domain", () => {
     const rows = aggregateTableOrder([
-      { domain: "b.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", elementName: "C" },
-      { domain: "a.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", elementName: "C" },
+      { domain: "b.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", elementName: "C", id: "1", createdAt: new Date("2024-01-01") },
+      { domain: "a.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", elementName: "C", id: "2", createdAt: new Date("2024-01-01") },
     ]);
     expect(rows.map((r) => r.domain)).toEqual(["a.dev", "b.dev"]);
   });

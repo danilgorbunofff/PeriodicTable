@@ -14,22 +14,32 @@ export type SpendRow = {
   isLeader: boolean;
   elementSymbol: string;
   elementName: string;
+  id: string;
+  createdAt: Date | string;
 };
 
 /** Table Order: total cumulative spend across EVERY stake (not leaders only),
  * then crowns, then domain. */
 export function aggregateTableOrder(stakes: SpendRow[]): TableOrderRow[] {
-  const byDomain = new Map<string, { logoUrl: string; totalSpent: number; crowns: number; elements: Set<string> }>();
+  const byDomain = new Map<string, { logoUrl: string; totalSpent: number; crowns: number; elements: Set<string>; topId: string; topAmount: number; topAt: number }>();
   for (const s of stakes) {
-    const row = byDomain.get(s.domain) ?? { logoUrl: s.logoUrl, totalSpent: 0, crowns: 0, elements: new Set<string>() };
+    const row = byDomain.get(s.domain) ?? { logoUrl: s.logoUrl, totalSpent: 0, crowns: 0, elements: new Set<string>(), topId: "", topAmount: -1, topAt: Infinity };
     row.totalSpent += s.amountUsd;
     if (s.isLeader) row.crowns += 1;
     row.elements.add(s.elementSymbol);
     row.logoUrl = s.logoUrl;
+    // Attribute the row's outbound link to the startup's biggest stake
+    // (deterministic: amount desc, then earliest createdAt, then id).
+    const at = s.createdAt instanceof Date ? s.createdAt.getTime() : new Date(s.createdAt).getTime();
+    if (s.amountUsd > row.topAmount || (s.amountUsd === row.topAmount && (at < row.topAt || (at === row.topAt && s.id < row.topId)))) {
+      row.topId = s.id;
+      row.topAmount = s.amountUsd;
+      row.topAt = at;
+    }
     byDomain.set(s.domain, row);
   }
   return [...byDomain.entries()]
-    .map(([domain, r]) => ({ domain, logoUrl: r.logoUrl, totalSpent: r.totalSpent, crowns: r.crowns, elements: r.elements.size }))
+    .map(([domain, r]) => ({ domain, logoUrl: r.logoUrl, totalSpent: r.totalSpent, crowns: r.crowns, elements: r.elements.size, stakeId: r.topId }))
     .sort((a, b) => b.totalSpent - a.totalSpent || b.crowns - a.crowns || a.domain.localeCompare(b.domain));
 }
 

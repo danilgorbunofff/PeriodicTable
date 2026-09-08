@@ -13,7 +13,7 @@ export function StatsCard({
   elementsLive?: number;
 }) {
   return (
-    <Card className="flex flex-col items-start gap-2 px-4 py-[14px] text-[12.5px] leading-none rounded-[15px] shadow-float">
+    <Card className="flex flex-col items-start gap-2.5 px-4 py-4 text-sm leading-none rounded-[15px] shadow-float">
       <div className="whitespace-nowrap font-bold">🧪 <b className="text-ink font-extrabold">{claimedCount}</b> <span className="text-mutedink">elements live</span></div>
       <div className="whitespace-nowrap font-bold">
         💰 <span className="font-extrabold text-moneyink">${totalStakedUsd.toLocaleString()}</span> <span className="text-mutedink">in bids</span>

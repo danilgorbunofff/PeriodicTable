@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { fetchJson, isStatsResponse, isActivityRows, type Claim, type ActivityRow, type StatsResponse } from "../lib/api";
 import { PeriodicGrid } from "../components/PeriodicGrid";
 import { TableCamera } from "../components/TableCamera";
+import { BackgroundSymbols } from "../components/BackgroundSymbols";
 import { ELEMENTS, ElementNode } from "../lib/elements";
 import { HeroCard } from "../components/HeroCard";
 import { SearchPill, SearchPick } from "../components/SearchPill";
@@ -39,6 +40,8 @@ function HomeInner() {
   const [checkoutAmt, setCheckoutAmt] = useState(5);
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const [actMin, setActMin] = useState(false);
+  const [railMin, setRailMin] = useState(false);
   const [expandOpen, setExpandOpen] = useState(false);
 
   // live table data (30s poll)
@@ -107,12 +110,16 @@ function HomeInner() {
 
   const openSymbol = useCallback((symbol: string) => {
     const el = ELEMENTS.find((e) => e.symbol === symbol);
-    if (el) setSelected(el);
+    if (el) {
+      setSelected(el);
+      setRailMin(false);
+    }
   }, []);
 
   const onSelectTile = useCallback((el: ElementNode) => {
     track("tile_click", { element: el.symbol });
     setSelected(el);
+    setRailMin(false); // a minimized rail must pop back open to show the bidding view
     track("drawer_open", { element: el.symbol });
   }, []);
 
@@ -141,6 +148,7 @@ function HomeInner() {
 
   return (
     <div id="app-root" className="stage-shell relative h-screen overflow-hidden text-ink">
+      <BackgroundSymbols />
       <TableCamera focusId={selected?.id ?? null}>
         <div className="periodic-object p-2">
           <PeriodicGrid
@@ -173,9 +181,24 @@ function HomeInner() {
         <StatsCard totalStakedUsd={totalStakedUsd} claimedCount={claimedCount} elementsLive={statsData?.elementsTotal ?? 122} />
       </div>
 
-      {/* activity — desktop */}
+      {/* activity — desktop (minimize button collapses it to the same FAB as mobile) */}
       <div className="absolute bottom-[18px] left-[18px] z-[var(--z-cards)] hidden md:block">
-        <ActivityCard rows={activity} onOpen={openSymbol} />
+        {actMin ? (
+          <button
+            aria-label="Live activity"
+            aria-expanded={false}
+            title="Show live activity"
+            onClick={() => setActMin(false)}
+            className="h-11 w-11 rounded-full bg-white shadow-float grid place-items-center animate-panel-in"
+          >
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
+            </span>
+          </button>
+        ) : (
+          <ActivityCard rows={activity} onMinimize={() => setActMin(true)} />
+        )}
       </div>
 
       {/* activity — mobile/tablet FAB + popover */}
@@ -192,27 +215,40 @@ function HomeInner() {
           </span>
         </button>
         {mobileActivityOpen && (
-          <div className="absolute bottom-[74px] left-[18px] z-[var(--z-cards)]">
-            <ActivityCard
-              rows={activity}
-              onOpen={(s) => {
-                openSymbol(s);
-                setMobileActivityOpen(false);
-              }}
-            />
+          <div
+            className="absolute bottom-[74px] left-[18px] z-[var(--z-cards)]"
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("a")) setMobileActivityOpen(false);
+            }}
+          >
+            <ActivityCard rows={activity} />
           </div>
         )}
       </div>
 
-      {/* rail — desktop, always on */}
+      {/* rail — desktop (minimize button collapses it to the same FAB as mobile) */}
       <div className="absolute bottom-[18px] right-[18px] z-[var(--z-rail)] hidden w-[385px] max-h-[calc(100vh-36px)] lg:block">
-        <RailShell>
-          {selected ? (
-            <TerritoryView el={selected} onClose={() => setSelected(null)} onStake={openStake} onExpand={() => setExpandOpen(true)} />
-          ) : (
-            <WorldOrder onExpand={() => setExpandOpen(true)} />
-          )}
-        </RailShell>
+        {railMin ? (
+          <div className="flex justify-end">
+            <button
+              aria-label="Table order"
+              aria-expanded={false}
+              title="Show table order"
+              onClick={() => setRailMin(false)}
+              className="h-11 w-11 rounded-full bg-cta text-ink shadow-float grid place-items-center text-lg font-display font-bold animate-panel-in"
+            >
+              ⚗️
+            </button>
+          </div>
+        ) : (
+          <RailShell>
+            {selected ? (
+              <TerritoryView el={selected} onClose={() => setSelected(null)} onStake={openStake} onExpand={() => setExpandOpen(true)} onMinimize={() => setRailMin(true)} />
+            ) : (
+              <WorldOrder onExpand={() => setExpandOpen(true)} onMinimize={() => setRailMin(true)} />
+            )}
+          </RailShell>
+        )}
       </div>
 
       {/* rail — mobile/tablet FAB + bottom sheet */}

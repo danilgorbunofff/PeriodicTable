@@ -34,6 +34,7 @@ export function TableCamera({
   const [anim, setAnim] = useState(false);
   const dirty = useRef(false);
   const drag = useRef<{
+    pointerId: number;
     px: number;
     py: number;
     x: number;
@@ -48,6 +49,15 @@ export function TableCamera({
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // The camera transform math assumes an unscrolled viewport. Native focus
+    // scrolling can silently set scrollLeft/scrollTop on the overflow:hidden
+    // box (see the overflow:clip note below), which would double-offset the
+    // board — heal it at the single choke point every camera move goes through.
+    const vp = viewportRef.current;
+    if (vp && (vp.scrollTop !== 0 || vp.scrollLeft !== 0)) {
+      vp.scrollTop = 0;
+      vp.scrollLeft = 0;
+    }
     camRef.current = next;
     setAnim(reduced ? false : animate);
     setCam(next);
@@ -104,16 +114,41 @@ export function TableCamera({
 
   useEffect(() => {
     const vp = viewportRef.current;
+    const inner = innerRef.current;
     if (!vp) return;
     const onResize = () => {
       if (!dirty.current) fit(false);
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(vp);
+    if (inner) ro.observe(inner);
     window.addEventListener("resize", onResize);
+    // Grid metrics change once fonts swap in — re-fit so the table never
+    // lands off-center after the very first layout pass.
+    if (typeof document !== "undefined" && (document as Document & { fonts?: FontFaceSet }).fonts) {
+      (document as Document & { fonts: FontFaceSet }).fonts.ready.then(() => {
+        if (!dirty.current) fit(false);
+      });
+    }
+    // Safety net: if a pointerup is lost (alt-tab mid-drag, capture dropped
+    // by the browser, OS gesture), cameraInteract.dragging would otherwise
+    // stick true and silently swallow every tile click until reload.
+    const hardReset = () => {
+      pointers.current.clear();
+      pinch.current = null;
+      drag.current = null;
+      cameraInteract.dragging = false;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") hardReset();
+    };
+    window.addEventListener("blur", hardReset);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("blur", hardReset);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [fit]);
 
@@ -218,12 +253,19 @@ export function TableCamera({
   }, [zoomAt, fit, apply]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    if (e.button !== 0) return;
+
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
       drag.current = null;
       cameraInteract.dragging = true;
       setAnim(false);
+      const viewport = e.currentTarget as HTMLElement;
+      for (const pointerId of pointers.current.keys()) {
+        if (!viewport.hasPointerCapture(pointerId)) {
+          viewport.setPointerCapture(pointerId);
+        }
+      }
       const pts = Array.from(pointers.current.values());
       pinch.current = {
         dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
@@ -232,9 +274,10 @@ export function TableCamera({
       };
       return;
     }
-    if (e.button !== 0) return;
+
     cameraInteract.dragging = false;
     drag.current = {
+      pointerId: e.pointerId,
       px: e.clientX,
       py: e.clientY,
       x: camRef.current.x,
@@ -269,13 +312,17 @@ export function TableCamera({
       return;
     }
     const d = drag.current;
-    if (!d) return;
+    if (!d || d.pointerId !== e.pointerId) return;
     const dx = e.clientX - d.px;
     const dy = e.clientY - d.py;
     if (!cameraInteract.dragging && Math.hypot(dx, dy) > 5) {
       cameraInteract.dragging = true;
       dirty.current = true;
       setAnim(false);
+      const viewport = e.currentTarget as HTMLElement;
+      if (!viewport.hasPointerCapture(e.pointerId)) {
+        viewport.setPointerCapture(e.pointerId);
+      }
     }
     if (!cameraInteract.dragging) return;
     apply({ ...camRef.current, x: d.x + dx, y: d.y + dy }, false);
@@ -302,10 +349,12 @@ export function TableCamera({
       <div
         ref={viewportRef}
         className="absolute inset-0 z-[var(--z-table)] overflow-hidden touch-none select-none cursor-grab active:cursor-grabbing"
+        style={{ overflow: "clip" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest("[data-el-id]")) return;
           fit(true);
@@ -313,10 +362,12 @@ export function TableCamera({
       >
         <div
           ref={innerRef}
-          className="absolute left-0 top-0 will-change-transform"
+          className="absolute left-0 top-0"
+          onTransitionEnd={() => setAnim(false)}
           style={{
             transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.scale})`,
             transformOrigin: "0 0",
+            willChange: anim ? "transform" : "auto",
             transition: anim
               ? "transform 320ms cubic-bezier(.22, 1, .36, 1)"
               : "none",
@@ -326,40 +377,36 @@ export function TableCamera({
         </div>
       </div>
 
-      <div className="absolute bottom-[70px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] hidden sm:flex items-center gap-3 rounded-full bg-white/95 backdrop-blur px-3.5 py-1.5 text-[11px] font-bold text-mutedink shadow-float pointer-events-none">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-[3px] bg-white shadow-[inset_0_0_0_1px_#E4EBF3]" /> unclaimed
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: "#FDE68A" }} /> claimed
-        </span>
-        <span className="flex items-center gap-1.5">👑 contested</span>
-      </div>
-
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-[var(--z-cards)] flex items-center gap-2 pointer-events-none">
+      <div className="absolute bottom-5 md:bottom-[56px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] flex items-center gap-2 pointer-events-none">
         <IconBtn
           label="Zoom out"
-          className="pointer-events-auto text-lg leading-none"
+          className="pointer-events-auto"
           onClick={() => zoomFromCenter(0.82)}
         >
-          −
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M2.5 7h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
         </IconBtn>
-        <span className="text-[11px] font-extrabold text-mutedink px-1 whitespace-nowrap drop-shadow-[0_1px_8px_rgba(0,0,0,.8)]">
+        <span className="text-[11px] font-extrabold text-white/90 px-1 whitespace-nowrap [text-shadow:0_1px_3px_rgba(10,22,40,.85)]">
           drag to pan · scroll to zoom
         </span>
         <IconBtn
           label="Zoom in"
-          className="pointer-events-auto text-lg leading-none"
+          className="pointer-events-auto"
           onClick={() => zoomFromCenter(1.22)}
         >
-          +
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M2.5 7h9M7 2.5v9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
         </IconBtn>
         <IconBtn
           label="Fit table"
           className="pointer-events-auto"
           onClick={() => fit(true)}
         >
-          ⤢
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M8 2.5h3.5V6M6 11.5H2.5V8M11.5 2.5 7.75 6.25M2.5 11.5l3.75-3.75" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </IconBtn>
       </div>
     </>

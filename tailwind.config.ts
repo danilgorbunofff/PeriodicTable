@@ -12,7 +12,7 @@ const config: Config = {
       colors: {
         stage: "#05070A",
         stagemid: "#0A1720",
-        card: "#FFFFFF",
+        cardbg: "#FFFFFF",
         ink: "#1F2B3E",
         muted: "#8494AB",
         // Phase 5 AA text variants (plan remediation §Visual accessibility):
@@ -45,7 +45,7 @@ const config: Config = {
         btn: "18px",
       },
       boxShadow: {
-        card: "0 26px 60px rgba(0,0,0,.30)",
+        card: "0 18px 50px rgba(0,0,0,.28)",
         float: "0 8px 24px rgba(0,0,0,.24)",
       },
     },

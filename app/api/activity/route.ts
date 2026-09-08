@@ -29,6 +29,21 @@ export async function GET(req: NextRequest) {
       createdAt: true,
     },
   });
+
+  // Resolve the live stake behind each event so rows can deep-link straight
+  // to the paying user's site via the attributed /go/:stakeId redirect.
+  const pairs = [...new Set(logs.map((l) => `${l.domain}|${l.elementSymbol}`))].map((k) => {
+    const [domain, symbol] = k.split("|");
+    return { startup: { domain }, element: { symbol } };
+  });
+  const stakeRows = pairs.length
+    ? await prisma.stake.findMany({
+        where: { OR: pairs },
+        select: { id: true, element: { select: { symbol: true } }, startup: { select: { domain: true } } },
+      })
+    : [];
+  const stakeBy = new Map(stakeRows.map((s) => [`${s.startup.domain}|${s.element.symbol}`, s.id] as const));
+
   return apiJson(
     logs.map((l) => ({
       id: l.id,
@@ -40,6 +55,7 @@ export async function GET(req: NextRequest) {
       kind: l.kind,
       city: l.city,
       createdAt: l.createdAt,
+      stakeId: stakeBy.get(`${l.domain}|${l.elementSymbol}`) ?? null,
     }))
   );
 }

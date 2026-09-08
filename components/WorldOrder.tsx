@@ -7,10 +7,13 @@ import { fetchJson, isTableOrderRows, type TableOrderRow } from "../lib/api";
 export function WorldOrder({
   onClose,
   onExpand,
+  onMinimize,
   expanded,
 }: {
   onClose?: () => void;
   onExpand?: () => void;
+  /** Desktop rail: collapse the rail into its round FAB. */
+  onMinimize?: () => void;
   /** Rendered inside the fullscreen-ish expand overlay: swap in the worldmap.lol-style cream header, drop own controls, and let the parent shell scroll instead. */
   expanded?: boolean;
 }) {
@@ -43,6 +46,11 @@ export function WorldOrder({
             <div className="mt-1.5 text-xs font-extrabold text-moneyink">TOP 10 · MOST SPENT</div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {onMinimize && (
+              <button aria-label="Minimize table order" title="Minimize" onClick={onMinimize} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            )}
             {onClose && (
               <button aria-label="Close" title="Close" onClick={onClose} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">✕</button>
             )}
@@ -65,9 +73,9 @@ export function WorldOrder({
           return (
             <a
               key={r.domain}
-              href={`/s/${encodeURIComponent(r.domain)}`}
+              href={r.stakeId ? `/go/${r.stakeId}` : `/s/${encodeURIComponent(r.domain)}`}
               target="_blank"
-              rel="noopener noreferrer"
+              rel="sponsored nofollow noopener"
               className={`grid items-center text-left no-underline transition-colors ${
                 first
                   ? "mb-1 grid-cols-[34px_32px_1fr_auto] gap-2.5 rounded-[14px] border border-goldwashedge bg-goldwash px-2.5 py-3"
@@ -94,11 +102,11 @@ export function WorldOrder({
           );
         })}
       </div>
-      <div className="mt-2 shrink-0 text-center text-[11px] font-bold text-mutedink whitespace-nowrap">total staked across every element · click one for details</div>
+      <div className="mt-2 shrink-0 text-center text-[11px] font-bold text-mutedink whitespace-nowrap">total staked across every element · click a row to visit their site</div>
     </div>
   );
 }
 
 export function RailShell({ children }: { children: React.ReactNode }) {
-  return <Card className="overflow-hidden rounded-[22px] p-5 shadow-card">{children}</Card>;
+  return <Card className="overflow-hidden rounded-[22px] p-5 shadow-card animate-panel-in">{children}</Card>;
 }

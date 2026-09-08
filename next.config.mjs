@@ -7,7 +7,9 @@ const csp = [
   "script-src 'self' 'unsafe-inline' https://plausible.io https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "img-src 'self' data: https://image.microlink.io https://www.google.com",
+  // s2/favicons 302-redirects to t*.gstatic.com/faviconV2 — the redirect
+  // target must also be allowlisted or Chrome blocks the image entirely.
+  "img-src 'self' data: https://image.microlink.io https://www.google.com https://*.gstatic.com",
   "connect-src 'self' https://plausible.io",
   "frame-src https://challenges.cloudflare.com",
   "object-src 'none'",

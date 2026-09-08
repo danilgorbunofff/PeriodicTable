@@ -17,7 +17,7 @@ export function HeroCard({
   onClaim: () => void;
 }) {
   return (
-    <Card className="w-[400px] max-w-[calc(100vw-36px)] rounded-[18px] p-4 shadow-float">
+    <Card className="w-[360px] max-w-[calc(100vw-36px)] rounded-[18px] p-4 shadow-float">
       <h1 className="font-display text-base leading-[1.15] font-bold whitespace-nowrap max-[440px]:whitespace-normal">
         Put your startup on the table. Literally.
       </h1>

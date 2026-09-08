@@ -16,12 +16,15 @@ export function TerritoryView({
   onClose,
   onStake,
   onExpand,
+  onMinimize,
   expanded,
 }: {
   el: ElementNode;
   onClose: () => void;
   onStake: (el: ElementNode, amount: number) => void;
   onExpand?: () => void;
+  /** Desktop rail: collapse the rail into its round FAB. */
+  onMinimize?: () => void;
   /** Rendered inside the fullscreen-ish expand overlay: drop own header controls, Modal supplies the close affordance. */
   expanded?: boolean;
 }) {
@@ -90,6 +93,11 @@ export function TerritoryView({
             {rows.length ? "CLAIMED TERRITORY" : "UNCLAIMED TERRITORY"}
           </div>
           <div className="flex gap-1.5">
+            {onMinimize && (
+              <button aria-label="Minimize" title="Minimize" onClick={onMinimize} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            )}
             {onExpand && (
               <button aria-label="Expand" title="Expand" onClick={onExpand} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">⤢</button>
             )}

@@ -58,8 +58,362 @@ body {
   animation: modal-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Panel pop for minimize/maximize of the activity + table-order panels:
+   plays on mount (each toggle remounts the card or its FAB). */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-panel-in {
+  animation: panel-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: bottom center;
+}
+
 .animate-modal-backdrop {
   animation: modal-backdrop 180ms ease;
+}
+
+/* Ambient drifting element symbols (BackgroundSymbols). transform/opacity
+   only — GPU-composited; freezes into a static sprinkle under reduced motion. */
+@keyframes bg-rise {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0;
+  }
+  12% {
+    opacity: var(--op, 0.06);
+  }
+  50% {
+    transform: translate3d(var(--sway, 24px), -55vh, 0);
+  }
+  88% {
+    opacity: var(--op, 0.06);
+  }
+  100% {
+    transform: translate3d(0, -120vh, 0);
+    opacity: 0;
+  }
+}
+
+.bg-sym {
+  position: absolute;
+  opacity: 0;
+  animation-name: bg-rise;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform, opacity;
+}
+
+/* v2 depth layers: each translates by --mx/--my (set on the root by the
+   parallax listener) times its own --amp, eased for a smooth glide. */
+.bg-sym-root {
+  --mx: 0;
+  --my: 0;
+}
+
+.bg-layer {
+  position: absolute;
+  inset: 0;
+  transform: translate3d(calc(var(--mx) * var(--amp, 14px)), calc(var(--my) * var(--amp, 14px)), 0);
+  transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+/* Twinkle pulse on a nested span so it composes with the rise envelope. */
+@keyframes bg-twinkle {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
+.bg-sym-tw {
+  display: inline-block;
+  animation-name: bg-twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-sym {
+    animation: none !important;
+    opacity: var(--op, 0.06) !important;
+  }
+  .bg-sym-tw {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .bg-layer {
+    transition: none !important;
+    transform: none !important;
+  }
+  .exotic-star,
+  .exotic-pod::before,
+  .exotic-pod__nebula,
+  .exotic-pod__sweep {
+    animation: none !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  .exotic-pod__sweep {
+    opacity: 0 !important;
+  }
+}
+
+/* Premium deep-space capsule behind the four Exotic tiles. */
+.exotic-pod {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  isolation: isolate;
+  border-radius: 18px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(194, 232, 255, 0.72) 0%,
+      rgba(92, 111, 222, 0.58) 32%,
+      rgba(70, 199, 238, 0.38) 68%,
+      rgba(226, 244, 255, 0.3) 100%
+    );
+  box-shadow:
+    0 10px 24px rgba(0, 3, 12, 0.52),
+    0 2px 6px rgba(0, 6, 18, 0.4);
+}
+
+.exotic-pod::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -13px;
+  border-radius: 27px;
+  background:
+    radial-gradient(ellipse at 32% 44%, rgba(86, 91, 255, 0.78), transparent 58%),
+    radial-gradient(ellipse at 73% 56%, rgba(42, 210, 255, 0.66), transparent 56%);
+  opacity: 0.46;
+  filter: blur(11px);
+  transform: scale(0.98);
+  animation: exotic-ambient-breathe 3.1s ease-in-out -0.8s infinite;
+  will-change: transform, opacity;
+}
+
+.exotic-pod__shell {
+  position: absolute;
+  z-index: 1;
+  inset: 1px;
+  overflow: hidden;
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(82, 103, 224, 0.38), transparent 39%),
+    radial-gradient(circle at 78% 74%, rgba(45, 198, 231, 0.26), transparent 36%),
+    linear-gradient(160deg, #17244f 0%, #0c1531 48%, #050b1b 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(226, 244, 255, 0.24),
+    inset 0 -1px 0 rgba(69, 137, 207, 0.2);
+}
+
+.exotic-pod__nebula {
+  position: absolute;
+  z-index: 0;
+  inset: -45%;
+  opacity: 0.88;
+  background:
+    radial-gradient(ellipse at 35% 40%, rgba(85, 73, 220, 0.56), transparent 32%),
+    radial-gradient(ellipse at 66% 54%, rgba(37, 186, 224, 0.4), transparent 31%),
+    radial-gradient(ellipse at 52% 70%, rgba(35, 76, 169, 0.5), transparent 40%);
+  filter: blur(9px);
+  animation: exotic-nebula-drift 10.5s ease-in-out -3s infinite alternate;
+  will-change: transform;
+}
+
+.exotic-pod__stars {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+}
+
+.exotic-star {
+  position: absolute;
+  border-radius: 9999px;
+  opacity: var(--star-opacity);
+  background: #e0f4ff;
+  box-shadow: 0 0 3px rgba(147, 219, 255, 0.66);
+  animation-name: exotic-star-far, exotic-star-twinkle;
+  animation-duration: var(--star-drift), var(--star-twinkle);
+  animation-delay: var(--star-delay), var(--star-twinkle-delay);
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  animation-direction: alternate, alternate;
+  will-change: transform, opacity;
+}
+
+.exotic-star--near {
+  background: #f5fbff;
+  box-shadow: 0 0 4px rgba(128, 220, 255, 0.74);
+  animation-name: exotic-star-near, exotic-star-twinkle;
+}
+
+.exotic-star--cross {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.exotic-star--cross::before,
+.exotic-star--cross::after {
+  content: "";
+  position: absolute;
+  border-radius: 9999px;
+  background: #dff4ff;
+}
+
+.exotic-star--cross::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.exotic-star--cross::after {
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.exotic-pod__sweep {
+  position: absolute;
+  z-index: 2;
+  top: -35%;
+  left: -72px;
+  width: 44px;
+  height: 170%;
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(185, 231, 255, 0.08) 25%,
+    rgba(219, 246, 255, 0.28) 52%,
+    rgba(147, 215, 255, 0.08) 76%,
+    transparent 100%
+  );
+  transform: translate3d(-40px, 0, 0) skewX(-16deg);
+  animation: exotic-light-sweep 7.5s cubic-bezier(0.42, 0, 0.58, 1) -2s infinite;
+  will-change: transform, opacity;
+}
+
+.exotic-pod__vignette {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, transparent 42%, rgba(1, 5, 15, 0.2) 100%),
+    linear-gradient(180deg, rgba(235, 247, 255, 0.09) 0%, transparent 30%, rgba(0, 3, 10, 0.14) 100%);
+  box-shadow:
+    inset 0 0 13px rgba(0, 3, 12, 0.3),
+    inset 0 1px 0 rgba(226, 243, 255, 0.14);
+}
+
+.exotic-pod__rim {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.exotic-pod__tab {
+  position: absolute;
+  z-index: 4;
+  top: -30px;
+  left: 50%;
+  display: block;
+  width: 100px;
+  height: 25px;
+  overflow: visible;
+  transform: translateX(-50%);
+}
+
+@keyframes exotic-ambient-breathe {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.065);
+  }
+}
+
+@keyframes exotic-nebula-drift {
+  from {
+    transform: translate3d(-9px, -2px, 0) scale(1.02);
+  }
+  to {
+    transform: translate3d(11px, 3px, 0) scale(1.1);
+  }
+}
+
+@keyframes exotic-star-far {
+  from {
+    transform: translate3d(-9px, 1px, 0);
+  }
+  to {
+    transform: translate3d(11px, -1px, 0);
+  }
+}
+
+@keyframes exotic-star-near {
+  from {
+    transform: translate3d(-16px, 2px, 0);
+  }
+  to {
+    transform: translate3d(19px, -2px, 0);
+  }
+}
+
+@keyframes exotic-star-twinkle {
+  from {
+    opacity: var(--star-min-opacity);
+  }
+  to {
+    opacity: var(--star-opacity);
+  }
+}
+
+@keyframes exotic-light-sweep {
+  0%,
+  45% {
+    opacity: 0;
+    transform: translate3d(-40px, 0, 0) skewX(-16deg);
+  }
+  54% {
+    opacity: 0.62;
+  }
+  78% {
+    opacity: 0.24;
+    transform: translate3d(340px, 0, 0) skewX(-16deg);
+  }
+  84%,
+  100% {
+    opacity: 0;
+    transform: translate3d(340px, 0, 0) skewX(-16deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -67,7 +421,8 @@ body {
     transition: none !important;
   }
   .animate-modal-in,
-  .animate-modal-backdrop {
+  .animate-modal-backdrop,
+  .animate-panel-in {
     animation: none !important;
   }
   /* Phase 5: all nonessential movement — camera transitions are forced off
