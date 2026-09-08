@@ -71,6 +71,24 @@ body {
   }
 }
 
+/* Hero pill fold/unfold: the card width cross-fades via
+   transition-[width]; the incoming content fades + slides in from the left
+   (the pill collapses toward its left anchor). */
+@keyframes hero-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-hero-in {
+  animation: hero-in 180ms ease-out;
+}
+
 .animate-panel-in {
   animation: panel-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
   transform-origin: bottom center;
@@ -422,7 +440,8 @@ body {
   }
   .animate-modal-in,
   .animate-modal-backdrop,
-  .animate-panel-in {
+  .animate-panel-in,
+  .animate-hero-in {
     animation: none !important;
   }
   /* Phase 5: all nonessential movement — camera transitions are forced off
