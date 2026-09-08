@@ -10,7 +10,7 @@ const EXOTIC_POD = {
   left: 6 * (TILE_WIDTH + GRID_GAP) - 14,
   top: TILE_HEIGHT + GRID_GAP - 14,
   width: 4 * TILE_WIDTH + 3 * GRID_GAP + 28,
-  height: TILE_HEIGHT + 24,
+  height: TILE_HEIGHT + 28,
 } as const;
 
 type PodStar = {
@@ -260,7 +260,7 @@ export function PeriodicGrid({
       <div
         key={r}
         role="row"
-        className={`relative z-[1] grid gap-1.5 ${r === 2 ? "mb-3" : ""}`}
+        className="relative z-[1] grid gap-1.5"
         style={{ gridTemplateColumns: "repeat(18, 48px)" }}
       >
         {row}
