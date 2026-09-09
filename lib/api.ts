@@ -145,6 +145,10 @@ export type SearchHit =
       elementName: string;
       amount: number;
       profileUrl: string;
+      /** Every owned element, lead stake first (capped by the API). */
+      elements: { symbol: string; elementName: string; amount: number }[];
+      /** Total owned elements (may exceed elements.length). */
+      elementCount: number;
     }
   | { type: "element"; symbol: string; elementName: string };
 
@@ -242,7 +246,16 @@ export function isSearchHits(v: unknown): v is SearchHit[] {
             typeof h.symbol === "string" &&
             typeof h.elementName === "string" &&
             typeof h.amount === "number" &&
-            typeof h.profileUrl === "string")
+            typeof h.profileUrl === "string" &&
+            Array.isArray(h.elements) &&
+            (h.elements as unknown[]).every(
+              (e) =>
+                isRecord(e) &&
+                typeof e.symbol === "string" &&
+                typeof e.elementName === "string" &&
+                typeof e.amount === "number"
+            ) &&
+            typeof h.elementCount === "number")
     )
   );
 }

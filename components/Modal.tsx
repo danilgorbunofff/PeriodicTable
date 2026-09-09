@@ -26,11 +26,14 @@ export function Modal({
   children,
   label,
   size = "md",
+  hideClose = false,
 }: {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
   label: string;
+  /** Hide the built-in corner X — content renders its own close affordance. */
+  hideClose?: boolean;
   /** "lg" is a taller, non-scrolling shell for content (e.g. the rail) that manages its own internal scroll region. */
   size?: "md" | "lg";
 }) {
@@ -107,7 +110,9 @@ export function Modal({
         tabIndex={-1}
         className={`relative bg-white rounded-card w-full p-6 outline-none animate-modal-in shadow-[0_10px_26px_rgba(0,0,0,0.35)] ${sizeClass}`}
       >
-        <IconBtn label="Close" onClick={() => onCloseRef.current()} className="absolute top-4 right-4">✕</IconBtn>
+        {!hideClose && (
+          <IconBtn label="Close" onClick={() => onCloseRef.current()} className="absolute top-4 right-4">✕</IconBtn>
+        )}
         {children}
       </div>
     </div>,

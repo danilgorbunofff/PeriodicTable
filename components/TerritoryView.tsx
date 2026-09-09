@@ -16,15 +16,12 @@ export function TerritoryView({
   onClose,
   onStake,
   onExpand,
-  onMinimize,
   expanded,
 }: {
   el: ElementNode;
   onClose: () => void;
   onStake: (el: ElementNode, amount: number) => void;
   onExpand?: () => void;
-  /** Desktop rail: collapse the rail into its round FAB. */
-  onMinimize?: () => void;
   /** Rendered inside the fullscreen-ish expand overlay: drop own header controls, Modal supplies the close affordance. */
   expanded?: boolean;
 }) {
@@ -71,7 +68,7 @@ export function TerritoryView({
     <div className="flex flex-col h-full relative">
       {expanded ? (
         <div
-          className="-mx-6 -mt-6 mb-4 flex shrink-0 items-start gap-3 px-6 pt-6 pb-5"
+          className="-mx-6 -mt-6 mb-4 relative flex shrink-0 items-start gap-3 px-6 pt-6 pb-5"
           style={{ background: "linear-gradient(180deg,#FFEFC1,#FFCE4B)" }}
         >
           <div
@@ -82,7 +79,7 @@ export function TerritoryView({
           </div>
           <div className="min-w-0 flex-1 pt-0.5">
             <div className="text-[11px] tracking-widest font-extrabold uppercase text-ink/60">
-              {rows.length ? "CLAIMED TERRITORY" : "UNCLAIMED TERRITORY"}
+              {rows.length ? "CLAIMED ELEMENT" : "OPEN ELEMENT"}
             </div>
             <h2 className="mt-0.5 font-display text-[27px] leading-none font-bold text-ink">
               {el.symbol} {el.name}
@@ -101,18 +98,21 @@ export function TerritoryView({
               {rows.length ? `${rows.length} bidding · $${totalStaked} staked` : "no bids yet · $5 to be the first"}
             </div>
           </div>
+          <button
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/85 text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]"
+          >
+            ✕
+          </button>
         </div>
       ) : (
         <div className="flex items-start justify-between">
           <div className="text-[11px] tracking-widest text-mutedink font-bold">
-            {rows.length ? "CLAIMED TERRITORY" : "UNCLAIMED TERRITORY"}
+            {rows.length ? "CLAIMED ELEMENT" : "OPEN ELEMENT"}
           </div>
           <div className="flex gap-1.5">
-            {onMinimize && (
-              <button aria-label="Minimize" title="Minimize" onClick={onMinimize} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">
-                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              </button>
-            )}
             {onExpand && (
               <button aria-label="Expand" title="Expand" onClick={onExpand} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">⤢</button>
             )}
@@ -145,7 +145,7 @@ export function TerritoryView({
       )}
 
       {loading ? (
-        <div className="flex-1 flex flex-col gap-1 mt-3" role="status" aria-label="Loading territory">
+        <div className="flex-1 flex flex-col gap-1 mt-3" role="status" aria-label="Loading element">
           {[0, 1, 2, 3].map((i) => <div key={i} className="h-[52px] rounded-2xl bg-icy animate-pulse" />)}
         </div>
       ) : error && !data ? (
@@ -158,13 +158,13 @@ export function TerritoryView({
         <>
           <div className="text-xs font-bold text-moneyink mt-1">BE THE FIRST · ${joinMin}</div>
           <div className="mt-3 bg-icy rounded-2xl p-3 text-sm">
-            <span className="font-extrabold">?</span> No bids yet — plant your flag for ${joinMin}. Yours until someone outbids you.
+            <span className="font-extrabold">?</span> No bids yet — ${joinMin} puts your logo here until someone outbids you.
           </div>
           <div className="mt-auto sticky bottom-0 bg-white pt-3">
             <ChunkyButton className="w-full text-sm px-5 h-12" onClick={() => onStake(el, joinMin)}>
               Be the first — from ${joinMin}
             </ChunkyButton>
-            <div className="text-center text-[11px] text-mutedink mt-1">plant your flag · rank is your total stake</div>
+            <div className="text-center text-[11px] text-mutedink mt-1">rank is your total stake</div>
           </div>
         </>
       ) : (
@@ -257,7 +257,6 @@ export function TerritoryView({
           </div>
         </>
       )}
-      <div className="mt-2 text-[11px] text-mutedink">IUPAC Standard</div>
       <Modal open={confirm !== null} onClose={() => setConfirm(null)} label="Confirm report" size="md">
         <h2 className="font-display text-xl font-bold pr-10">Report {confirm?.domain}?</h2>
         <p className="text-sm text-mutedink mt-2">

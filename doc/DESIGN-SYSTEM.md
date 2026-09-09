@@ -70,7 +70,7 @@ Navy circle `#0F172A`, white arrow. Sits inside the icy search pill on the right
 - Headlines 800, ink. **Exactly one word in `#FFC93C`** in modal titles.
 - Wordmark: `periodictable` (or `periodic table`) ink + `.lol` yellow, white pill, bold.
 - Hero H1: `Put your startup on the table. Literally.` — **no subtitle**.
-- Eyebrows: 11px, tracking-widest, `#8497AE`, uppercase (`CLAIMED TERRITORY`, `THE TABLE · LIVE`).
+- Eyebrows: 11px, tracking-widest, `#8497AE`, uppercase (`CLAIMED ELEMENT`, `THE TABLE · LIVE`).
 - Money: 800, `#C8892A`, always with `$`, no cents in UI.
 - Body muted `#8497AE`. Never pure `#64748b` gray-500 — too cool/dark.
 
@@ -111,7 +111,7 @@ Navy circle `#0F172A`, white arrow. Sits inside the icy search pill on the right
 | Contested | same pastel | ink | **👑** top-right, nothing else |
 | Selected | same | ink | 2px ink/yellow ring + lift `scale(1.04)` |
 
-**Premium exotic exception:** Hbar, Ps, Uue, and DM may use compact science-led SVG micro-art and element-specific color fields inside the shared exotic capsule. Their 48×52px geometry, number, symbol, price/claim state, tooltip, focus behavior, and selection affordance remain identical in function to standard tiles. Claimed exotic tiles keep their thematic glyph and show the leader logo as a separate small status badge. Ambient motion must be low-amplitude, transform/opacity based, and subordinate to the capsule; hover/focus may intensify it. `prefers-reduced-motion` renders a fully composed static state.
+**Exotic ambient finish:** Hbar, Ps, Uue, and DM share the exact same 48×52px tile structure, logic, tooltip, focus behavior, and selection affordance as standard tiles. Only their background differs: an element-specific ambient color field inside the shared exotic capsule. No SVG art, no per-claim FX layers. The ambient sheen is low-amplitude, transform/opacity based, and subordinate to the capsule. `prefers-reduced-motion` renders a fully composed static state.
 
 **Still forbidden:** premium finishes on standard MVP tiles, large paint-area shaders, WebGL/canvas effects, uncontrolled glow spill, motion that obscures tile data, diamond crowns, and 🌌 crowns.
 
@@ -125,7 +125,7 @@ Hover tooltip: dark pill `Symbol · Name · #1 $X` or `Unclaimed · $5`.
 - Wordmark pill above, separate.
 - Card ~360px, padding 18–20, H1 only.
 - Row: chunky CTA **hug contents** `Claim an element · from $5` + 3 icon circles.
-- 🔍 open → yellow ring on icon + search pill **under** the card: icy input, placeholder `find your startup...`, navy arrow button.
+- 🔍 open → yellow ring on icon + search pill **under** the card: icy input, placeholder `find your startup...`, navy arrow button. Pill fades/slides in and out (`animate-search-in/out`); dropdown opens at 2+ chars only. Startup rows show logo + domain + lead amount with a clickable chip per owned element (`SYM · $amt`, `+N more` overflow).
 
 ### Stats (094154)
 - Compact white card, 3 lines, emoji/icon + copy.
@@ -161,7 +161,7 @@ Hover tooltip: dark pill `Symbol · Name · #1 $X` or `Unclaimed · $5`.
 Matches worldmap.lol’s “Country Leaderboard” / “World Order” modal treatment. Triggered by the rail’s ⤢ button; renders in `<Modal size="lg">` (fixed `max-w-[460px] h-[min(720px,85vh)]`, single Modal-supplied ✕, no double header).
 - Full-bleed cream/gold gradient band at the top (`linear-gradient(180deg,#FFEFC1,#FFCE4B)`, bled to the dialog edges via `-mx-6 -mt-6` so it reaches the rounded corners)
 - White rounded-2xl avatar chip on the left: `⚗️` for World Order, element-colored symbol chip for Territory
-- Eyebrow (`text-ink/60`, e.g. `the table · live` / `CLAIMED TERRITORY`), bold title (`text-ink`, e.g. `Table Order` / `C Carbon`), subtitle stat line (`text-ink/70`, e.g. `{n} bidding · ${total} staked`)
+- Eyebrow (`text-ink/60`, e.g. `the table · live` / `CLAIMED ELEMENT`), bold title (`text-ink`, e.g. `Table Order` / `C Carbon`), subtitle stat line (`text-ink/70`, e.g. `{n} bidding · ${total} staked`)
 - Below the header: the same row list as the compact rail (peach-pill rank rules unchanged: #1-only for World Order, all ranks for Territory), each row still an `<a target="_blank">`
 - Compact-mode-only stat lines (e.g. the `{n} bidding · #1 pays $X` line) are hidden when expanded since that info now lives in the header subtitle
 
@@ -211,7 +211,7 @@ Matches worldmap.lol’s “Country Leaderboard” / “World Order” modal tre
 ## 7. Motion
 
 - Rail swap 280ms ease. Preview 120ms. Modal 180ms scale+fade.
-- Standard tiles use hover lift only. Exotic tiles may use slow, low-amplitude thematic SVG motion plus a stronger hover/focus response.
+- Standard tiles use hover lift only. Exotic tiles share the same hover lift plus a stronger glow response on their ambient face.
 - `prefers-reduced-motion`: cuts lift to color-ring only.
 
 ---

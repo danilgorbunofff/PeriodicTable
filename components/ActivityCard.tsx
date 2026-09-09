@@ -6,7 +6,7 @@ import { fetchJson, isActivityRows, type ActivityRow } from "../lib/api";
 import { relTime } from "../lib/relTime";
 
 function kindLabel(kind: string): string {
-  if (kind === "join") return "planted flag";
+  if (kind === "join") return "bid on";
   if (kind === "reclaim") return "reclaimed";
   return "topped up";
 }
@@ -14,11 +14,17 @@ function kindLabel(kind: string): string {
 export function ActivityCard({
   rows,
   onMinimize,
+  onClose,
+  fluid,
 }: {
   /** Pre-fetched rows (from page-level SWR); if omitted the card fetches itself. */
   rows?: ActivityRow[];
   /** Desktop placement: collapse the card into its round FAB. */
   onMinimize?: () => void;
+  /** Bottom-sheet placement: explicit close button in the header. */
+  onClose?: () => void;
+  /** Bottom-sheet placement: fill the sheet width instead of the 340px card. */
+  fluid?: boolean;
 }) {
   const own = useSWR<ActivityRow[]>(rows ? null : "/api/activity?limit=6", (url: string) => fetchJson(url, isActivityRows), {
     refreshInterval: 30000,
@@ -28,7 +34,7 @@ export function ActivityCard({
   const s0 = data?.[0];
 
   return (
-    <Card className="w-[340px] max-w-[calc(100vw-36px)] rounded-2xl px-3.5 py-3 shadow-float animate-panel-in">
+    <Card className={`${fluid ? "w-full max-w-none" : "w-[340px] max-w-[calc(100vw-36px)]"} rounded-2xl px-3.5 py-3 shadow-float animate-panel-in`}>
       <div className="font-display text-sm font-bold text-mutedink flex items-center gap-2">
         <span className="block h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
         Live activity
@@ -39,9 +45,17 @@ export function ActivityCard({
             onClick={onMinimize}
             className="ml-auto grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink"
           >
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-              <path d="M2 5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
+            ✕
+          </button>
+        )}
+        {onClose && (
+          <button
+            aria-label="Close live activity"
+            title="Close"
+            onClick={onClose}
+            className="ml-auto grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]"
+          >
+            ✕
           </button>
         )}
       </div>
@@ -53,7 +67,7 @@ export function ActivityCard({
         ) : (
           <>
             <span className="text-ink">{s0.elementSymbol.toUpperCase()}</span>{" "}
-            {s0.kind === "join" ? "New flag planted" : s0.kind === "reclaim" ? "Crown reclaimed" : "Stake bumped"} ·{" "}
+            {s0.kind === "join" ? "New bid" : s0.kind === "reclaim" ? "Crown reclaimed" : "Stake bumped"} ·{" "}
             <span className="text-ink">{s0.city ?? "somewhere"}</span>
           </>
         )}

@@ -7,7 +7,7 @@ import { ChunkyButton } from "./ChunkyButton";
 import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
-import { classifyAndValidate } from "../lib/pricing";
+import { classifyAndValidate, reclaimFor } from "../lib/pricing";
 import { domainFromUrl, domainFromSocial } from "../lib/validate";
 import { paymentsLiveClient } from "../lib/flags";
 import { track } from "../lib/analytics";
@@ -15,7 +15,7 @@ import type { ElementNode } from "../lib/elements";
 
 export function HowItWorks({ open, onClose }: { open: boolean; onClose: () => void }) {
   const steps = [
-    { icon: "🚩", bg: "#FFEFC1", t: "1 Claim", d: "Pick an open element and stake from $5. Your logo goes on the table instantly." },
+    { icon: "🚩", bg: "#FFEFC1", t: "1 Claim", d: "Pick an open element and stake from $5. Your logo goes up as soon as payment settles." },
     { icon: "📈", bg: "#E0F2FE", t: "2 Stake to climb", d: "Rank is your total stake. Top up anytime — past stake still counts." },
     { icon: "♻️", bg: "#DCFCE7", t: "3 Reclaim anytime", d: "Outbid? Pay only the difference back to #1. Never start over." },
   ];
@@ -76,7 +76,6 @@ export function CheckoutPreview({
   if (!elSafe) return null;
   const elSymbol = elSafe.symbol;
   const leaderTotal = data?.stakes[0]?.amount;
-  const need = data?.prices.takeLead ?? amount;
   const badUrl = url.length > 0 && !/^https?:\/\/.+\..+/.test(tab === "url" ? url : `https://x.com/${url.replace(/^@/, "")}`);
   const badEmail = email.length > 0 && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
   const badTitle = title.length > 0 && (title.trim().length < 2 || title.trim().length > 32);
@@ -96,6 +95,15 @@ export function CheckoutPreview({
   // the server re-validates authoritatively under lock.
   const stakeTotals = (data?.stakes ?? []).map((s) => s.amount);
   const myPriorTotal = !domain ? 0 : (data?.stakes.find((s) => s.domain === domain)?.amount ?? 0);
+  // Returning holder? Quote the reclaim delta (leader+1 minus prior, min $1),
+  // not the full take price. `need` stays null until prices load so the crown
+  // never flashes a guess based on the typed amount.
+  const priorHere = !isNewHere && myPriorTotal > 0;
+  const alreadyLead = priorHere && leaderTotal != null && myPriorTotal >= leaderTotal;
+  const need = !data ? null : priorHere ? reclaimFor(leaderTotal, myPriorTotal) : (data.prices.takeLead ?? amount);
+  // A hold (reservation) only exists for a real TAKE quote: newcomer whose
+  // entered amount reaches leader+1. Anything else is a JOIN with no hold.
+  const takeQuoted = !priorHere && isNewHere && leaderTotal != null && need != null && Math.round(amount) >= need;
   const classified = classifyAndValidate({
     amount: Math.round(amount) || 0,
     leaderTotal,
@@ -295,7 +303,7 @@ export function CheckoutPreview({
           {serverField?.field === "pitch" && <div id="co-pitch-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
         </div>
         <div>
-          <label htmlFor="co-email" className="mb-1 block text-[11px] font-extrabold text-mutedink">Email for receipt + outbid alerts</label>
+          <label htmlFor="co-email" className="mb-1 block text-[11px] font-extrabold text-mutedink">Email for receipt + outbid alerts (optional)</label>
           <IcyInput
             id="co-email" name="co-email" type="email" autoComplete="email"
             value={email}
@@ -314,8 +322,23 @@ export function CheckoutPreview({
           </div>
         </div>
       </div>
-      <div className="mt-2 text-sm font-extrabold">👑 ${need} takes #1 in {el.name}!</div>
-      <div className="mt-1 text-xs text-mutedink">Any amount $5+ works — ${need} is just the minimum to grab #1 right now.{isNewHere && leaderTotal != null ? " Your take quote is held for 15 min once you continue." : ""}</div>
+      {need != null && (
+        <>
+          <div className="mt-2 text-sm font-extrabold">
+            {alreadyLead
+              ? `👑 You're #1 in ${el.name} — extend your lead!`
+              : priorHere
+                ? `👑 $${need} more reclaims #1 in ${el.name}!`
+                : `👑 $${need} takes #1 in ${el.name}!`}
+          </div>
+          <div className="mt-1 text-xs text-mutedink">
+            {priorHere
+              ? `Top-ups are $1+ — $${need} more puts you back on top. Exact ties are rejected, so stand $1 clear.`
+              : `Any $5+ amount joins the ladder — $${need} grabs #1 right now. Exact ties are rejected, so stand $1 clear.`}
+            {takeQuoted ? " Your take quote is held for 15 min once you continue." : ""}
+          </div>
+        </>
+      )}
       {priceMoved != null && (
         <div className="mt-2 rounded-2xl bg-goldwash p-3 text-xs font-bold">
           Price moved to ${priceMoved} — continue?
@@ -325,15 +348,18 @@ export function CheckoutPreview({
         </div>
       )}
       <div className="mt-1.5 flex gap-1.5">
-        {[10, 25, 50].map((p) => (
-          <button
-            key={p}
-            onClick={() => onAmount(Math.max(p, need))}
-            className="flex-1 rounded-xl bg-icy py-1.5 text-xs font-extrabold text-ink hover:bg-goldwash"
-          >
-            ${Math.max(p, need)}
-          </button>
-        ))}
+        {(need != null && need > 50 ? [need, need + 25, need + 100] : [10, 25, 50]).map((p) => {
+          const chip = need != null ? Math.max(p, need) : p;
+          return (
+            <button
+              key={p}
+              onClick={() => onAmount(chip)}
+              className="flex-1 rounded-xl bg-icy py-1.5 text-xs font-extrabold text-ink hover:bg-goldwash"
+            >
+              ${chip}
+            </button>
+          );
+        })}
       </div>
       {clientErr && <div className="mt-2 text-xs text-red-500 font-bold">{clientErr}</div>}
       {serverErr && <div className="mt-2 text-xs text-red-500 font-bold">{serverErr}</div>}
@@ -349,7 +375,7 @@ export function CheckoutPreview({
       />
       <label className="mt-2 flex items-start gap-2 text-xs text-mutedink">
         <input type="checkbox" checked={attest} onChange={(e) => setAttest(e.target.checked)} className="mt-0.5" />
-        <span>I own or may promote this URL. No refunds/withdrawals — stake = ad inventory.</span>
+        <span>I am 18+ and I own or may promote this URL. No refunds/withdrawals — stake = ad inventory.</span>
       </label>
       {process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ? (
         <div

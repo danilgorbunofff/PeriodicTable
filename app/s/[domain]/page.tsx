@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: { params: { domain: string } 
   if (!startup) return { title: "Startup not found — periodictable.lol" };
   return {
     title: `${domain} is on the table | periodictable.lol`,
-    description: startup.pitch || `${startup.title} holds territory on the periodic table.`,
+    description: startup.pitch || `${startup.title} is on the periodic table.`,
     openGraph: {
       title: `${domain} is on the table`,
       description: startup.pitch || undefined,

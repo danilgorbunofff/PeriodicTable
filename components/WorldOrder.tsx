@@ -28,7 +28,7 @@ export function WorldOrder({
     <div className={`flex flex-col ${expanded ? "h-full" : ""}`}>
       {expanded ? (
         <div
-          className="-mx-6 -mt-6 mb-4 flex shrink-0 items-start gap-3 px-6 pt-6 pb-5"
+          className="-mx-6 -mt-6 mb-4 relative flex shrink-0 items-start gap-3 px-6 pt-6 pb-5"
           style={{ background: "linear-gradient(180deg,#FFEFC1,#FFCE4B)" }}
         >
           <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white text-2xl shadow-card">⚗️</div>
@@ -37,6 +37,16 @@ export function WorldOrder({
             <h2 className="mt-0.5 font-display text-[27px] leading-none font-bold text-ink">Table Order</h2>
             <div className="mt-1.5 text-xs font-extrabold text-ink/70">TOP 10 · MOST SPENT</div>
           </div>
+          {onClose && (
+            <button
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/85 text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]"
+            >
+              ✕
+            </button>
+          )}
         </div>
       ) : (
         <div className="flex items-start justify-between">
@@ -46,16 +56,16 @@ export function WorldOrder({
             <div className="mt-1.5 text-xs font-extrabold text-moneyink">TOP 10 · MOST SPENT</div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {onExpand && (
+              <button aria-label="Expand" title="Expand" onClick={onExpand} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">⤢</button>
+            )}
             {onMinimize && (
               <button aria-label="Minimize table order" title="Minimize" onClick={onMinimize} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">
-                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                ✕
               </button>
             )}
             {onClose && (
               <button aria-label="Close" title="Close" onClick={onClose} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">✕</button>
-            )}
-            {onExpand && (
-              <button aria-label="Expand" title="Expand" onClick={onExpand} className="grid h-7 w-7 place-items-center rounded-full bg-icy text-mutedink hover:text-ink [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]">⤢</button>
             )}
           </div>
         </div>
