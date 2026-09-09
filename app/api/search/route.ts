@@ -10,8 +10,9 @@ export const dynamic = "force-dynamic";
 /**
  * Unified search (Phase 4, P1-06). Startup rows carry every field the client
  * renders — including the destination: the startup's leading element
- * (biggest stake, earliest first) plus its profile URL. Element rows are
- * plain tiles. At most 8 rows, startups first.
+ * (biggest stake, earliest first), its full owned-element list (capped),
+ * plus its profile URL. Element rows are plain tiles. At most 8 rows,
+ * startups first.
  */
 export async function GET(req: NextRequest) {
   const ip = clientIp(req.headers);
@@ -32,9 +33,10 @@ export async function GET(req: NextRequest) {
         domain: true,
         title: true,
         logoUrl: true,
+        _count: { select: { stakes: true } },
         stakes: {
           orderBy: [{ amountUsd: "desc" }, { createdAt: "asc" }, { id: "asc" }],
-          take: 1,
+          take: 5,
           include: { element: { select: { symbol: true, name: true } } },
         },
       },
@@ -51,6 +53,11 @@ export async function GET(req: NextRequest) {
   const startupHits: SearchHit[] = startups.flatMap((s) => {
     const lead = s.stakes[0];
     if (!lead) return [];
+    const elements = s.stakes.map((stake) => ({
+      symbol: stake.element.symbol,
+      elementName: stake.element.name,
+      amount: stake.amountUsd,
+    }));
     return [
       {
         type: "startup" as const,
@@ -61,6 +68,8 @@ export async function GET(req: NextRequest) {
         elementName: lead.element.name,
         amount: lead.amountUsd,
         profileUrl: `/s/${encodeURIComponent(s.domain)}`,
+        elements,
+        elementCount: s._count.stakes,
       },
     ];
   });

@@ -286,7 +286,7 @@ export function PeriodicGrid({
     <div
       ref={gridRef}
       role="grid"
-      aria-label="Periodic table of startup territories. Arrow keys move, Enter opens a territory, Escape returns to search."
+      aria-label="Periodic table of startups. Arrow keys move, Enter opens an element, Escape returns to search."
       onKeyDown={onKeyDown}
       className="relative isolate flex flex-col gap-1.5"
     >

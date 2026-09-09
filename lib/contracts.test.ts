@@ -54,7 +54,7 @@ describe("shape guards", () => {
   });
   it("search hits require destinations on startup rows", () => {
     expect(
-      isSearchHits([{ type: "startup", domain: "a.dev", symbol: "C", elementName: "Carbon", amount: 5, profileUrl: "/s/a.dev" }])
+      isSearchHits([{ type: "startup", domain: "a.dev", symbol: "C", elementName: "Carbon", amount: 5, profileUrl: "/s/a.dev", elements: [{ symbol: "C", elementName: "Carbon", amount: 5 }], elementCount: 1 }])
     ).toBe(true);
     expect(isSearchHits([{ type: "startup", domain: "a.dev", name: "A" }])).toBe(false);
     expect(isSearchHits([{ type: "element", symbol: "C", elementName: "Carbon" }])).toBe(true);

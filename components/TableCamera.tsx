@@ -377,22 +377,22 @@ export function TableCamera({
         </div>
       </div>
 
-      <div className="absolute bottom-5 md:bottom-[56px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] flex items-center gap-2 pointer-events-none">
+      <div className="absolute bottom-5 md:bottom-[56px] left-1/2 -translate-x-1/2 z-[var(--z-cards)] hidden md:flex items-center gap-2 pointer-events-none bg-black/55 backdrop-blur-md rounded-full px-2.5 py-1.5 shadow-lg">
         <IconBtn
           label="Zoom out"
-          className="pointer-events-auto"
+          className="pointer-events-auto !bg-white !text-ink"
           onClick={() => zoomFromCenter(0.82)}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2.5 7h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
         </IconBtn>
-        <span className="text-[11px] font-extrabold text-white/90 px-1 whitespace-nowrap [text-shadow:0_1px_3px_rgba(10,22,40,.85)]">
+        <span className="text-[11px] font-extrabold text-white/90 px-1 whitespace-nowrap">
           drag to pan · scroll to zoom
         </span>
         <IconBtn
           label="Zoom in"
-          className="pointer-events-auto"
+          className="pointer-events-auto !bg-white !text-ink"
           onClick={() => zoomFromCenter(1.22)}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -401,7 +401,7 @@ export function TableCamera({
         </IconBtn>
         <IconBtn
           label="Fit table"
-          className="pointer-events-auto"
+          className="pointer-events-auto !bg-white !text-ink"
           onClick={() => fit(true)}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">

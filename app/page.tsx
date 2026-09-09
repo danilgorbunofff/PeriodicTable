@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { fetchJson, isStatsResponse, isActivityRows, type Claim, type ActivityRow, type StatsResponse } from "../lib/api";
 import { PeriodicGrid } from "../components/PeriodicGrid";
@@ -42,6 +42,17 @@ function HomeInner() {
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [actMin, setActMin] = useState(false);
   const [railMin, setRailMin] = useState(false);
+  // Remembers a minimized rail across an element detour: opening an element
+  // pops the rail open, closing it restores the minimized state.
+  const railWasMin = useRef(false);
+
+  const closeElement = useCallback(() => {
+    setSelected(null);
+    if (railWasMin.current) {
+      railWasMin.current = false;
+      setRailMin(true);
+    }
+  }, []);
   const [expandOpen, setExpandOpen] = useState(false);
 
   // live table data (30s poll)
@@ -113,12 +124,14 @@ function HomeInner() {
     if (el) {
       setSelected(el);
       setRailMin(false);
+      setMobileActivityOpen(false);
     }
   }, []);
 
   const onSelectTile = useCallback((el: ElementNode) => {
     track("tile_click", { element: el.symbol });
     setSelected(el);
+    setMobileActivityOpen(false);
     setRailMin(false); // a minimized rail must pop back open to show the bidding view
     track("drawer_open", { element: el.symbol });
   }, []);
@@ -131,13 +144,13 @@ function HomeInner() {
       if (expandOpen) setExpandOpen(false);
       else if (searchOpen) setSearchOpen(false);
       else if (checkoutEl) setCheckoutEl(null);
-      else if (selected) setSelected(null);
+      else if (selected) closeElement();
       else if (mobileRailOpen) setMobileRailOpen(false);
       else if (mobileActivityOpen) setMobileActivityOpen(false);
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [searchOpen, checkoutEl, selected, mobileRailOpen, mobileActivityOpen, expandOpen]);
+  }, [searchOpen, checkoutEl, selected, mobileRailOpen, mobileActivityOpen, expandOpen, closeElement]);
 
   const onPick = (p: SearchPick) => {
     track("search_submit", { element: p.symbol });
@@ -206,7 +219,13 @@ function HomeInner() {
         <button
           aria-label="Live activity"
           aria-expanded={mobileActivityOpen}
-          onClick={() => setMobileActivityOpen((v) => !v)}
+          onClick={() => {
+            if (!mobileActivityOpen) {
+              setMobileRailOpen(false);
+              setSelected(null);
+            }
+            setMobileActivityOpen(!mobileActivityOpen);
+          }}
           className="absolute bottom-[18px] left-[18px] z-[var(--z-cards)] h-11 w-11 rounded-full bg-white shadow-float grid place-items-center"
         >
           <span className="relative flex h-2.5 w-2.5">
@@ -215,13 +234,8 @@ function HomeInner() {
           </span>
         </button>
         {mobileActivityOpen && (
-          <div
-            className="absolute bottom-[74px] left-[18px] z-[var(--z-cards)]"
-            onClick={(e) => {
-              if ((e.target as HTMLElement).closest("a")) setMobileActivityOpen(false);
-            }}
-          >
-            <ActivityCard rows={activity} />
+          <div className="absolute inset-x-3 bottom-3 z-[var(--z-rail)] max-h-[70vh] overflow-auto">
+            <ActivityCard rows={activity} fluid onClose={() => setMobileActivityOpen(false)} />
           </div>
         )}
       </div>
@@ -234,7 +248,7 @@ function HomeInner() {
               aria-label="Table order"
               aria-expanded={false}
               title="Show table order"
-              onClick={() => setRailMin(false)}
+              onClick={() => { railWasMin.current = false; setRailMin(false); }}
               className="h-11 w-11 rounded-full bg-cta text-ink shadow-float grid place-items-center text-lg font-display font-bold animate-panel-in"
             >
               ⚗️
@@ -243,9 +257,9 @@ function HomeInner() {
         ) : (
           <RailShell>
             {selected ? (
-              <TerritoryView el={selected} onClose={() => setSelected(null)} onStake={openStake} onExpand={() => setExpandOpen(true)} onMinimize={() => setRailMin(true)} />
+              <TerritoryView el={selected} onClose={closeElement} onStake={openStake} onExpand={() => setExpandOpen(true)} />
             ) : (
-              <WorldOrder onExpand={() => setExpandOpen(true)} onMinimize={() => setRailMin(true)} />
+              <WorldOrder onExpand={() => setExpandOpen(true)} onMinimize={() => { railWasMin.current = true; setRailMin(true); }} />
             )}
           </RailShell>
         )}
@@ -253,11 +267,14 @@ function HomeInner() {
 
       {/* rail — mobile/tablet FAB + bottom sheet */}
       <div className="lg:hidden">
-        {!selected && (
+        {!selected && !mobileActivityOpen && (
           <button
             aria-label="Table order"
             aria-expanded={mobileRailOpen}
-            onClick={() => setMobileRailOpen((v) => !v)}
+            onClick={() => {
+              if (!mobileRailOpen) setMobileActivityOpen(false);
+              setMobileRailOpen(!mobileRailOpen);
+            }}
             className="absolute bottom-[18px] right-[18px] z-[var(--z-rail)] h-11 w-11 rounded-full bg-cta text-ink shadow-float grid place-items-center text-lg font-display font-bold"
           >
             ⚗️
@@ -269,7 +286,7 @@ function HomeInner() {
               {selected ? (
                 <TerritoryView
                   el={selected}
-                  onClose={() => setSelected(null)}
+                  onClose={closeElement}
                   onStake={openStake}
                   onExpand={() => setExpandOpen(true)}
                 />
@@ -288,6 +305,7 @@ function HomeInner() {
         onClose={() => setExpandOpen(false)}
         label={selected ? `${selected.name} — expanded view` : "Table Order — expanded view"}
         size="lg"
+        hideClose
       >
         {selected ? (
           <TerritoryView
@@ -300,7 +318,7 @@ function HomeInner() {
             expanded
           />
         ) : (
-          <WorldOrder expanded />
+          <WorldOrder expanded onClose={() => setExpandOpen(false)} />
         )}
       </Modal>
       <CheckoutPreview

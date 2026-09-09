@@ -16,7 +16,7 @@ function FoldChevron({ open }: { open: boolean }) {
       className={`transition-transform duration-200 ${open ? "" : "rotate-180"}`}
     >
       <path
-        d="M7.5 2.5 4 6l3.5 3.5"
+        d="M6.5 2.5 3 6l3.5 3.5M10 2.5 6.5 6 10 9.5"
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
