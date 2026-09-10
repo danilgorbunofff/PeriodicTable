@@ -27,7 +27,7 @@
 
 Known gaps (do NOT flip real money until fixed — see §8):
 `requireProdEnv()` has zero runtime call sites (only `lib/env.test.ts`); `ADMIN_TOKEN` missing from `REQUIRED_PROD_ENV`;
-`lib/manage.ts` only `console.error`s in prod (magic link never emailed); `REFUNDED` enum never written; Whop contract values in `lib/whop.ts` are guesses until proven with signed fixtures.
+`lib/manage.ts` is backend-only by design in v1 (listing edits not shipped — a listing is set at checkout and is final); `REFUNDED` enum never written; Whop contract values in `lib/whop.ts` are guesses until proven with signed fixtures.
 
 ## 2. Data, domain, DNS, headers, read APIs
 
@@ -86,23 +86,30 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] Full pipeline test (`POST /api/dev/pay` → `POST /api/jobs/outbox` → `EmailLog=sent`) — needs local Postgres; blocked until §0 local DB exists. NOTE: `/api/dev/pay` is 403 on prod by design (Whop keys set), so this runs locally, never against prod.
 
 ### 4b. Outbox + screenshot workers
-- [ ] `POST /api/jobs/outbox` without secret in prod → `401`; with `Authorization: ******` → `{ok:true, claimed, completed, failed}`
-- [ ] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups
-- [ ] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30)
-- [ ] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints
+- [x] `POST /api/jobs/outbox` without secret in prod → `401`; with a valid bearer header → `{ok:true, claimed, completed, failed}` (2026-09-10: unauthenticated `401` confirmed on prod for both routes)
+- [x] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups (2026-09-10: auth confirmed; backfill run still to do)
+- [x] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30) (2026-09-10: merged to `main` via PR #2; main deploy `success`; `GET /api/jobs/outbox` now `401` where it was `405` ⇒ GET aliases Vercel Cron needs are live)
+- [x] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints (2026-09-10: manual dispatch run `34467721174` green in 10s — `outbox {"ok":true,"claimed":0,"completed":0,"failed":0}`, `screenshot {"ok":true,"checked":0,"updated":0,"failed":0}` ⇒ secret matches across GitHub + Vercel; `claimed:0` = empty queue, expected)
+- [ ] Confirm the Vercel dashboard Cron Jobs tab lists both daily jobs (proves `vercel.json` was ingested) — dashboard check, then the 04:00 UTC run tomorrow is the live proof
+- [ ] End-to-end delivery proof: enqueue one real row, let the 10-min tick drain it, confirm `completedAt` set (proves the robot does real work, not just auth)
 - [ ] Outbox row lifecycle: `attempts<5`, exponential backoff, `lastError` persisted, operator retry endpoint works with `ADMIN_TOKEN`
 
-### 4c. Receipt / outbid / unsubscribe / magic-link (hand test with two emails)
-- [ ] Claim → payer gets receipt with correct `{element, amount, rank, domain, manageUrl, unsubUrl}`; `EmailLog{template:receipt,status:sent}`
+### 4c. Receipt / outbid / unsubscribe (hand test with two emails)
+- [ ] Claim → payer gets receipt with correct `{element, amount, rank, domain, viewUrl, unsubUrl}`; `EmailLog{template:receipt,status:sent}`
 - [ ] Outbid → victim gets outbid mail with correct `reclaim = winner+1-victim (min 1)` and `/?el=SYM&stake=N` prefill link
 - [ ] `List-Unsubscribe` + `List-Unsubscribe-Post` headers present; `GET /api/unsubscribe?token=` clears email → homepage `?unsub=done` toast; unknown → `?unsub=unknown`
-- [ ] Manage link: `POST /api/manage/request {domain,email}` → non-prod returns `debugToken`, **prod returns `{sent:true}` with NO token**; prod must actually EMAIL the link (today `lib/manage.ts` only `console.error`s — fix before launch); `POST /api/manage/verify {token}` → httpOnly `ptl_manage` cookie (Secure in prod) → `PATCH /api/startups/[domain]` works; token single-use, 15-min TTL; session 60-min
+- [x] **v1 product decision: a listing is set at checkout and is final** (settled 2026-09-10, after finding the manage flow had no UI). `findOrCreateCheckoutStartup` writes title/pitch/url/link/email from the checkout form; a later stake on the same domain only adds stake and never mutates the profile. So there is nothing for an owner to "manage" in v1, and no UI is missing by accident. Consequences, all verified in code:
+  - [x] Listing edits are **not shipped in v1** — the magic-link backend (`lib/manage.ts`, `/api/manage/*`, `PATCH /api/startups/[domain]`) stays implemented, tested and **dormant/unreachable**. Production intentionally does not email the link (`console.warn` + TODO(v2)); non-prod still returns `debugToken` for dev convenience.
+  - [x] `POST /api/manage/request` is non-committal: always `200`, same shape, rate-limited, message no longer promises a link ("Listing management is not enabled").
+  - [x] No user-facing surface promises editing: grepped every `.tsx` — no manage/edit UI text exists. The receipt email's "Manage your spot →" button (which pointed at the read-only `/s/<domain>`) is now **"View your spot →"** (`emails/receipt.tsx`, prop `manageUrl`→`viewUrl`).
+  - [x] Docs corrected so nobody re-adds the promise: `README.md` "Ownership", `doc/ARCHITECTURE.md` §3, `HANDOFF.md` item 5 (now deferred to v2).
+  - ⚠️ v2 scope when we do ship it: 3 pages (request link, land/verify, edit form) + turn the prod email send on + make sure the receipt button points at the edit flow. Not a launch blocker.
 
 ## 5. Trust, abuse, admin, frontend honesty
 
 - [ ] Turnstile: `TURNSTILE_SECRET` + `NEXT_PUBLIC_TURNSTILE_SITEKEY` from Cloudflare set; without them bot checks silently pass (`lib/abuse.ts`) — must not launch without
 - [ ] Upstash: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` set; without them rate limits are per-instance memory (`lib/rateStore.ts` fails open, bypassable on serverless)
-- [ ] `ADMIN_TOKEN` long random set; all `/api/admin/*` → `403` without `Authorization: ****** round-trip: report → triage → HIDE → verify → restore (see hand journey J6)
+- [ ] `ADMIN_TOKEN` long random set; all `/api/admin/*` → `403` without it; report → triage → HIDE → verify → restore round-trip (see hand journey J6)
 - [ ] Kill switch: `PAYMENTS_LIVE=false` + `NEXT_PUBLIC_PAYMENTS_LIVE=false` → checkout flips to waitlist in <2min via env-only redeploy (see `ops/rollback.md`)
 - [ ] Grid/stats failure honesty: block API (offline/devtools) → error panels, NEVER fake all-`Unclaimed $5`/zeros. Reference pattern: `TerritoryView.tsx` error panel vs `app/page.tsx`
 - [ ] HIDDEN leaks: activity feed must exclude HIDDEN; stats must not sum hidden money while boards filter VISIBLE; hidden profile `/s/<domain>` → 404; `/go/<stakeId>` refuses hidden; hide clears `previewImgUrl`

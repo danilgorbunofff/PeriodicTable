@@ -1,9 +1,15 @@
 /**
- * Email magic-link management (Phase 1 remediation).
+ * Email magic-link management (Phase 1 remediation) — BACKEND ONLY: NOT
+ * SHIPPED IN v1, and unreachable from the UI.
  *
- * Flow: POST /api/manage/request (domain+email) → opaque token emailed →
- * POST /api/manage/verify {token} → httpOnly session cookie →
- * PATCH /api/startups/[domain] (session required).
+ * v1 model: a listing is set at checkout and is final. The manage pages were
+ * designed but never built, and production never emails the link, so this
+ * module is dormant. Keep it dormant until the pages + delivery exist — do
+ * not surface it to users (see README "Ownership" and doc/ARCHITECTURE.md §3).
+ *
+ * Flow (when it is eventually shipped): POST /api/manage/request (domain+email)
+ * → opaque token emailed → POST /api/manage/verify {token} → httpOnly session
+ * cookie → PATCH /api/startups/[domain] (session required).
  *
  * Security properties:
  * - Only sha256 hashes are stored; raw tokens exist in email/cookie only.
@@ -11,7 +17,7 @@
  * - Sessions are short-lived (60 min), revocable by expiry, cookie httpOnly.
  * - Request endpoint never reveals whether a domain exists (no oracle).
  * - Raw tokens are returned by requestManageToken ONLY outside production
- *   (dev convenience); production delivers via email exclusively.
+ *   (dev convenience); production never delivers them.
  */
 import { createHash, randomBytes } from "crypto";
 import { prisma } from "./prisma";
@@ -52,10 +58,13 @@ export async function requestManageToken(params: {
       },
     });
     await audit({ action: "MANAGE_LINK_REQUESTED", startupId: startup.id, detail: email });
-    // Delivery: email in production (Phase 6 outbox); dev returns the token.
+    // v1: listing edits are not shipped (no UI, no delivery) — see README
+    // "Ownership". Production deliberately drops the link instead of
+    // half-delivering it; the token simply expires unused. Dev still returns
+    // the raw token so the token/session logic stays testable.
     if (!isProduction()) return { sent: true, debugToken: raw };
-    // TODO(Phase 6): enqueue manage-link email via OutboxEvent instead of dropping.
-    console.error(`manage link for ${domain} requested; email delivery lands in Phase 6`);
+    // TODO(v2): ship the management pages, then enqueue the link via OutboxEvent.
+    console.warn(`manage link requested for ${domain}, but listing management is not shipped (v1); link not sent`);
     return { sent: true };
   }
   return { sent: true };

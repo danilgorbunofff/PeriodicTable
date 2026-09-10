@@ -100,11 +100,17 @@ Do not set `PAYMENTS_LIVE=true` in production until every release gate in
 
 ## Ownership
 
-Checkout never mutates an existing startup profile: identity is derived
-server-side from the validated URL/handle, and url/title/pitch/link/email
-change only through an email magic-link management session
-(`POST /api/manage/request` → `POST /api/manage/verify` → cookie →
-`PATCH /api/startups/[domain]`). Every mutation writes an `AuditLog` row.
+**v1: a listing is set at checkout and is final.** Identity is derived
+server-side from the validated URL/handle (`findOrCreateCheckoutStartup`),
+and checkout never mutates an existing startup profile — a later stake on the
+same domain only adds stake. Title, pitch, url, link and email come from the
+buyer's checkout form, so what they submit is what ships.
+
+Editing an existing listing is **not shipped in v1**. The magic-link backend
+(`lib/manage.ts`, `/api/manage/*` → `PATCH /api/startups/[domain]`) exists and
+is tested, but has no UI and production never emails the link, so it is
+deliberately dormant and unreachable. Do not advertise it until the management
+pages and delivery ship. Every mutation writes an `AuditLog` row.
 
 ## Payments (take quotes + settlement)
 

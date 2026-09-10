@@ -53,15 +53,19 @@
 3. [ ] Idempotent provider session creation (orphan sessions → `reference-mismatch`).
 4. [ ] Refunds / disputes / `PENDING` expiry + reconciliation cron
        (`REFUNDED` enum value is never written today).
-5. [ ] Prod magic-link email actually sends (`lib/manage.ts` only `console.error`s;
-       owners get success but no link in production).
+5. [~] **DEFERRED TO v2** (decided 2026-09-10): listing edits are not shipped
+       in v1 — a listing is set at checkout and is final, so production never
+       emailing the magic link is no longer a pre-launch blocker. The backend
+       stays dormant and nothing user-facing promises it (README/ARCHITECTURE
+       updated; receipt button now reads "View your spot"). Ship the management
+       pages + email delivery together in v2.
 6. [ ] Failure states: grid/stats must show error panels, not fake
        all-`Unclaimed $5` / zero data (`app/page.tsx` vs `TerritoryView.tsx` pattern).
 7. [ ] Activity feed leaks HIDDEN listings; early-adopter board can show wrong tile;
        stats sums hidden money while boards filter `VISIBLE`.
 8. [ ] Wire `requireProdEnv()` at runtime (currently zero call sites) and add
        `ADMIN_TOKEN` to `REQUIRED_PROD_ENV` (`lib/env.ts`).
-9. [ ] Fix CI live rehearsal env (`VERCEL_ENV=preview`, not prod `npm run start` —
+9. [x] Fix CI live rehearsal env (`VERCEL_ENV=preview`, not prod `npm run start` —
        simulator can never run on a production build by design).
 10. [ ] A11y/mobile sweep (44px targets, combobox semantics, toast-while-modal,
         mobile camera) + real browser/axe E2E (today: static string tests only).

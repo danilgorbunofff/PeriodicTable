@@ -43,9 +43,16 @@ deterministic 2xx; unexpected failures are non-2xx so providers redeliver.
 ## 3. Ownership
 
 Checkout derives identity server-side and never mutates existing profiles
-(`findOrCreateCheckoutStartup`). Profile changes require an email magic-link
-session (`/api/manage/*` → `PATCH /api/startups/[domain]`). Every mutation
-writes `AuditLog`. Unsubscribe is POST-first (RFC 8058); no emails in URLs.
+(`findOrCreateCheckoutStartup`): a listing is created from the buyer's checkout
+form and is then final for the life of v1. A later stake on the same domain
+only adds stake.
+
+Editing an existing listing is designed but **not shipped in v1**. The
+magic-link session backend (`/api/manage/*` → `PATCH /api/startups/[domain]`)
+is implemented and tested, but has no UI and production never sends the link —
+so it is dormant and unreachable, and no user-facing surface may promise it.
+Every mutation writes `AuditLog`. Unsubscribe is POST-first (RFC 8058); no
+emails in URLs.
 
 ## 4. Reservations (take-lead quotes, P0-05)
 

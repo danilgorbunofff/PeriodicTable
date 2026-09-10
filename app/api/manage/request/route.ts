@@ -8,8 +8,10 @@ export const dynamic = "force-dynamic";
 /**
  * Request a management magic link for a startup domain. Always 200 with the
  * same shape (no oracle for domain enumeration). Rate-limited per IP.
- * Non-production returns the raw token for dev convenience; production
- * delivers via email only (Phase 6 outbox).
+ *
+ * NOT SHIPPED IN v1: listing edits have no UI and production emails nothing,
+ * so the note below must not promise delivery (see lib/manage.ts). Non-production
+ * still returns the raw token for dev convenience.
  */
 export async function POST(req: NextRequest) {
   const ip = clientIp(req.headers);
@@ -31,7 +33,7 @@ export async function POST(req: NextRequest) {
   const result = await requestManageToken({ domain: body.domain, email: body.email });
   return NextResponse.json({
     ok: true,
-    note: "If the domain exists, a management link is on its way.",
+    note: "Listing management is not enabled — your listing is set at checkout and is final.",
     ...(result.debugToken ? { debugToken: result.debugToken } : {}),
   });
 }

@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       amountUsd: 21,
       rank: 1,
       domain: "b.com",
-      manageUrl: "http://localhost:3000/s/b.com",
+      viewUrl: "http://localhost:3000/s/b.com",
       unsubUrl: "http://localhost:3000/api/unsubscribe?token=preview",
     });
     return new NextResponse(html, { headers: { "Content-Type": "text/html" } });
