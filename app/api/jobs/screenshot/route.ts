@@ -64,3 +64,8 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ ok: true, checked: claimed.length, updated, failed });
 }
+
+/** Vercel Cron invokes the path with GET (see vercel.json); same auth, default bounds. */
+export async function GET(req: NextRequest) {
+  return POST(req);
+}

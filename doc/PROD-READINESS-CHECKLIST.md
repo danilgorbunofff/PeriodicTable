@@ -23,7 +23,7 @@
 | Vulns | `npm run audit:prod` | `no unaccepted high/critical` |
 | Prod-env fail-closed | `VERCEL_ENV=production NODE_ENV=production node scripts/check-prod-env.mjs` (no secrets) | exits 1 listing missing keys |
 | Prod-env pass | same command **with** all prod secrets exported | `production config OK` |
-| No scheduler file | `ls vercel.json` | must NOT exist (cron configured in Vercel dashboard, see §5) |
+| Cron file present | `cat vercel.json` | 2 daily crons (outbox 04:00, screenshot 04:30) — Vercel cannot create crons from the dashboard, and Hobby allows only 2 jobs at once-a-day frequency |
 
 Known gaps (do NOT flip real money until fixed — see §8):
 `requireProdEnv()` has zero runtime call sites (only `lib/env.test.ts`); `ADMIN_TOKEN` missing from `REQUIRED_PROD_ENV`;
@@ -88,7 +88,8 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 ### 4b. Outbox + screenshot workers
 - [ ] `POST /api/jobs/outbox` without secret in prod → `401`; with `Authorization: ******` → `{ok:true, claimed, completed, failed}`
 - [ ] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups
-- [ ] Vercel Cron exists: `/api/jobs/outbox` + `/api/jobs/screenshot` on schedule with `CRON_SECRET` bearer (repo has no `vercel.json` — without this, receipts/previews pile up unsent)
+- [ ] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30)
+- [ ] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints
 - [ ] Outbox row lifecycle: `attempts<5`, exponential backoff, `lastError` persisted, operator retry endpoint works with `ADMIN_TOKEN`
 
 ### 4c. Receipt / outbid / unsubscribe / magic-link (hand test with two emails)
