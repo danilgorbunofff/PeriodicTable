@@ -5,6 +5,7 @@ import { hasTestDb, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { settlePayment } from "./settle";
+import { attachPreview } from "./outbox";
 import { GET as searchGET } from "../app/api/search/route";
 import { GET as tableOrderGET } from "../app/api/table-order/route";
 import { GET as boardGET } from "../app/api/board/route";
@@ -215,5 +216,23 @@ describe.skipIf(!hasDb)("unsubscribe semantics (P1-18)", () => {
       req("/api/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: "nope" }) })
     );
     expect(unknown.status).toBe(200);
+  });
+});
+
+describe.skipIf(!hasDb)("preview writes respect moderation (P1-14 retention)", () => {
+  it("a late probe result cannot re-attach a preview to a moderated listing", async () => {
+    const { id } = await prisma.startup.findUniqueOrThrow({ where: { domain: "modhide-t.dev" }, select: { id: true } });
+    const late = "https://iad.microlink.io/late-probe.png";
+
+    for (const state of ["HIDDEN", "UNLISTED"] as const) {
+      await prisma.startup.update({ where: { id }, data: { moderationState: state, previewImgUrl: null } });
+      expect((await attachPreview(id, late)).count).toBe(0);
+      expect((await prisma.startup.findUniqueOrThrow({ where: { id } })).previewImgUrl).toBeNull();
+    }
+
+    await prisma.startup.update({ where: { id }, data: { moderationState: "VISIBLE" } });
+    expect((await attachPreview(id, late)).count).toBe(1);
+    expect((await prisma.startup.findUniqueOrThrow({ where: { id } })).previewImgUrl).toBe(late);
+    await prisma.startup.update({ where: { id }, data: { previewImgUrl: null } });
   });
 });

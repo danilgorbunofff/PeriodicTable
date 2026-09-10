@@ -57,6 +57,19 @@ function backoffMs(attempts: number): number {
   return Math.min(60 * 60_000, 30_000 * 2 ** attempts);
 }
 
+/** Attach a generated preview, but only while the listing is publicly visible.
+ *
+ * The Microlink probe takes seconds, so this write can land AFTER a moderator
+ * hid the listing — an unconditional update would silently undo the takedown's
+ * retention clear of `previewImgUrl`. Moderation wins: hidden/unlisted rows are
+ * left untouched (0 rows updated) and the outbox row completes without retry. */
+export function attachPreview(startupId: string, previewImgUrl: string) {
+  return prisma.startup.updateMany({
+    where: { id: startupId, moderationState: "VISIBLE" },
+    data: { previewImgUrl },
+  });
+}
+
 async function handleOne(type: string, payload: Record<string, unknown>): Promise<void> {
   switch (type) {
     case "RECEIPT_EMAIL":
@@ -70,7 +83,7 @@ async function handleOne(type: string, payload: Record<string, unknown>): Promis
       await persistPreview({
         startupId: p.startupId,
         url: p.url,
-        store: (startupId, previewImgUrl) => prisma.startup.update({ where: { id: startupId }, data: { previewImgUrl } }),
+        store: attachPreview,
       });
       return;
     }
