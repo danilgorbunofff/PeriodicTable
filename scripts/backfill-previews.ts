@@ -10,7 +10,10 @@ const prisma = new PrismaClient();
 async function main() {
   const limitArg = process.argv.find((a) => a.startsWith("--limit="));
   const limit = Math.min(Math.max(parseInt(limitArg?.split("=")[1] ?? "50", 10) || 50, 1), 500);
-  const targets = await prisma.startup.findMany({ where: { previewImgUrl: null }, take: limit });
+  const targets = await prisma.startup.findMany({
+    where: { previewImgUrl: null, moderationState: "VISIBLE" },
+    take: limit,
+  });
   console.log(`backfill-previews: ${targets.length} startups without preview`);
   let updated = 0;
   for (const s of targets) {
@@ -19,9 +22,17 @@ async function main() {
       shot = await probeShot(s.url);
     }
     if (shot) {
-      await prisma.startup.update({ where: { id: s.id }, data: { previewImgUrl: shot } });
-      updated++;
-      console.log(`  + ${s.domain}`);
+      // Conditional: a hide during the probe must win over the backfill.
+      const { count } = await prisma.startup.updateMany({
+        where: { id: s.id, moderationState: "VISIBLE" },
+        data: { previewImgUrl: shot },
+      });
+      if (count) {
+        updated++;
+        console.log(`  + ${s.domain}`);
+      } else {
+        console.log(`  - ${s.domain} (moderated during probe, skipped)`);
+      }
     } else {
       console.log(`  x ${s.domain} (shot unreachable, kept favicon fallback)`);
     }
