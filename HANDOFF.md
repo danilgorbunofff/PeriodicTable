@@ -10,16 +10,27 @@
 
 ---
 
-## Read this first — the three things that matter
+## Read this first — what is still open
 
-### 1. 🔴 THE TOP BLOCKER: prod is full of fake demo claims
+### 1. ✅ RESOLVED — fake demo claims removed from prod (2026-09-10)
 
-Prod shows **10 claimed elements, 12 stakes, $410 "staked"** — and every one of
-them is **seed/demo data**, not a real customer. Live right now:
+Prod *was* showing **10 claimed elements, 12 stakes, $410 "staked"**, all of it
+seed/demo data. `/api/stats` now returns:
+
+```json
+{ "elementsTotal": 122, "claimedElements": 0, "unclaimedElements": 122, "stakeCount": 0, "totalStakedUsd": 0 }
+```
+
+`/api/activity` returns `[]`, and `/api/elements/C` returns an empty `stakes`
+list at `pool: 0` — the real `takeLead: 5` floor is no longer hidden behind a
+$50 demo leader. The elements table and its 122 rows are untouched.
+
+**What was actually there** (the table originally in this doc listed wrong
+amounts — adyen was $24, not $31; squareup $9, not $18):
 
 | Element | Leader shown | Amount |
 | --- | --- | --- |
-| C | `stripe.com` (plus adyen.com #2, squareup.com #3) | $50 |
+| C | `stripe.com` (adyen.com #2, squareup.com #3) | $50 |
 | Au | `coinbase.com` | $88 |
 | DM | `anthropic.com` | $66 |
 | Pt | `coinbase.com` | $42 |
@@ -30,44 +41,81 @@ them is **seed/demo data**, not a real customer. Live right now:
 | H | `cloudflare.com` | $12 |
 | He | `cloudflare.com` | $10 |
 
-**How we know it is demo data:** those domains come from `mocks/startups.ts`
-(`MOCK_STAKES`), which `prisma/seed.ts` upserts as "6 demo startups + stakes".
-The live `/api/elements/C` detail returns exactly the mock ranks and amounts
-(stripe #1 $50, adyen #2 $31, squareup #3 $18), and `/api/activity` streams the
-same fake companies.
+**Corrections to the original write-up of this item** (it was wrong on both
+counts that mattered):
 
-**Why this blocks launch:**
-- New users see fake traction — famous companies that never claimed anything.
-- Those are real company names **and logos**, used without permission
-  (Stripe, NVIDIA, Coinbase, Cloudflare, Supabase, Anthropic). This is a
-  trademark/endorsement risk the moment the site is promoted.
-- A brand-new territory map that already looks "taken" kills the reason to join.
+- The data did **not** come from `mocks/startups.ts` (`MOCK_STAKES`, which is
+  local demo only). The prod seeder is **`prisma/launch-seed.ts`** — its 12
+  stakes match the live ladder exactly. It writes **9** domains, not 6, and 0 of
+  them ever had an email, a `Payment`, or a manage token.
+- A cleanup tool **did** exist: `launch-seed.ts --fresh` already implemented an
+  FK-safe wipe. It is blanket, though — it clears `Report`/`EmailLog` too — so
+  the scoped script below supersedes it.
 
-**Fix:** delete the demo rows from the Neon prod database before launch.
-⚠️ **There is no script for this** — `scripts/` has no cleanup tool and the seed
-is upsert-only (it skips elements that already have stakes, so re-seeding will
-not clear them). Options: a guarded SQL delete of the demo startups/stakes, or a
-small `scripts/clear-demo-data.ts`. Either way, confirm what is left with
-`curl -s https://www.periodictable.lol/api/stats` → expect
-`claimedElements:0, stakeCount:0, totalStakedUsd:0`.
+**The tool that did it: `scripts/clear-demo-data.ts`**
+(`npm run db:clear-demo`) — **dry run by default**; writing needs
+`-- --apply --allow-remote`. It is provenance-guarded: a demo domain is only
+deleted while it still looks exactly as the seed left it (no email, no payment,
+no manage token/session, no operator moderation). Any deviation aborts the
+**entire** run rather than half-deleting. It computes the dry-run plan by
+executing the real statements inside a transaction and rolling back, so a dry
+run also proves the delete ordering is FK-valid. Element aggregates are
+recomputed through the shared `rankStakes`/`assertLedgerInvariants` path, never
+ad hoc. `lib/demoData.test.ts` guards the domain allowlist against drift from
+both seeder files.
 
-### 2. 🔴 The 10-minute worker timer has never once fired
+Deleted 59 rows: `firstClaim` 10, `report` 2, `clickEvent` 5, `stake` 12,
+`activityLog` 12, `outboxEvent` 9, `startup` 9. `Payment` and `WaitlistEntry`
+were both empty — no real payment or signup was ever at risk.
+
+⚠️ **Two traps found while doing this, both still live:**
+
+1. **The local `.env` `DATABASE_URL` points at the production Neon database.**
+   Running `npm run seed` or `npm run db:migrate` from this laptop mutates prod.
+   Prefer `db:clear-demo`'s dry run as the pattern for anything touching data.
+2. **Prod has no `_prisma_migrations` table at all.** The schema was created by
+   `db push`, so a build command containing `prisma migrate deploy` would try to
+   replay `0000_baseline` over existing tables. See "What is next" — this needs
+   a decision before it bites.
+
+Backup taken immediately before the cleanup (verified complete, contains all 9
+startups and 12 stakes): `prod-backup-20260910-213853.sql` in the session
+artifacts folder.
+
+### 2. 🟠 The 10-minute worker timer fires, but nowhere near every 10 minutes
 
 `.github/workflows/outbox-tick.yml` is registered on `main`, `state:active`,
-cron `*/10 * * * *` — and at 12:10Z the repo-wide run API returned **33 runs
-(17 push + 10 pull_request + 6 workflow_dispatch) and 0 `schedule`**: nine
-consecutive missed boundaries, 1 h 25 m after registration.
+cron `*/10 * * * *`. The original version of this section said it had "never
+once fired" — that is **stale**. It has fired: exactly **2 `schedule` runs**,
+both `success`:
+
+- `2026-09-10T14:39:33Z`
+- `2026-09-10T17:51:34Z`
+
+But that is **3 h 12 m apart**. In a window that should hold ~20 ticks, 2
+landed. The timer is not dead — it is throttled into uselessness, which is
+normal for GitHub scheduled workflows (best-effort, de-prioritised; a `*/10`
+expression on a low-traffic repo will never hold cadence). Do not design around
+it.
 
 **Not launch-blocking** because receipts and outbid mail are sent **inline** at
 webhook time — the outbox is the *retry* path, and previews render nowhere in
-v1. A late tick delays a retry; it never silences first-time mail.
+v1. A late tick delays a retry; it never silences first-time mail. Treat the
+in-repo cron as the fallback and the external pinger as the real schedule.
 
-**Fallback (one dashboard action, user-side):** a free 10-minute pinger such as
+**Fix (one dashboard action, user-side):** a free 10-minute pinger such as
 cron-job.org. Verified ready for it — both paths accept a plain **GET** with
-`Authorization: Bearer <CRON_SECRET>` and need no body, and a deliberately
-wrong secret returns **401 on both**, so a 200 is real proof:
+header `Authorization` set to a bearer token taken from the `CRON_SECRET`
+env var, and need no body; a deliberately wrong secret returns **401 on
+both**, so a 200 is real proof:
+
 - `https://www.periodictable.lol/api/jobs/outbox`
 - `https://www.periodictable.lol/api/jobs/screenshot`
+
+`vercel.json` carries only `crons` entries (daily 04:00 outbox, 04:30
+screenshot); that access model belongs in the reference section next to the
+pinger.
+
 
 ### 3. ✅ `main` is green, and two real prod bugs were found and fixed today
 
@@ -94,11 +142,15 @@ wrong secret returns **401 on both**, so a 200 is real proof:
 
 **Done and proven**
 - [x] Deployed on Vercel (`periodic-table`, auto-deploys `main`); main CI green
-- [x] Neon Postgres connected + migrated — **122 elements live**
+- [x] Neon Postgres connected — **122 elements live** (schema applied with
+      `db push`, so there is **no `_prisma_migrations` table** — see the trap below)
 - [x] Custom domain live: `periodictable.lol` → 308 → `www.periodictable.lol`
 - [x] Security headers + CSP live in prod (`next.config.mjs`, prod-only block)
 - [x] All 6 read APIs 200 on the custom domain
 - [x] Payments **safely paused**: `POST /api/checkout` → `403` (waitlist)
+- [x] **Demo/seed listings cleared from prod** (§1) — 59 rows across 7 tables;
+      `/api/stats` → 0 claimed, 0 stakes, $0; checked with
+      `scripts/clear-demo-data.ts` (`npm run db:clear-demo`, dry run first)
 - [x] Resend domain `periodictable.lol` verified (DNS via GoDaddy, mail rows intact)
 - [x] Resend key **deleted + recreated** after a chat exposure; direct-API test
       delivered to an inbox (landed in Gmail *spam* — expected for a bare test
@@ -113,8 +165,7 @@ wrong secret returns **401 on both**, so a 200 is real proof:
       edits deferred to v2; nothing user-facing promises a manage flow)
 
 **Known broken / unproven**
-- [ ] 🔴 **Demo data in prod** (§1) — top blocker
-- [ ] 🔴 **GitHub cron never fires** (§2)
+- [ ] 🟠 **GitHub cron is throttled to hours, not 10 min** (§2)
 - [ ] `requireProdEnv()` has **zero runtime call sites** (only `lib/env.test.ts`)
       and `ADMIN_TOKEN` is **not** in `REQUIRED_PROD_ENV` (`lib/env.ts:37`) —
       re-verified 2026-09-10. Prod can boot under-configured with no hard failure.
@@ -142,9 +193,19 @@ wrong secret returns **401 on both**, so a 200 is real proof:
   `200 passed | 41 skipped`; CI runs `241 passed (241)` with **0 skipped**. A green
   local run is **not** proof the integration path works — that is exactly how the
   takedown bug sat unnoticed in `main`. Let CI be the DB oracle.
-- **`npm run lint` and `npx eslint` hang in this Windows environment** (14+ min, no
-  output; the repo path contains a comma). CI on Linux lints fine. Locally, use
-  `npm run typecheck` + `npm run test:ci`.
+- **`npm run lint` is fast and clean on macOS** (`✔ No ESLint warnings or errors`,
+  verified 2026-09-10). An earlier revision of this doc claimed lint *hangs* —
+  that was a different machine (Windows, repo path containing a comma). Ignore it.
+  Use `npm run typecheck` + `npm run test:ci` for a fast local gate.
+- ⚠️ **The local `.env` `DATABASE_URL` points at the production Neon database.**
+  `npm run seed` and `npm run db:migrate` run straight against prod from this
+  laptop. Anything that writes rows should be dry-run-first and guarded the way
+  `scripts/clear-demo-data.ts` is.
+- ⚠️ **Prod has no `_prisma_migrations` table.** The schema was created with
+  `db push`, not `migrate`. If the Vercel build command runs
+  `prisma migrate deploy`, it will try to replay `0000_baseline` over tables that
+  already exist. Decide: baseline the migration table, or drop `migrate deploy`
+  from the build and keep using `db push`.
 - CI runs on `push` to `main` **and** `pull_request`. **The post-merge `push` run
   can fail even when the PR run passed** — always re-check `main` after merging.
 - Secrets must never be pasted into chat. A Resend key leaked that way once and
@@ -154,7 +215,8 @@ wrong secret returns **401 on both**, so a 200 is real proof:
 
 ## What is next, in order
 
-1. **Clear the demo data from prod** (§1) — the only true launch blocker.
+1. **Decide the migration story** (`_prisma_migrations` trap above) — cheapest to
+   settle now, while prod is still empty of real rows.
 2. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
 3. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
