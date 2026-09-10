@@ -183,13 +183,23 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
     const stakes = await tx.stake.findMany({
       where: { elementId: element.id },
       orderBy: [{ amountUsd: "desc" }, { createdAt: "asc" }, { id: "asc" }],
-      select: { amountUsd: true, startupId: true },
+      select: { amountUsd: true, startupId: true, startup: { select: { moderationState: true } } },
     });
-    const leaderTotal = stakes[0]?.amountUsd as number | undefined;
-    const leaderStartupId = stakes[0]?.startupId as string | undefined;
+    // Price off the leader the buyer was actually shown. Identity-bearing
+    // surfaces exclude HIDDEN listings (lib/moderation.ts), and the displayed
+    // take-lead price is derived from that filtered list
+    // (app/api/elements/[sym]/route.ts) — so pricing off the unfiltered top
+    // stake could demand more than the page advertised, or classify the
+    // advertised amount as a mere join. Hidden money still counts in
+    // pool/count (deliberate policy); it just no longer sets the price.
+    const leader = stakes.find((s) => s.startup.moderationState !== "HIDDEN");
+    const leaderTotal = leader?.amountUsd as number | undefined;
+    const leaderStartupId = leader?.startupId as string | undefined;
     const myStake = existing ? stakes.find((s) => s.startupId === existing.id) : undefined;
     const isNewHere = !myStake;
     const myPriorTotal = myStake ? (myStake.amountUsd as number) : 0;
+    // Deliberately unfiltered: this is the no-tie guard, and a collision with a
+    // hidden row is still a collision in the ledger ranking.
     const existingTotals = stakes.map((s) => s.amountUsd as number);
 
     // Phase 3: single classify+validate source (pre-check ran unlocked; this

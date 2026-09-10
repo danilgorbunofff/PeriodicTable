@@ -20,12 +20,13 @@ import { POST as moderatePOST } from "../app/api/admin/startups/[domain]/moderat
 import { POST as outboxRetryPOST } from "../app/api/admin/outbox/retry/route";
 import { POST as outboxPOST } from "../app/api/jobs/outbox/route";
 import { POST as shotPOST } from "../app/api/jobs/screenshot/route";
+import { POST as checkoutPOST } from "../app/api/checkout/route";
 import { GET as unsubGET, POST as unsubPOST } from "../app/api/unsubscribe/route";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
 const T7 = 9993;
-const DOMAINS = ["modhide-t.dev", "modvis-t.dev"];
+const DOMAINS = ["modhide-t.dev", "modvis-t.dev", "modbuy-t.dev"];
 let keyN = 0;
 const key = () => `p6-mod-${Date.now()}-${keyN++}`;
 const ADMIN = "test-admin-token";
@@ -70,6 +71,8 @@ afterAll(async () => {
     return;
   }
   delete penv.ADMIN_TOKEN;
+  // Reservations before payments — the FK is restrictive.
+  await prisma.claimReservation.deleteMany({ where: { elementId: T7 } });
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
   await prisma.outboxEvent.deleteMany({ where: { OR: [{ dedupeKey: { contains: "p6-mod" } }] } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: DOMAINS } } });
@@ -133,6 +136,38 @@ describe.skipIf(!hasDb)("moderation enforcement", () => {
       select: { domain: true, moderationState: true },
     });
     expect(feedStates.filter((s) => s.moderationState === "HIDDEN")).toEqual([]);
+
+    // The charge must equal the advertised price. With modhide-t.dev hidden,
+    // the displayed take-lead price is derived from the visible leader (12) —
+    // so paying that price must actually take the lead at that same price.
+    // Pricing off the hidden 40 instead classified the advertised amount as a
+    // mere join: no reservation, and the buyer's money would not have bought
+    // the lead the page promised.
+    const advertised = (
+      (await (await elementGET(req("/api/elements/TST7"), { params: { sym: "TST7" } } as never)).json()) as {
+        prices: { takeLead: number };
+      }
+    ).prices.takeLead;
+    expect(advertised).toBe(13);
+    const buy = await checkoutPOST(
+      req("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          elementSym: "TST7",
+          amountUsd: advertised,
+          attest: true,
+          idempotencyKey: key(),
+          startup: { title: "Mod Buyer", pitch: "moderation buyer probe pitch", url: "https://modbuy-t.dev", linkType: "product" },
+        }),
+      })
+    );
+    expect(buy.status).toBe(200);
+    const bought = (await buy.json()) as { paymentId: string; reservation?: { reservedTotal: number } };
+    expect(bought.reservation?.reservedTotal).toBe(advertised);
+    const boughtPayment = await prisma.payment.findUniqueOrThrow({ where: { id: bought.paymentId } });
+    expect(boughtPayment.path).toBe("TAKE");
+    expect(boughtPayment.amountUsd).toBe(advertised);
   });
   it("unlist keeps direct surfaces, drops discovery", async () => {
     await moderatePOST(
