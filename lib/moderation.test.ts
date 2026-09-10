@@ -10,6 +10,7 @@ import { GET as searchGET } from "../app/api/search/route";
 import { GET as tableOrderGET } from "../app/api/table-order/route";
 import { GET as boardGET } from "../app/api/board/route";
 import { GET as elementsGET } from "../app/api/elements/route";
+import { GET as activityGET } from "../app/api/activity/route";
 import { GET as elementGET } from "../app/api/elements/[sym]/route";
 import { GET as goGET } from "../app/go/[stakeId]/route";
 import { POST as reportPOST } from "../app/api/report/route";
@@ -120,6 +121,18 @@ describe.skipIf(!hasDb)("moderation enforcement", () => {
 
     const stake = await prisma.stake.findFirstOrThrow({ where: { elementId: T7, startup: { domain: "modhide-t.dev" } } });
     expect((await goGET(req(`/go/${stake.id}`), { params: { stakeId: stake.id } })).status).toBe(404);
+
+    // The feed publishes domain + city + amount, so it must not re-announce a
+    // concealed listing. Asserted as a window-independent invariant: whatever
+    // rows the feed happens to return, none may belong to a HIDDEN startup.
+    expect(await prisma.activityLog.count({ where: { domain: "modhide-t.dev" } })).toBeGreaterThan(0);
+    const feed = (await (await activityGET(req("/api/activity?limit=20"))).json()) as { domain: string }[];
+    expect(feed.some((row) => row.domain === "modhide-t.dev")).toBe(false);
+    const feedStates = await prisma.startup.findMany({
+      where: { domain: { in: [...new Set(feed.map((r) => r.domain))] } },
+      select: { domain: true, moderationState: true },
+    });
+    expect(feedStates.filter((s) => s.moderationState === "HIDDEN")).toEqual([]);
   });
   it("unlist keeps direct surfaces, drops discovery", async () => {
     await moderatePOST(
@@ -132,6 +145,16 @@ describe.skipIf(!hasDb)("moderation enforcement", () => {
     expect(tiles.find((t) => t.symbol === "TST7")?.leader?.domain).toBe("modhide-t.dev");
     const profile = await prisma.startup.findUniqueOrThrow({ where: { domain: "modhide-t.dev" } });
     expect(profile.moderationState).toBe("UNLISTED");
+
+    // UNLISTED stays in the feed on purpose: the listing is still shown on tiles
+    // and element pages, so concealing it here would hide nothing. Only HIDDEN
+    // is filtered, which keeps the invariant below satisfied.
+    const feed = (await (await activityGET(req("/api/activity?limit=20"))).json()) as { domain: string }[];
+    const feedStates = await prisma.startup.findMany({
+      where: { domain: { in: [...new Set(feed.map((r) => r.domain))] } },
+      select: { moderationState: true },
+    });
+    expect(feedStates.filter((s) => s.moderationState === "HIDDEN")).toEqual([]);
   });
   it("restore returns the listing and audits the operator trail", async () => {
     const res = await moderatePOST(

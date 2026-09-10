@@ -26,13 +26,29 @@ export default async function ElementPage({ params }: { params: { sym: string } 
   const symbol = decodeURIComponent(params.sym);
   const el = ELEMENTS.find((e) => e.symbol === symbol);
   let element = null;
+  let hiddenStakes = 0;
   try {
     element = await prisma.element.findUnique({
       where: { symbol },
       include: {
-        stakes: { orderBy: { amountUsd: "desc" }, include: { startup: { select: { domain: true, title: true, pitch: true } } } },
+        // Same visibility contract as /api/elements/[sym]: hidden listings
+        // never reach the ranked list, so the CTA price and JSON-LD derived
+        // from stakes[0] cannot disclose a concealed bid.
+        stakes: {
+          where: { startup: { moderationState: { not: "HIDDEN" } } },
+          orderBy: { amountUsd: "desc" },
+          include: { startup: { select: { domain: true, title: true, pitch: true } } },
+        },
       },
     });
+    if (element) {
+      // stakeCount/totalPoolUsd deliberately still count every stake
+      // (lib/moderation.ts: financial history is never deleted), so the page
+      // owes the reader an explanation for the difference in row count.
+      hiddenStakes = await prisma.stake.count({
+        where: { elementId: element.id, startup: { moderationState: "HIDDEN" } },
+      });
+    }
   } catch {
     element = null;
   }
@@ -92,6 +108,15 @@ export default async function ElementPage({ params }: { params: { sym: string } 
             ))}
             {element.stakes.length === 0 && (
               <tr><td className="px-4 py-3 text-mutedink">No bids yet — be the first for $5.</td></tr>
+            )}
+            {hiddenStakes > 0 && (
+              <tr>
+                <td colSpan={3} className="px-4 py-3 text-mutedink">
+                  {hiddenStakes === 1 ? "1 listing is" : `${hiddenStakes} listings are`} hidden from this
+                  table by moderation. The pool and staker count above still include{" "}
+                  {hiddenStakes === 1 ? "it" : "them"}.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

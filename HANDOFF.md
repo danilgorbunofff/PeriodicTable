@@ -170,10 +170,27 @@ pinger.
 - [ ] `requireProdEnv()` has **zero runtime call sites** (only `lib/env.test.ts`)
       and `ADMIN_TOKEN` is **not** in `REQUIRED_PROD_ENV` (`lib/env.ts:37`) —
       re-verified 2026-09-10. Prod can boot under-configured with no hard failure.
-- [ ] `app/api/activity/route.ts` and `app/api/stats/route.ts` **do not filter by
-      `moderationState`**, while `board`, `elements`, `search`, `table-order` and
-      the screenshot worker all do — so a HIDDEN listing still leaks into the
-      activity feed, and hidden money is summed into stats. (Re-verified today.)
+- [x] **Fixed 2026-09-10:** `app/api/activity/route.ts` republished the `domain`
+      and `city` of a HIDDEN listing — an identity leak that defeated the whole
+      point of concealment. The feed now excludes hidden domains (resolved via
+      `Startup.moderationState`; `ActivityLog` only stores a denormalized domain,
+      no FK). `UNLISTED` is deliberately **kept** — it is still shown on tiles and
+      element pages, so concealing it there would hide nothing. Regression coverage
+      added to `lib/moderation.test.ts`, and confirmed to fail without the filter.
+- [x] **Fixed 2026-09-10:** `app/elements/[sym]/page.tsx` printed
+      `{stakeCount} stakers · ${totalPoolUsd} pool` directly above a table built
+      from filtered stakes, contradicting itself. The table still excludes hidden
+      rows, and a disclosure row now explains that the totals include them.
+- [ ] `app/api/stats/route.ts` and `Element.stakeCount`/`totalPoolUsd` **still sum
+      hidden money — this is deliberate policy, not a bug.** Three independent
+      source comments say so (`lib/moderation.ts`, `app/api/elements/route.ts`,
+      and the moderate route: "Financial history is NEVER touched"). Aggregates
+      carry no identity; the feed did. Explicit decision this session: keep the
+      money, hide the listing. Two display-layer consequences remain **unresolved
+      and unverified as intentional**: `app/api/checkout/route.ts` charges a
+      hidden-**inclusive** take-lead price while `app/api/elements/[sym]/route.ts`
+      displays a hidden-**excluded** one, and `app/api/elements/route.ts` returns
+      unfiltered `pool`/`count` beside a filtered `leader` (self-inconsistent tile).
 - [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`)
 - [ ] Upstash not set — rate limits are per-instance memory, bypassable on
       serverless (`lib/rateStore.ts` fails open)
@@ -190,10 +207,26 @@ pinger.
 - [ ] Vercel dashboard Cron Jobs tab should list both daily jobs (visual check)
 
 **Environment traps — do not lose time on these**
-- **Local tests silently skip the DB suites.** Without `TEST_DATABASE_URL` you get
-  `200 passed | 41 skipped`; CI runs `241 passed (241)` with **0 skipped**. A green
-  local run is **not** proof the integration path works — that is exactly how the
-  takedown bug sat unnoticed in `main`. Let CI be the DB oracle.
+- **Local tests silently skip the DB suites.** Without a DB the gate in
+  `lib/testDb.ts` skips them silently (`215 passed | 41 skipped`, measured
+  2026-09-10). A green local run is **not** proof the integration path works —
+  that is exactly how the takedown bug sat unnoticed in `main`. Let CI be the DB
+  oracle. **You can be the oracle locally too**, and it is cheap: run a throwaway
+  Postgres in Docker, then point tests at it without touching `.env` (which holds
+  the prod Neon URL) —
+  `docker run -d --name pt-test-pg -p 55432:5432 -e POSTGRES_USER=testu -e POSTGRES_PASSWORD=testpw -e POSTGRES_DB=pttest postgres:16-alpine`,
+  then run `npx prisma migrate deploy`, then vitest, both with `TEST_DATABASE_URL`
+  pointed at that container (standard `postgresql` URL scheme, user `testu`,
+  password `testpw`, host `localhost`, port `55432`, db `pttest`). Spelled out
+  rather than pasted because this file passes through a secret scrubber that
+  redacts anything shaped like a credential-bearing URL — which is exactly how
+  earlier edits to this doc got silently mangled. Measured that way on
+  2026-09-10: **256 passed (256), 18 files, 0 skipped, ~2.4s** — three different
+  counts appear in older revisions of this doc (200/215/241); 256 is the correct
+  total. `prisma migrate deploy`
+  followed by `prisma migrate diff --from-schema-datasource … --to-schema-datamodel …`
+  on that fresh DB returns "No difference detected", which independently proves
+  the migration baseline is sound.
 - **`npm run lint` is fast and clean on macOS** (`✔ No ESLint warnings or errors`,
   verified 2026-09-10). An earlier revision of this doc claimed lint *hangs* —
   that was a different machine (Windows, repo path containing a comma). Ignore it.
@@ -223,8 +256,8 @@ pinger.
 1. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
 2. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
-   - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **activity+stats HIDDEN leak**, honest
-     error panels, board sorting, click salt
+   - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **stats HIDDEN sums (deliberate — see
+     above)**, honest error panels, board sorting, click salt
    - §4c: receipt / outbid / unsubscribe **hand tests with two real inboxes**
    - §6: hand journeys J1–J8
    - §7: GO / NO-GO

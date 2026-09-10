@@ -14,7 +14,19 @@ const ELEMENT_NAMES = new Map(ELEMENTS.map((e) => [e.symbol, e.name] as const));
  */
 export async function GET(req: NextRequest) {
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") ?? "6", 10) || 6, 20);
+
+  // ActivityLog keeps a denormalised domain string, so visibility is resolved
+  // against Startup here. Hidden listings must not appear: this feed publishes
+  // domain, city, and amount, which would undo the concealment that hiding is
+  // for. UNLISTED stays in — it is already shown on tiles and element detail,
+  // so omitting it would conceal nothing. Filtering in the query (not after
+  // the take) keeps the requested page size exact.
+  const hiddenDomains = (
+    await prisma.startup.findMany({ where: { moderationState: "HIDDEN" }, select: { domain: true } })
+  ).map((s) => s.domain);
+
   const logs = await prisma.activityLog.findMany({
+    where: hiddenDomains.length ? { domain: { notIn: hiddenDomains } } : undefined,
     orderBy: { createdAt: "desc" },
     take: limit,
     select: {
