@@ -13,10 +13,15 @@ export const maxDuration = 30;
  * - Authenticated on every production invocation (P1-15) — no body-shape
  *   bypasses.
  * - Bounded: at most 10 targets per invocation, 20s global deadline,
- *   8s per-target probe (inside persistPreview).
+ *   10s per-target probe (inside persistPreview; a cold Microlink render of an
+ *   uncached site takes ~4s, a cached one ~0.1s, so a batch drains over a few
+ *   invocations and lease-release handles anything the deadline cut off).
  * - Retry state lives on the outbox row (attempts/nextAttemptAt/lastError).
  * - `backfill: true` enqueues rows for preview-less startups (bounded 50),
- *   then processes the due batch.
+ *   then processes the due batch. Because this is an explicit operator action,
+ *   it RE-ARMS the row (attempts/backoff cleared): `claimDueOutbox` skips rows
+ *   at OUTBOX_MAX_ATTEMPTS, so without the reset a burned-out row could never
+ *   recover after the underlying fault was fixed.
  *
  * Retention/privacy policy: previews are public homepage screenshots of
  * public listings, stored as remote image URLs (no bytes retained). Hiding a
@@ -43,7 +48,7 @@ export async function POST(req: NextRequest) {
       await prisma.outboxEvent.upsert({
         where: { dedupeKey: `preview-${s.id}` },
         create: { type: "PREVIEW_GENERATE", dedupeKey: `preview-${s.id}`, payload: { startupId: s.id, url: s.url } },
-        update: {},
+        update: { attempts: 0, nextAttemptAt: new Date(), lastError: null, completedAt: null },
       });
     }
   }
