@@ -152,3 +152,56 @@ describe("requireProdEnv", () => {
     expect(() => requireProdEnv(fakeEnv({}))).not.toThrow();
   });
 });
+
+describe("getProdConfigReport", () => {
+  const FULL: Env = {
+    DATABASE_URL: "postgresql://x",
+    WHOP_API_KEY: "x",
+    WHOP_WEBHOOK_SECRET: "x",
+    NEXT_PUBLIC_APP_URL: "https://periodictable.lol",
+    TURNSTILE_SECRET: "x",
+    CLICK_SALT: "a-private-random-value",
+    CRON_SECRET: "x",
+    RESEND_API_KEY: "x",
+    EMAIL_FROM: "hi@periodictable.lol",
+    ADMIN_TOKEN: "opaque-admin",
+    UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
+    UPSTASH_REDIS_REST_TOKEN: "x",
+  };
+
+  it("reports exactly REQUIRED_PROD_ENV when nothing is set (drift guard)", async () => {
+    // The whole point of the single-source change: the throwing path and the
+    // reporting path must both derive from REQUIRED_PROD_ENV. If a second
+    // hand-written check list ever reappears, these two assertions disagree.
+    const { REQUIRED_PROD_ENV, getProdConfigReport, getMissingProdEnv } = await import("./env");
+    const empty = fakeEnv({});
+    const required = getProdConfigReport(empty)
+      .findings.filter((f) => f.severity === "required")
+      .map((f) => f.key);
+    expect(required).toEqual([...REQUIRED_PROD_ENV]);
+    expect(getMissingProdEnv(empty)).toHaveLength(REQUIRED_PROD_ENV.length);
+  });
+
+  it("is clean for a fully configured production env", async () => {
+    const { getProdConfigReport } = await import("./env");
+    expect(getProdConfigReport(fakeEnv(FULL))).toEqual({ ok: true, findings: [] });
+  });
+
+  it("surfaces the quiet degradations without throwing", async () => {
+    const { getProdConfigReport, requireProdEnv } = await import("./env");
+    const noOperator: Env = { ...FULL };
+    delete noOperator.ADMIN_TOKEN;
+    delete noOperator.UPSTASH_REDIS_REST_URL;
+    delete noOperator.UPSTASH_REDIS_REST_TOKEN;
+
+    expect(getProdConfigReport(fakeEnv(noOperator)).findings.map((f) => [f.key, f.severity])).toEqual([
+      ["ADMIN_TOKEN", "operator"],
+      ["UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN", "degraded"],
+    ]);
+
+    // Non-fatal by design: an operator lockout, or rate limits degrading to
+    // per-instance memory, must not take down public browsing.
+    prodEnv();
+    expect(() => requireProdEnv(fakeEnv(noOperator))).not.toThrow();
+  });
+});

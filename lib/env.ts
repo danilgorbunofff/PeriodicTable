@@ -7,11 +7,13 @@
  * Rules:
  * - Development-only fallbacks (localhost URLs, dev salts, simulator paths)
  *   are permitted outside production only.
- * - In production every value listed in REQUIRED_PROD_ENV must be present
- *   and valid; call requireProdEnv() at server startup / request entry.
+ * - In production every value listed in REQUIRED_PROD_ENV must be present and
+ *   valid; requireProdEnv() throws otherwise. It has no call site yet, so
+ *   nothing enforces that today: getProdConfigReport() — served by
+ *   /api/jobs/config — is where the gaps are currently visible.
  * - During `next build` (NEXT_PHASE === "phase-production-build") validation
- *   is deferred to runtime so static prerendering without prod secrets still
- *   works; the runtime still throws (see requireProdEnv).
+ *   is deferred so static prerendering without prod secrets still works;
+ *   requireProdEnv() is the check that must be invoked at runtime.
  */
 
 export type AppEnv = "development" | "test" | "preview" | "production";
@@ -58,23 +60,88 @@ function isHttpsAppUrl(v: string | undefined): boolean {
   }
 }
 
+export type RequiredProdEnvKey = (typeof REQUIRED_PROD_ENV)[number];
+
+/**
+ * Why each entry above is required. Typed as a complete record, so adding a
+ * name to REQUIRED_PROD_ENV without a reason here is a compile error — that is
+ * what keeps the list authoritative instead of drifting from a second,
+ * hand-maintained check list.
+ */
+const PROD_ENV_REASONS: Record<RequiredProdEnvKey, string> = {
+  DATABASE_URL: "DATABASE_URL is required in production",
+  WHOP_API_KEY: "WHOP_API_KEY is required in production",
+  WHOP_WEBHOOK_SECRET: "WHOP_WEBHOOK_SECRET is required in production",
+  NEXT_PUBLIC_APP_URL: "NEXT_PUBLIC_APP_URL must be an https URL in production (no localhost)",
+  TURNSTILE_SECRET: "TURNSTILE_SECRET is required in production (bot checks must not bypass)",
+  CLICK_SALT: "CLICK_SALT must be set to a private random value in production",
+  CRON_SECRET: "CRON_SECRET is required in production (job endpoints must authenticate)",
+  RESEND_API_KEY: "RESEND_API_KEY is required in production (receipts/outbid must deliver)",
+  EMAIL_FROM: "EMAIL_FROM is required in production",
+};
+
+/** Entries whose presence alone does not make them valid. */
+const PROD_ENV_VALIDATORS: Partial<Record<RequiredProdEnvKey, (env: NodeJS.ProcessEnv) => boolean>> = {
+  NEXT_PUBLIC_APP_URL: (env) => isHttpsAppUrl(env.NEXT_PUBLIC_APP_URL),
+  CLICK_SALT: (env) => !DEV_SALT_VALUES.has(env.CLICK_SALT ?? ""),
+};
+
+function prodEnvSatisfied(key: RequiredProdEnvKey, env: NodeJS.ProcessEnv): boolean {
+  const validate = PROD_ENV_VALIDATORS[key];
+  return validate ? validate(env) : !!env[key];
+}
+
 /** Returns human-readable descriptions of missing/invalid prod config. */
 export function getMissingProdEnv(env: NodeJS.ProcessEnv = process.env): string[] {
-  const missing: string[] = [];
-  if (!env.DATABASE_URL) missing.push("DATABASE_URL is required in production");
-  if (!env.WHOP_API_KEY) missing.push("WHOP_API_KEY is required in production");
-  if (!env.WHOP_WEBHOOK_SECRET) missing.push("WHOP_WEBHOOK_SECRET is required in production");
-  if (!isHttpsAppUrl(env.NEXT_PUBLIC_APP_URL)) {
-    missing.push("NEXT_PUBLIC_APP_URL must be an https URL in production (no localhost)");
+  return REQUIRED_PROD_ENV.filter((key) => !prodEnvSatisfied(key, env)).map((key) => PROD_ENV_REASONS[key]);
+}
+
+export type ProdConfigSeverity = "required" | "operator" | "degraded";
+export type ProdConfigFinding = { key: string; severity: ProdConfigSeverity; detail: string };
+
+/**
+ * Config whose absence does not stop the site, so nothing fails and the
+ * degradation is only visible if something reports it. Each entry names the
+ * concrete consequence rather than only the missing variable.
+ */
+const PROD_ENV_ADVISORIES: {
+  key: string;
+  severity: Exclude<ProdConfigSeverity, "required">;
+  satisfied: (env: NodeJS.ProcessEnv) => boolean;
+  detail: string;
+}[] = [
+  {
+    key: "ADMIN_TOKEN",
+    severity: "operator",
+    satisfied: (env) => !!env.ADMIN_TOKEN,
+    detail:
+      "ADMIN_TOKEN is unset: adminAuth() fails closed, so moderation triage and outbox retry are unreachable in production",
+  },
+  {
+    key: "UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN",
+    severity: "degraded",
+    satisfied: (env) => !!env.UPSTASH_REDIS_REST_URL && !!env.UPSTASH_REDIS_REST_TOKEN,
+    detail: "Upstash is unconfigured: rate limits fall back to per-instance memory and fail open (lib/rateStore.ts)",
+  },
+];
+
+/**
+ * Non-throwing production config status. `required` findings are exactly what
+ * requireProdEnv() refuses to serve without; the advisory severities degrade
+ * quietly, so they are reported here rather than thrown.
+ */
+export function getProdConfigReport(
+  env: NodeJS.ProcessEnv = process.env
+): { ok: boolean; findings: ProdConfigFinding[] } {
+  const findings: ProdConfigFinding[] = REQUIRED_PROD_ENV.filter((key) => !prodEnvSatisfied(key, env)).map(
+    (key) => ({ key, severity: "required" as const, detail: PROD_ENV_REASONS[key] })
+  );
+  for (const advisory of PROD_ENV_ADVISORIES) {
+    if (!advisory.satisfied(env)) {
+      findings.push({ key: advisory.key, severity: advisory.severity, detail: advisory.detail });
+    }
   }
-  if (!env.TURNSTILE_SECRET) missing.push("TURNSTILE_SECRET is required in production (bot checks must not bypass)");
-  if (!env.CLICK_SALT || DEV_SALT_VALUES.has(env.CLICK_SALT)) {
-    missing.push("CLICK_SALT must be set to a private random value in production");
-  }
-  if (!env.CRON_SECRET) missing.push("CRON_SECRET is required in production (job endpoints must authenticate)");
-  if (!env.RESEND_API_KEY) missing.push("RESEND_API_KEY is required in production (receipts/outbid must deliver)");
-  if (!env.EMAIL_FROM) missing.push("EMAIL_FROM is required in production");
-  return missing;
+  return { ok: findings.length === 0, findings };
 }
 
 /**

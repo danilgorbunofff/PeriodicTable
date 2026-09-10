@@ -167,9 +167,30 @@ pinger.
 
 **Known broken / unproven**
 - [ ] 🟠 **GitHub cron is throttled to hours, not 10 min** (§2)
-- [ ] `requireProdEnv()` has **zero runtime call sites** (only `lib/env.test.ts`)
-      and `ADMIN_TOKEN` is **not** in `REQUIRED_PROD_ENV` (`lib/env.ts:37`) —
-      re-verified 2026-09-10. Prod can boot under-configured with no hard failure.
+- [x] **Addressed 2026-09-10 (Stage 1): the guard was inert in two ways.**
+      `requireProdEnv()` still has **zero runtime call sites** (only
+      `lib/env.test.ts`), *and* `REQUIRED_PROD_ENV` (`lib/env.ts:37`) was **read by
+      nothing** — `requireProdEnv` validated a second, hand-written list inside
+      `getMissingProdEnv`. The two happened to agree, but the doc comment named
+      `REQUIRED_PROD_ENV` as authoritative, so it was decorative and free to drift.
+      It is now the single source: `getMissingProdEnv` derives from it,
+      `PROD_ENV_REASONS` is a `Record<RequiredProdEnvKey, string>` (adding a var
+      without a reason is a **compile error**), and `lib/env.test.ts` asserts the
+      report's `required` findings equal the list exactly — so a second list
+      cannot silently reappear.
+- [x] **Correction — `ADMIN_TOKEN` unset is a lockout, not a leak.** `adminAuth`
+      (`lib/jobs.ts`) fails **closed** with 403 even in dev ("a leaked dev database
+      is never one missing header from mutation"). Its absence is an **operator
+      availability** gap (no triage / outbox retry), not exposure.
+- [ ] **Stage 2, deferred deliberately: actually *calling* `requireProdEnv()`.**
+      The gaps are now *visible* via **`GET /api/jobs/config`** (bearer
+      `CRON_SECRET`), reported **non-fatally** — a missing `WHOP_API_KEY` must not
+      500 public browsing, which needs none of the guard's nine vars. Wiring the
+      guard into startup is all-or-nothing and would brick the public site over an
+      operator-only gap.
+- [ ] `UPSTASH_REDIS_REST_URL` / `_TOKEN` are **not** in `REQUIRED_PROD_ENV`, so
+      even a wired-up `requireProdEnv()` would not catch the degraded rate
+      limiter. `/api/jobs/config` does, as a `degraded` advisory.
 - [x] **Fixed 2026-09-10:** `app/api/activity/route.ts` republished the `domain`
       and `city` of a HIDDEN listing — an identity leak that defeated the whole
       point of concealment. The feed now excludes hidden domains (resolved via
@@ -199,9 +220,13 @@ pinger.
       the lead, and was confirmed to fail without the fix.
 - [ ] `app/api/elements/route.ts` returns unfiltered `pool`/`count` beside a
       filtered `leader` — a self-inconsistent tile. **Still open.**
-- [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`)
+- [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`:
+      `verifyTurnstile` returns `true` outright when `TURNSTILE_SECRET` is unset).
+      Surfaced by `/api/jobs/config`; the only thing that would have caught it
+      before was the never-called `requireProdEnv()`.
 - [ ] Upstash not set — rate limits are per-instance memory, bypassable on
-      serverless (`lib/rateStore.ts` fails open)
+      serverless (`lib/rateStore.ts` fails open: warns once, continues). Surfaced
+      by `/api/jobs/config` as a `degraded` advisory.
 - [ ] Whop contract **still guessed** (`lib/whop.ts`): endpoint shape, signature
       header, payment-id location, paid event types. Needs signed fixtures.
 - [ ] Webhook trusts the amount it is told (`null` skips validation)
@@ -262,6 +287,8 @@ pinger.
 ## What is next, in order
 
 1. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
+   **Add `/api/jobs/config` to the same URL list** (bearer `CRON_SECRET`): the
+   report is only worth having if something calls it.
 2. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
    - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **stats HIDDEN sums (deliberate — see

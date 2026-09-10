@@ -1,6 +1,7 @@
 /* Phase 6 ops tests — pure (no DB): trusted IP, URL validation, rate-store
    behavior, job/admin auth branches, visibility truth tables. */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { NextRequest } from "next/server";
 import { clientIp } from "./ip";
 import { normalizeUrl, isPublicHost, domainFromUrl } from "./validate";
 import { rateLimitAsync, setSharedRateLimitStore, type RateLimitStore } from "./rateStore";
@@ -117,6 +118,41 @@ describe("jobAuth", () => {
     expect(bad?.status).toBe(401);
     set("CRON_SECRET", undefined);
     expect(jobAuth(req("s3cr3t") as never, null)?.status).toBe(401);
+  });
+});
+
+describe("config report route", () => {
+  it("gates like the other job endpoints and never echoes values", async () => {
+    const { GET } = await import("../app/api/jobs/config/route");
+    const call = (h?: Record<string, string>) =>
+      GET(new NextRequest("http://localhost/api/jobs/config", { headers: h }) as never);
+
+    set("CRON_SECRET", "s3cr3t");
+    // Outside production jobAuth permits the local rehearsal shape.
+    const local = await call();
+    expect(local.status).toBe(200);
+    const body = (await local.json()) as { ok: boolean; env: string; findings: { key: string; severity: string; detail: string }[] };
+    expect(body.env).toBe("test");
+    expect(Array.isArray(body.findings)).toBe(true);
+    for (const f of body.findings) {
+      expect(typeof f.key).toBe("string");
+      expect(["required", "operator", "degraded"]).toContain(f.severity);
+      expect(typeof f.detail).toBe("string");
+    }
+    // Findings describe configuration shape, never the configured values.
+    expect(JSON.stringify(body.findings)).not.toContain("s3cr3t");
+
+    // In production the report is not public.
+    set("VITEST", undefined);
+    set("NODE_ENV", "production");
+    set("VERCEL_ENV", "production");
+    expect((await call()).status).toBe(401);
+    expect((await call({ authorization: "Bearer wrong" })).status).toBe(401);
+    const allowed = await call({ authorization: "Bearer s3cr3t" });
+    expect(allowed.status).toBe(200);
+    // The report is non-fatal: it answers even while reporting gaps.
+    const prod = (await allowed.json()) as { ok: boolean };
+    expect(typeof prod.ok).toBe("boolean");
   });
 });
 
