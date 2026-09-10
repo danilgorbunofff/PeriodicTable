@@ -27,7 +27,7 @@
 
 Known gaps (do NOT flip real money until fixed — see §8):
 `requireProdEnv()` has zero runtime call sites (only `lib/env.test.ts`); `ADMIN_TOKEN` missing from `REQUIRED_PROD_ENV`;
-`lib/manage.ts` only `console.error`s in prod (magic link never emailed); `REFUNDED` enum never written; Whop contract values in `lib/whop.ts` are guesses until proven with signed fixtures.
+`lib/manage.ts` is backend-only by design in v1 (listing edits not shipped — a listing is set at checkout and is final); `REFUNDED` enum never written; Whop contract values in `lib/whop.ts` are guesses until proven with signed fixtures.
 
 ## 2. Data, domain, DNS, headers, read APIs
 
@@ -94,12 +94,16 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] End-to-end delivery proof: enqueue one real row, let the 10-min tick drain it, confirm `completedAt` set (proves the robot does real work, not just auth)
 - [ ] Outbox row lifecycle: `attempts<5`, exponential backoff, `lastError` persisted, operator retry endpoint works with `ADMIN_TOKEN`
 
-### 4c. Receipt / outbid / unsubscribe / magic-link (hand test with two emails)
-- [ ] Claim → payer gets receipt with correct `{element, amount, rank, domain, manageUrl, unsubUrl}`; `EmailLog{template:receipt,status:sent}`
+### 4c. Receipt / outbid / unsubscribe (hand test with two emails)
+- [ ] Claim → payer gets receipt with correct `{element, amount, rank, domain, viewUrl, unsubUrl}`; `EmailLog{template:receipt,status:sent}`
 - [ ] Outbid → victim gets outbid mail with correct `reclaim = winner+1-victim (min 1)` and `/?el=SYM&stake=N` prefill link
 - [ ] `List-Unsubscribe` + `List-Unsubscribe-Post` headers present; `GET /api/unsubscribe?token=` clears email → homepage `?unsub=done` toast; unknown → `?unsub=unknown`
-- [ ] Manage link: `POST /api/manage/request {domain,email}` → non-prod returns `debugToken`, **prod returns `{sent:true}` with NO token**; prod must actually EMAIL the link (today `lib/manage.ts` only `console.error`s — fix before launch); `POST /api/manage/verify {token}` → httpOnly `ptl_manage` cookie (Secure in prod) → `PATCH /api/startups/[domain]` works; token single-use, 15-min TTL; session 60-min
-- [ ] 🔴 **Owner portal does not exist in the UI** (found 2026-09-10): APIs are complete (`manage/request`, `manage/verify`, `manage/session`, `PATCH /api/startups/[domain]`) but there is **no page anywhere** to (a) request a link, (b) land after clicking it, or (c) edit the profile — `app/` has no `manage/page.tsx`, and nothing links to the flow. The receipt email's "Manage your spot →" button points at `/s/<domain>`, which is read-only. So for a paying owner the promise "manage your listing" is currently unfulfillable. **Blocks the `PAYMENTS_LIVE` flip, not a waitlist launch** (while paused, no new owner can be created). Fix = 3 pages + wire the prod email send.
+- [x] **v1 product decision: a listing is set at checkout and is final** (settled 2026-09-10, after finding the manage flow had no UI). `findOrCreateCheckoutStartup` writes title/pitch/url/link/email from the checkout form; a later stake on the same domain only adds stake and never mutates the profile. So there is nothing for an owner to "manage" in v1, and no UI is missing by accident. Consequences, all verified in code:
+  - [x] Listing edits are **not shipped in v1** — the magic-link backend (`lib/manage.ts`, `/api/manage/*`, `PATCH /api/startups/[domain]`) stays implemented, tested and **dormant/unreachable**. Production intentionally does not email the link (`console.warn` + TODO(v2)); non-prod still returns `debugToken` for dev convenience.
+  - [x] `POST /api/manage/request` is non-committal: always `200`, same shape, rate-limited, message no longer promises a link ("Listing management is not enabled").
+  - [x] No user-facing surface promises editing: grepped every `.tsx` — no manage/edit UI text exists. The receipt email's "Manage your spot →" button (which pointed at the read-only `/s/<domain>`) is now **"View your spot →"** (`emails/receipt.tsx`, prop `manageUrl`→`viewUrl`).
+  - [x] Docs corrected so nobody re-adds the promise: `README.md` "Ownership", `doc/ARCHITECTURE.md` §3, `HANDOFF.md` item 5 (now deferred to v2).
+  - ⚠️ v2 scope when we do ship it: 3 pages (request link, land/verify, edit form) + turn the prod email send on + make sure the receipt button points at the edit flow. Not a launch blocker.
 
 ## 5. Trust, abuse, admin, frontend honesty
 

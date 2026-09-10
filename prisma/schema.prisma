@@ -215,9 +215,10 @@ model ClaimReservation {
   @@index([expiresAt])
 }
 
-// Email magic-link management: hashed one-time token per request. Delivery is
-// via email in production; the raw token is returned by the API in
-// non-production only (see lib/manage.ts).
+// Email magic-link management (v2, not shipped): hashed one-time token per
+// request. The raw token is returned by the API in non-production only, and
+// production deliberately sends nothing until the management UI exists
+// (see lib/manage.ts).
 model ManageToken {
   id         String    @id @default(cuid())
   startupId  String

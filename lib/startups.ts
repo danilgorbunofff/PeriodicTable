@@ -3,10 +3,10 @@
  *
  * Rule: the server derives canonical identity from the validated URL/handle
  * and NEVER trusts a caller-provided domain. A checkout for a NEW startup
- * creates its initial immutable public profile; a checkout for an EXISTING
- * startup only adds stake — profile fields (url, title, pitch, linkType,
- * logo, notification email) change exclusively through a verified
- * email magic-link management session (lib/manage.ts).
+ * creates its initial public profile; a checkout for an EXISTING startup only
+ * adds stake. In v1 the profile is FINAL once created — it comes from the
+ * checkout form and is never mutated afterwards. (Listing edits would arrive
+ * via the dormant lib/manage.ts magic-link backend; not shipped.)
  */
 import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";

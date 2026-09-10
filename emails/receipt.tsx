@@ -7,7 +7,9 @@ export type ReceiptTemplateProps = {
   amountUsd: number;
   rank: number;
   domain: string;
-  manageUrl: string;
+  /** Public profile link. Listing edits are not offered in v1 — the profile
+   * is set at checkout and is final, so this is a "view", not a "manage". */
+  viewUrl: string;
   unsubUrl: string;
 };
 
@@ -25,7 +27,7 @@ export function receiptHtml(p: ReceiptTemplateProps): string {
         Your $${p.amountUsd} stake puts you <strong>#${p.rank}</strong> on ${p.elementSymbol}.
         Every click from your tile is a verified redirect — watch 🟢 clicks delivered climb on your profile.
       </p>
-      <a href="${p.manageUrl}" style="display:inline-block;margin-top:16px;background:#FFCE4B;color:#111;font-weight:800;padding:14px 28px;border-radius:999px;text-decoration:none;font-size:15px;">Manage your spot →</a>
+      <a href="${p.viewUrl}" style="display:inline-block;margin-top:16px;background:#FFCE4B;color:#111;font-weight:800;padding:14px 28px;border-radius:999px;text-decoration:none;font-size:15px;">View your spot →</a>
       <p style="font-size:12px;color:#999;margin-top:20px;">
         it&apos;s an ad buy, not a bet ·
         <a href="${p.unsubUrl}">unsubscribe</a>

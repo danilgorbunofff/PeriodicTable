@@ -119,7 +119,7 @@ export async function sendReceiptEmail(p: ReceiptEmailParams) {
     amountUsd: p.amountUsd,
     rank: p.rank,
     domain: p.domain,
-    manageUrl: `${APP_URL}/s/${encodeURIComponent(p.domain)}`,
+    viewUrl: `${APP_URL}/s/${encodeURIComponent(p.domain)}`,
     unsubUrl: `${APP_URL}/api/unsubscribe?token=${p.unsubToken}`,
   });
   const status = await deliver(p.to, subject, html, { unsubToken: p.unsubToken });
