@@ -3,7 +3,7 @@
  * Requires DATABASE_URL. Best-effort: probe Microlink shot, store URL on success.
  */
 import { PrismaClient } from "@prisma/client";
-import { fetchShotBytes } from "../lib/screenshots";
+import { probeShot } from "../lib/screenshots";
 
 const prisma = new PrismaClient();
 
@@ -14,15 +14,12 @@ async function main() {
   console.log(`backfill-previews: ${targets.length} startups without preview`);
   let updated = 0;
   for (const s of targets) {
-    let ok = false;
-    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
-      ok = !!(await fetchShotBytes(s.url));
+    let shot: string | null = null;
+    for (let attempt = 0; attempt < 3 && !shot; attempt++) {
+      shot = await probeShot(s.url);
     }
-    if (ok) {
-      await prisma.startup.update({
-        where: { id: s.id },
-        data: { previewImgUrl: `https://image.microlink.io/?url=${encodeURIComponent(s.url)}&viewport.width=1200&viewport.height=675&embed=screenshot.url` },
-      });
+    if (shot) {
+      await prisma.startup.update({ where: { id: s.id }, data: { previewImgUrl: shot } });
       updated++;
       console.log(`  + ${s.domain}`);
     } else {
