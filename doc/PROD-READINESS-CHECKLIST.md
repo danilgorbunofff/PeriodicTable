@@ -86,7 +86,7 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] Full pipeline test (`POST /api/dev/pay` → `POST /api/jobs/outbox` → `EmailLog=sent`) — needs local Postgres; blocked until §0 local DB exists. NOTE: `/api/dev/pay` is 403 on prod by design (Whop keys set), so this runs locally, never against prod.
 
 ### 4b. Outbox + screenshot workers
-- [x] `POST /api/jobs/outbox` without secret in prod → `401`; with `Authorization: ******` → `{ok:true, claimed, completed, failed}` (2026-09-10: unauthenticated `401` confirmed on prod for both routes)
+- [x] `POST /api/jobs/outbox` without secret in prod → `401`; with a valid bearer header → `{ok:true, claimed, completed, failed}` (2026-09-10: unauthenticated `401` confirmed on prod for both routes)
 - [x] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups (2026-09-10: auth confirmed; backfill run still to do)
 - [x] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30) (2026-09-10: merged to `main` via PR #2; main deploy `success`; `GET /api/jobs/outbox` now `401` where it was `405` ⇒ GET aliases Vercel Cron needs are live)
 - [x] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints (2026-09-10: manual dispatch run `34467721174` green in 10s — `outbox {"ok":true,"claimed":0,"completed":0,"failed":0}`, `screenshot {"ok":true,"checked":0,"updated":0,"failed":0}` ⇒ secret matches across GitHub + Vercel; `claimed:0` = empty queue, expected)
@@ -109,7 +109,7 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 
 - [ ] Turnstile: `TURNSTILE_SECRET` + `NEXT_PUBLIC_TURNSTILE_SITEKEY` from Cloudflare set; without them bot checks silently pass (`lib/abuse.ts`) — must not launch without
 - [ ] Upstash: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` set; without them rate limits are per-instance memory (`lib/rateStore.ts` fails open, bypassable on serverless)
-- [ ] `ADMIN_TOKEN` long random set; all `/api/admin/*` → `403` without `Authorization: ****** round-trip: report → triage → HIDE → verify → restore (see hand journey J6)
+- [ ] `ADMIN_TOKEN` long random set; all `/api/admin/*` → `403` without it; report → triage → HIDE → verify → restore round-trip (see hand journey J6)
 - [ ] Kill switch: `PAYMENTS_LIVE=false` + `NEXT_PUBLIC_PAYMENTS_LIVE=false` → checkout flips to waitlist in <2min via env-only redeploy (see `ops/rollback.md`)
 - [ ] Grid/stats failure honesty: block API (offline/devtools) → error panels, NEVER fake all-`Unclaimed $5`/zeros. Reference pattern: `TerritoryView.tsx` error panel vs `app/page.tsx`
 - [ ] HIDDEN leaks: activity feed must exclude HIDDEN; stats must not sum hidden money while boards filter VISIBLE; hidden profile `/s/<domain>` → 404; `/go/<stakeId>` refuses hidden; hide clears `previewImgUrl`

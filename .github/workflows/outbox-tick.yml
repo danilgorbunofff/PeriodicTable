@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Smoke test: enqueue preview rows for preview-less listings first"
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -29,6 +34,16 @@ jobs:
             echo "::error::CRON_SECRET repository secret is not set (Settings → Secrets and variables → Actions) — every worker call would 401."
             exit 1
           fi
+      - name: Verify the queue can actually move (manual only)
+        if: inputs.backfill
+        run: |
+          # Enqueues PREVIEW_GENERATE rows for listings that have none, then
+          # drains them — so a non-zero "updated" here proves the worker does
+          # real work end to end, not merely that auth passed.
+          curl -fsS -X POST "$BASE_URL/api/jobs/screenshot" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{"backfill":true,"limit":10}'
       - name: Drain email outbox
         run: |
           curl -fsS -X POST "$BASE_URL/api/jobs/outbox" \
