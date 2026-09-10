@@ -25,7 +25,7 @@
 | Prod-env pass | same command **with** all prod secrets exported | `production config OK` |
 | Cron file present | `cat vercel.json` | 2 daily crons (outbox 04:00, screenshot 04:30) — Vercel cannot create crons from the dashboard, and Hobby allows only 2 jobs at once-a-day frequency |
 
-Known gaps (do NOT flip real money until fixed — see §8):
+Known gaps (do NOT flip real money until fixed — see §7):
 `requireProdEnv()` has zero runtime call sites (only `lib/env.test.ts`); `ADMIN_TOKEN` missing from `REQUIRED_PROD_ENV`;
 `lib/manage.ts` is backend-only by design in v1 (listing edits not shipped — a listing is set at checkout and is final); `REFUNDED` enum never written; Whop contract values in `lib/whop.ts` are guesses until proven with signed fixtures.
 
@@ -36,6 +36,8 @@ Known gaps (do NOT flip real money until fixed — see §8):
 - [ ] Apex `curl -sI https://periodictable.lol | head -3` → `308` → `https://www.periodictable.lol`
 - [ ] `MX` + `email` + `secureserver` DKIM rows still present (GoDaddy mail intact; Resend uses different hostnames, no conflict)
 - [ ] Security headers on `https://www.periodictable.lol` (prod only): `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `X-Frame-Options: SAMEORIGIN`, `Permissions-Policy`, `Strict-Transport-Security`, `Content-Security-Policy` (see `next.config.mjs`)
+  - ✅ `img-src` must include `https://*.microlink.io` (the wildcard is required — Microlink hands back a sharded shot host, live vs cached). This was too narrow until 2026-09-10; found by §4b, fixed in PR #4, confirmed in the live prod response headers.
+  - ℹ️ CSP ships **production-only** (dev needs webpack `eval()`), so a CSP symptom never reproduces under `npm run dev` — always test the deployed URL.
 - [ ] All 6 read APIs return 200 on custom domain, <2000ms each:
 ```
 for p in /api/stats /api/elements /api/table-order "/api/board?tab=crowns" "/api/activity?limit=6" "/api/search?q=carbon"; do
@@ -87,11 +89,19 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 
 ### 4b. Outbox + screenshot workers
 - [x] `POST /api/jobs/outbox` without secret in prod → `401`; with a valid bearer header → `{ok:true, claimed, completed, failed}` (2026-09-10: unauthenticated `401` confirmed on prod for both routes)
-- [x] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups (2026-09-10: auth confirmed; backfill run still to do)
+- [x] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups (2026-09-10: auth confirmed; **backfill run now done and green** — see the delivery-proof row below)
 - [x] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30) (2026-09-10: merged to `main` via PR #2; main deploy `success`; `GET /api/jobs/outbox` now `401` where it was `405` ⇒ GET aliases Vercel Cron needs are live)
 - [x] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints (2026-09-10: manual dispatch run `34467721174` green in 10s — `outbox {"ok":true,"claimed":0,"completed":0,"failed":0}`, `screenshot {"ok":true,"checked":0,"updated":0,"failed":0}` ⇒ secret matches across GitHub + Vercel; `claimed:0` = empty queue, expected)
 - [ ] Confirm the Vercel dashboard Cron Jobs tab lists both daily jobs (proves `vercel.json` was ingested) — dashboard check, then the 04:00 UTC run tomorrow is the live proof
-- [ ] End-to-end delivery proof: enqueue one real row, let the 10-min tick drain it, confirm `completedAt` set (proves the robot does real work, not just auth)
+- [x] End-to-end delivery proof: enqueue one real row, let the tick drain it, confirm `completedAt` set (proves the robot does real work, not just auth) — **done 2026-09-10 by `-f backfill=true`; this single step found two real prod bugs, both now fixed and re-proven:**
+  - 🔴 **What was broken:** the screenshot robot (`PREVIEW_GENERATE`) was failing **every** job in prod. `lib/screenshots.ts` probed `image.microlink.io` — a host with **no DNS record** (NXDOMAIN). Each job threw, backed off, and burned out at `attempts=5`.
+  - 🔴 **Second defect in the same code:** the probe downloaded the whole ~1.87MB PNG against an 8s budget, so even a live host would sit near the timeout. And the CSP did not allow the host the API actually returns.
+  - ✅ **Fix:** probe Microlink's **JSON** API (`api.microlink.io/?url=…&screenshot=true&meta=false`) and store the returned `iad.microlink.io/<hash>.png` CDN URL; validate before storing (`https:` **and** hostname ends `.microlink.io`) so a third-party response can never inject an arbitrary `<img src>`; `img-src` widened to `https://*.microlink.io`; `scripts/backfill-previews.ts` now shares the same helper. Payload per job: **~300 bytes instead of 1.87MB**.
+  - ✅ **Fix, second half (why re-running alone would not have worked):** `POST /api/jobs/screenshot {backfill:true}` now **re-arms** matched rows (`attempts:0, nextAttemptAt:now, lastError:null, completedAt:null`). `claimDueOutbox` filters `attempts < 5` and claim pushes `nextAttemptAt` 5 min forward, so a burned-out row is otherwise permanently stuck even after the cause is fixed.
+  - ✅ **Probe latency (measured live):** cold request **6.9s**, warm cached **172ms**; stored CDN URL serves `200 image/png` (1.56MB) in **0.33s**.
+  - ✅ **Drain proof — 4 dispatches, queue visibly emptying:** `checked:9, updated:3, failed:0` → `checked:6, updated:4, failed:1` → `checked:2, updated:2, failed:0` → **`checked:0, updated:0, failed:0`**. The shrinking candidate set *is* the evidence the worker does real work: 9 rows enqueued, 9 completed, queue empty. The single transient failure retried cleanly through the new re-arm path.
+  - ✅ **Read-path proof:** `GET /api/elements/C` returns `stakes[].preview` = the stored `iad.microlink.io/…png` URL; fetching that exact URL returns `200 image/png` ⇒ the stored value is a real servable image, and the live CSP now permits the browser to render it.
+  - ℹ️ **Scope note:** previews are **not rendered anywhere in the v1 UI yet** (no `.tsx` reads `preview`; only `Avatar.tsx` renders `logoUrl`). So this was a backend-only defect — no user ever saw a broken image — but the pipeline is now correct and proven for when v1 adds the surface. Decide explicitly whether v1 shows previews or leaves them for v2.
 - [ ] Outbox row lifecycle: `attempts<5`, exponential backoff, `lastError` persisted, operator retry endpoint works with `ADMIN_TOKEN`
 
 ### 4c. Receipt / outbid / unsubscribe (hand test with two emails)
@@ -124,7 +134,7 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] **J4 Claim (live sim):** fill title/pitch/URL → checkout → pay → `?paid=SYM` toast + tiles/ranks refresh, receipt email arrives
 - [ ] **J5 Outbid/reclaim:** second user takes tile → victim outbid email → victim clicks reclaim link → prefilled amount → pays → crown returns
 - [ ] **J6 Report/moderate:** report a stake → confirm modal → admin triage → HIDE → tile/profile/`/go` hide → restore → reappears
-- [ ] **J7 Manage/unsub:** request manage link → verify → edit profile → unsubscribe → emails stop, stake still counts
+- [ ] **J7 Unsub (v1):** unsubscribe from a receipt footer → emails stop, the stake still counts, homepage shows the `?unsub=done` toast (unknown token → `?unsub=unknown`). **There is no manage journey in v1** — a listing is final at checkout; `POST /api/manage/request` answers politely and emails no link (§4c). Listing edits are v2.
 - [ ] **J8 Reduced-motion + keyboard:** `prefers-reduced-motion` → static but legible; Esc closes modals/drawers in order; 44px touch targets; no toast-behind-modal; axe E2E clean (today: static string tests only — run a real browser pass)
 
 ## 7. GO / NO-GO (all must be GO)
