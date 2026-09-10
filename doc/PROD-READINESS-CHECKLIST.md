@@ -86,10 +86,12 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] Full pipeline test (`POST /api/dev/pay` → `POST /api/jobs/outbox` → `EmailLog=sent`) — needs local Postgres; blocked until §0 local DB exists. NOTE: `/api/dev/pay` is 403 on prod by design (Whop keys set), so this runs locally, never against prod.
 
 ### 4b. Outbox + screenshot workers
-- [ ] `POST /api/jobs/outbox` without secret in prod → `401`; with `Authorization: ******` → `{ok:true, claimed, completed, failed}`
-- [ ] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups
-- [ ] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30)
-- [ ] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints
+- [x] `POST /api/jobs/outbox` without secret in prod → `401`; with `Authorization: ******` → `{ok:true, claimed, completed, failed}` (2026-09-10: unauthenticated `401` confirmed on prod for both routes)
+- [x] `POST /api/jobs/screenshot` same auth; `backfill:true` enqueues ≤50 preview-less VISIBLE startups (2026-09-10: auth confirmed; backfill run still to do)
+- [x] Schedulers live: `.github/workflows/outbox-tick.yml` every 10 min (free — public repo, unlimited Actions minutes; runs only from `main`, so it activates when this branch merges) + `vercel.json` daily backstop (04:00/04:30) (2026-09-10: merged to `main` via PR #2; main deploy `success`; `GET /api/jobs/outbox` now `401` where it was `405` ⇒ GET aliases Vercel Cron needs are live)
+- [x] `CRON_SECRET` set in Vercel **and** as a GitHub Actions repo secret with the same value → manually run the `outbox tick` workflow → `{"ok":true,…}` (not `401`) for both endpoints (2026-09-10: manual dispatch run `34467721174` green in 10s — `outbox {"ok":true,"claimed":0,"completed":0,"failed":0}`, `screenshot {"ok":true,"checked":0,"updated":0,"failed":0}` ⇒ secret matches across GitHub + Vercel; `claimed:0` = empty queue, expected)
+- [ ] Confirm the Vercel dashboard Cron Jobs tab lists both daily jobs (proves `vercel.json` was ingested) — dashboard check, then the 04:00 UTC run tomorrow is the live proof
+- [ ] End-to-end delivery proof: enqueue one real row, let the 10-min tick drain it, confirm `completedAt` set (proves the robot does real work, not just auth)
 - [ ] Outbox row lifecycle: `attempts<5`, exponential backoff, `lastError` persisted, operator retry endpoint works with `ADMIN_TOKEN`
 
 ### 4c. Receipt / outbid / unsubscribe / magic-link (hand test with two emails)
@@ -97,6 +99,7 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] Outbid → victim gets outbid mail with correct `reclaim = winner+1-victim (min 1)` and `/?el=SYM&stake=N` prefill link
 - [ ] `List-Unsubscribe` + `List-Unsubscribe-Post` headers present; `GET /api/unsubscribe?token=` clears email → homepage `?unsub=done` toast; unknown → `?unsub=unknown`
 - [ ] Manage link: `POST /api/manage/request {domain,email}` → non-prod returns `debugToken`, **prod returns `{sent:true}` with NO token**; prod must actually EMAIL the link (today `lib/manage.ts` only `console.error`s — fix before launch); `POST /api/manage/verify {token}` → httpOnly `ptl_manage` cookie (Secure in prod) → `PATCH /api/startups/[domain]` works; token single-use, 15-min TTL; session 60-min
+- [ ] 🔴 **Owner portal does not exist in the UI** (found 2026-09-10): APIs are complete (`manage/request`, `manage/verify`, `manage/session`, `PATCH /api/startups/[domain]`) but there is **no page anywhere** to (a) request a link, (b) land after clicking it, or (c) edit the profile — `app/` has no `manage/page.tsx`, and nothing links to the flow. The receipt email's "Manage your spot →" button points at `/s/<domain>`, which is read-only. So for a paying owner the promise "manage your listing" is currently unfulfillable. **Blocks the `PAYMENTS_LIVE` flip, not a waitlist launch** (while paused, no new owner can be created). Fix = 3 pages + wire the prod email send.
 
 ## 5. Trust, abuse, admin, frontend honesty
 
