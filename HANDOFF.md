@@ -186,11 +186,19 @@ pinger.
       source comments say so (`lib/moderation.ts`, `app/api/elements/route.ts`,
       and the moderate route: "Financial history is NEVER touched"). Aggregates
       carry no identity; the feed did. Explicit decision this session: keep the
-      money, hide the listing. Two display-layer consequences remain **unresolved
-      and unverified as intentional**: `app/api/checkout/route.ts` charges a
+      money, hide the listing.
+- [x] **Fixed 2026-09-10:** `app/api/checkout/route.ts` charged a
       hidden-**inclusive** take-lead price while `app/api/elements/[sym]/route.ts`
-      displays a hidden-**excluded** one, and `app/api/elements/route.ts` returns
-      unfiltered `pool`/`count` beside a filtered `leader` (self-inconsistent tile).
+      displayed a hidden-**excluded** one. Buying at the advertised price was then
+      classified as a mere join — no reservation, and the money did not buy the
+      lead the page promised. Checkout now prices off the first non-HIDDEN stake,
+      matching the display side. `existingTotals` (the no-tie guard) is
+      deliberately left **complete** — a collision with a hidden row is still a
+      collision in the ledger ranking. Regression coverage in
+      `lib/moderation.test.ts` asserts the advertised price is the price that takes
+      the lead, and was confirmed to fail without the fix.
+- [ ] `app/api/elements/route.ts` returns unfiltered `pool`/`count` beside a
+      filtered `leader` — a self-inconsistent tile. **Still open.**
 - [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`)
 - [ ] Upstash not set — rate limits are per-instance memory, bypassable on
       serverless (`lib/rateStore.ts` fails open)
