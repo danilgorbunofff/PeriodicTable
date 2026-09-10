@@ -78,7 +78,15 @@ jobs:
           npx tsx prisma/seed.ts
           npx tsx prisma/launch-seed.ts
       - name: release rehearsal — live money flows
+        # VERCEL_ENV=preview keeps the app out of its fail-closed production
+        # mode, which requires real Whop keys (PAYMENTS_LIVE=true + key +
+        # secret). The rehearsal deliberately drives the dev simulator
+        # (/api/dev/pay) so the ledger, ranking, idempotency, reservation and
+        # webhook paths run against the same settle service without live
+        # charges. True production fail-closed behavior is covered below by
+        # the paused rehearsal, which runs in production env shape.
         env:
+          VERCEL_ENV: preview
           WHOP_WEBHOOK_SECRET: ci-rehearse-secret
           ADMIN_TOKEN: ci-rehearse-admin
           CRON_SECRET: ci-rehearse-cron

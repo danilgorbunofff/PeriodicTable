@@ -1,0 +1,43 @@
+name: outbox tick
+
+# Free scheduler for the background workers (receipt/outbid email retry and
+# preview generation) — Vercel's free plan only allows a cron once a day.
+# GitHub cron is best-effort and may fire a few minutes late; vercel.json adds
+# a once-a-day backstop so a missed tick can never strand mail for a full day.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: outbox-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_URL: https://www.periodictable.lol
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Fail loudly when CRON_SECRET is missing
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repository secret is not set (Settings → Secrets and variables → Actions) — every worker call would 401."
+            exit 1
+          fi
+      - name: Drain email outbox
+        run: |
+          curl -fsS -X POST "$BASE_URL/api/jobs/outbox" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{"limit":25}'
+      - name: Generate due previews
+        run: |
+          curl -fsS -X POST "$BASE_URL/api/jobs/screenshot" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{"limit":10}'
