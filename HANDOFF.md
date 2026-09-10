@@ -68,15 +68,11 @@ Deleted 59 rows: `firstClaim` 10, `report` 2, `clickEvent` 5, `stake` 12,
 `activityLog` 12, `outboxEvent` 9, `startup` 9. `Payment` and `WaitlistEntry`
 were both empty — no real payment or signup was ever at risk.
 
-⚠️ **Two traps found while doing this, both still live:**
+⚠️ **Trap found while doing this, still live:**
 
-1. **The local `.env` `DATABASE_URL` points at the production Neon database.**
-   Running `npm run seed` or `npm run db:migrate` from this laptop mutates prod.
-   Prefer `db:clear-demo`'s dry run as the pattern for anything touching data.
-2. **Prod has no `_prisma_migrations` table at all.** The schema was created by
-   `db push`, so a build command containing `prisma migrate deploy` would try to
-   replay `0000_baseline` over existing tables. See "What is next" — this needs
-   a decision before it bites.
+**The local `.env` `DATABASE_URL` points at the production Neon database.**
+Running `npm run seed` or `npm run db:migrate` from this laptop mutates prod.
+Prefer `db:clear-demo`'s dry run as the pattern for anything touching data.
 
 Backup taken immediately before the cleanup (verified complete, contains all 9
 startups and 12 stakes): `prod-backup-20260910-213853.sql` in the session
@@ -142,12 +138,17 @@ pinger.
 
 **Done and proven**
 - [x] Deployed on Vercel (`periodic-table`, auto-deploys `main`); main CI green
-- [x] Neon Postgres connected — **122 elements live** (schema applied with
-      `db push`, so there is **no `_prisma_migrations` table** — see the trap below)
+- [x] Neon Postgres connected — **122 elements live**
 - [x] Custom domain live: `periodictable.lol` → 308 → `www.periodictable.lol`
 - [x] Security headers + CSP live in prod (`next.config.mjs`, prod-only block)
 - [x] All 6 read APIs 200 on the custom domain
 - [x] Payments **safely paused**: `POST /api/checkout` → `403` (waitlist)
+- [x] **Migrations baselined.** Prod's schema had been applied with `db push`, so
+      `_prisma_migrations` did not exist and Prisma reported all 5 migrations as
+      *unapplied* — the next `prisma migrate deploy` in a build would have replayed
+      `0000_baseline` over live tables and failed. All 5 are now marked applied via
+      `prisma migrate resolve --applied`, and `prisma migrate deploy` reports
+      **`No pending migrations to apply.`** Migration files are authoritative again.
 - [x] **Demo/seed listings cleared from prod** (§1) — 59 rows across 7 tables;
       `/api/stats` → 0 claimed, 0 stakes, $0; checked with
       `scripts/clear-demo-data.ts` (`npm run db:clear-demo`, dry run first)
@@ -201,11 +202,15 @@ pinger.
   `npm run seed` and `npm run db:migrate` run straight against prod from this
   laptop. Anything that writes rows should be dry-run-first and guarded the way
   `scripts/clear-demo-data.ts` is.
-- ⚠️ **Prod has no `_prisma_migrations` table.** The schema was created with
-  `db push`, not `migrate`. If the Vercel build command runs
-  `prisma migrate deploy`, it will try to replay `0000_baseline` over tables that
-  already exist. Decide: baseline the migration table, or drop `migrate deploy`
-  from the build and keep using `db push`.
+- **`migrate deploy` is now safe to run in a build** (baselined, §Done and proven).
+  It also worked over Neon's **pooled** URL, so the usual `directUrl` advice for
+  serverless is not currently required here — but the datasource still has no
+  `directUrl`, so if a *future* migration ever fails on advisory locks, that is
+  the first thing to add (`DIRECT_URL` + `directUrl = env("DIRECT_URL")`).
+- **`package.json`'s `build` is only `next build`** — it does *not* run migrations.
+  `prisma migrate deploy` exists as `db:deploy`. If the Vercel project's Build
+  Command is an override (`prisma migrate deploy && next build`), it is a dashboard
+  setting and invisible from this repo — check it before assuming either way.
 - CI runs on `push` to `main` **and** `pull_request`. **The post-merge `push` run
   can fail even when the PR run passed** — always re-check `main` after merging.
 - Secrets must never be pasted into chat. A Resend key leaked that way once and
@@ -215,20 +220,18 @@ pinger.
 
 ## What is next, in order
 
-1. **Decide the migration story** (`_prisma_migrations` trap above) — cheapest to
-   settle now, while prod is still empty of real rows.
-2. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
-3. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
+1. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
+2. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
    - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **activity+stats HIDDEN leak**, honest
      error panels, board sorting, click salt
    - §4c: receipt / outbid / unsubscribe **hand tests with two real inboxes**
    - §6: hand journeys J1–J8
    - §7: GO / NO-GO
-4. **LAST:** `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Whop live
+3. **LAST:** `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Whop live
    keys + webhook `https://www.periodictable.lol/api/webhooks/whop` registered →
    redeploy → $1 live claim → refund/keep → announce.
-5. Product decision to make explicitly: v1 currently **renders no previews**
+4. Product decision to make explicitly: v1 currently **renders no previews**
    (nothing in `.tsx` reads `stake.preview`; only `Avatar.tsx` renders `logoUrl`).
    The pipeline works and the CSP allows it — decide whether v1 shows them.
 
