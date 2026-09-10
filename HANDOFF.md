@@ -188,6 +188,44 @@ pinger.
       500 public browsing, which needs none of the guard's nine vars. Wiring the
       guard into startup is all-or-nothing and would brick the public site over an
       operator-only gap.
+- [x] **Fixed 2026-09-11:** the webhook **ignored money reversals**, and the
+      handoff's summary of the amount handling was **backwards**. Refunds,
+      chargebacks, and disputes matched neither `paid` nor `failed`, so they fell
+      to the `!paid && !failed` branch and were recorded as `IGNORED` /
+      `unrelated-event` with **HTTP 200** — the network handed the buyer's money
+      back while the stake stayed on the board, in the pool, and on the tile
+      face. Now: `whopPayloadReversal` classifies 7 statuses and 11 event types,
+      is checked **before** the paid check, and `reversePayment`
+      (`lib/settle.ts`) unwinds the stake under the same per-element advisory
+      lock as settle, writes `Payment.status = REFUNDED` + `refundedAt`, logs the
+      public `kind: "refund"` activity row with a negative delta, and audits
+      `PAYMENT_REVERSED`. Redelivery cannot subtract twice (`providerEventId`
+      dedupe), and a reversal that arrives while the payment is still `PENDING`
+      closes it, so a late paid delivery cannot apply a stake for money that
+      already went back. Amounts are deliberately **not** validated on this path:
+      the unwind uses our own checkout-time `payment.amountUsd`, which is the
+      only figure the ledger ever used — so a partial refund still unwinds the
+      full charge it recorded (money must never leave paid-for inventory behind).
+      Declining refunds is still published policy (`app/legal/[slug]/page.tsx`,
+      `components/Modals.tsx`); this path exists because a chargeback is not a
+      policy you can decline. 6 integration tests + a 12-case signal suite, all
+      falsified by reverting the branch ordering.
+- [x] **Fixed 2026-09-11:** a fully reversed stake kept **the crown and the
+      price**. The zeroed row still sorted first, so a charged-back bidder kept
+      `isLeader: true` on the tile face forever — and `takeLeadPrice(0)` returns
+      **$1**, not the $5 floor, so an all-reversed element advertised a $1
+      takeover. Rows can never be deleted (`ClickEvent.stakeId` is required, plus
+      `FirstClaim`), so "not bidding" is now a **first-class ledger state**:
+      **`amountUsd > 0` is the canonical eligibility rule**, applied in
+      `rankStakes` (`lib/pricing.ts`) and mirrored in every reader — checkout
+      (the authoritative price), element detail, the elements grid, search, OG
+      images, the element page, and `Modals.tsx`. `assertLedgerInvariants` now
+      requires **no** leader row *and* `currentLeaderId === null` when nothing
+      live bids. Side effect worth knowing: a refunded bidder now counts as a
+      newcomer again and pays the $5 first-join floor instead of a $1 top-up.
+      A `PAID` payment with no stake row is a `ledger-invariant:` terminal error
+      rather than a silent no-op. Regression coverage in `lib/pricing.test.ts`
+      and `lib/webhook.test.ts`; both falsified.
 - [ ] `UPSTASH_REDIS_REST_URL` / `_TOKEN` are **not** in `REQUIRED_PROD_ENV`, so
       even a wired-up `requireProdEnv()` would not catch the degraded rate
       limiter. `/api/jobs/config` does, as a `degraded` advisory.
@@ -229,9 +267,18 @@ pinger.
       by `/api/jobs/config` as a `degraded` advisory.
 - [ ] Whop contract **still guessed** (`lib/whop.ts`): endpoint shape, signature
       header, payment-id location, paid event types. Needs signed fixtures.
-- [ ] Webhook trusts the amount it is told (`null` skips validation)
-- [ ] No refunds / disputes / `PENDING` expiry / reconciliation — the `REFUNDED`
-      enum value is never written
+- [ ] Webhook **does not trust** the amount it is told — this was previously
+      listed backwards. Every money path uses our own checkout-time
+      `payment.amountUsd`; the provider's figure only cross-checks it
+      (`validateWhopMoney`) and is stored as audit metadata. The real remaining
+      gap is narrower: an **absent** provider amount is indistinguishable from a
+      verified one (`validateWhopMoney` returns `null` in both cases), and
+      `providerAmount` / `providerCurrency` are **write-only** — nothing
+      reconciles them against `amountUsd`.
+- [ ] **No `PENDING` expiry sweeper** (reservations self-expire, so none is
+      needed yet) and **no reconciliation** of `providerAmount` vs `amountUsd`.
+      Money reversals are now handled — see the 2026-09-11 entries above. The
+      `CANCELED` enum value is still never written (stale Phase 2 comment).
 - [ ] Grid/stats failure honesty: a blocked API must show error panels, never a
       fake all-`Unclaimed $5` / zeros
 - [ ] A11y/mobile sweep + a real browser/axe E2E (today: static string tests only)
@@ -241,8 +288,8 @@ pinger.
 
 **Environment traps — do not lose time on these**
 - **Local tests silently skip the DB suites.** Without a DB the gate in
-  `lib/testDb.ts` skips them silently (`215 passed | 41 skipped`, measured
-  2026-09-10). A green local run is **not** proof the integration path works —
+  `lib/testDb.ts` skips them silently (`222 passed | 48 skipped`, measured
+  2026-09-11). A green local run is **not** proof the integration path works —
   that is exactly how the takedown bug sat unnoticed in `main`. Let CI be the DB
   oracle. **You can be the oracle locally too**, and it is cheap: run a throwaway
   Postgres in Docker, then point tests at it without touching `.env` (which holds
@@ -298,7 +345,14 @@ pinger.
    - §7: GO / NO-GO
 3. **LAST:** `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Whop live
    keys + webhook `https://www.periodictable.lol/api/webhooks/whop` registered →
-   redeploy → $1 live claim → refund/keep → announce.
+   redeploy → $1 live claim → refund/keep → announce. The refund leg is no longer
+   a manual no-op: a real provider reversal now unwinds the stake, so confirm
+   four things at once — the stake is back to $0 / **no leader** (tile face
+   clears, take-lead price returns to the $5 floor), a negative `refund` row
+   appears in the activity feed, an audit row `PAYMENT_REVERSED` exists, and
+   `Payment.status` is `REFUNDED` with `refundedAt` set. Migration `0005` must be
+   applied by the Vercel Build Command before that test, or the reversal path
+   writes to a column that does not exist.
 4. Product decision to make explicitly: v1 currently **renders no previews**
    (nothing in `.tsx` reads `stake.preview`; only `Avatar.tsx` renders `logoUrl`).
    The pipeline works and the CSP allows it — decide whether v1 shows them.

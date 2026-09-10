@@ -6,12 +6,13 @@ import {
   paymentIdFromWhopPayload,
   whopPayloadIsPaid,
   whopPayloadIsFailed,
+  whopPayloadReversal,
   whopEventId,
   whopEventType,
   whopMoney,
   validateWhopMoney,
 } from "@/lib/whop";
-import { settlePayment } from "@/lib/settle";
+import { settlePayment, reversePayment } from "@/lib/settle";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ export const dynamic = "force-dynamic";
  * - Verifies the HMAC signature against raw bytes; 401 otherwise.
  * - Classifies paid ONLY on explicit provider signals (P0-03: statusless or
  *   unknown events are IGNORED with 200 — they must never apply a stake).
+ * - Classifies refunds/chargebacks/disputes BEFORE paid/failed and unwinds the
+ *   stake (reversePayment): a reversal must never be treated as unrelated.
  * - Validates provider reference, amount, and currency against the local
  *   payment before settling (item 4); mismatches are rejected loudly.
  * - Every delivery is recorded as a ProviderEvent; true duplicates get 200;
@@ -63,6 +66,31 @@ export async function POST(req: NextRequest) {
     });
     // 200: retrying an unknown payment can never succeed.
     return NextResponse.json({ ok: true, note: "unknown payment" });
+  }
+
+  // Money-reversing signals (refund / chargeback / dispute) are classified
+  // BEFORE paid/failed: a payload can carry both a paid type and a refunded
+  // status, and the reversal must win — otherwise the network hands the money
+  // back while our ledger keeps the stake on the board and in the pool.
+  const reversal = whopPayloadReversal(payload);
+  if (reversal) {
+    try {
+      const outcome = await reversePayment(paymentId, {
+        provider: "whop",
+        eventId,
+        eventType,
+        reversal,
+        payload: payload as object,
+      });
+      // Ledger-invariant failures are terminal: 200 + ERROR row routes to
+      // operator review rather than a redelivery loop that cannot succeed.
+      if (outcome.outcome === "rejected") {
+        return NextResponse.json({ ok: false, error: outcome.reason }, { status: 200 });
+      }
+      return NextResponse.json({ ok: true, outcome: outcome.outcome });
+    } catch {
+      return NextResponse.json({ ok: false, error: "reverse-retryable" }, { status: 500 });
+    }
   }
 
   const paid = whopPayloadIsPaid(payload);

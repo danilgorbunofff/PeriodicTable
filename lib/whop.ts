@@ -102,7 +102,8 @@ export function paymentIdFromWhopPayload(payload: unknown): string | null {
 /** Only treat payments as successful on an explicit provider signal (P0-03).
  * Fail-closed: unknown, missing, pending, failed, or refunded states return
  * false. A signed-but-unrelated event carrying our metadata can no longer
- * apply a stake. */
+ * apply a stake. Reversed states are false here too, but they are no longer
+ * allowed to fall through to UNRELATED — see whopPayloadReversal. */
 const PAID_STATUSES = new Set(["succeeded", "completed", "paid"]);
 const PAID_EVENT_TYPES = new Set([
   "payment.succeeded",
@@ -136,7 +137,8 @@ export function whopPayloadIsPaid(payload: unknown): boolean {
 }
 
 /** Explicit failure signals only (statuses + event types). Anything else that
- * is not paid is UNRELATED — it must leave the payment untouched (P0-03). */
+ * is neither paid, failed, nor reversed is UNRELATED — it must leave the
+ * payment untouched (P0-03). */
 const FAILED_STATUSES = new Set(["failed", "canceled", "cancelled", "expired"]);
 const FAILED_EVENT_TYPES = new Set([
   "payment.failed",
@@ -154,6 +156,64 @@ export function whopPayloadIsFailed(payload: unknown): boolean {
   );
   if (statuses.some((s) => FAILED_STATUSES.has(s))) return true;
   return FAILED_EVENT_TYPES.has(whopEventType(payload));
+}
+
+/** Money-reversing signals: the provider returned, or clawed back, the buyer's
+ * money. Kept strictly separate from PAID *and* FAILED.
+ *
+ * Not FAILED: a reversal is not a checkout that failed, and P0-03 forbids
+ * letting a noisy event stream cancel a real checkout.
+ *
+ * Not UNRELATED either — that was the old behaviour, and it meant the network
+ * returned the buyer's money while the stake stayed on the board and in the
+ * pool, recorded as an unrelated event. Repeatable, self-incentivising, and
+ * invisible. Published policy declines refunds (app/legal, Modals.tsx), but a
+ * chargeback is not a policy you can decline.
+ *
+ * Returns the matched signal (for the audit trail) or null. Reversal amounts
+ * are deliberately NOT validated against the local payment: a partial refund
+ * is still a reversal, and a unit/amount mismatch must not block the unwind.
+ */
+const REVERSED_STATUSES = new Set([
+  "refunded",
+  "refund",
+  "reversed",
+  "disputed",
+  "dispute",
+  "chargeback",
+  "chargebacked",
+]);
+const REVERSED_EVENT_TYPES = new Set([
+  "payment.refunded",
+  "payment.refund",
+  "payment.disputed",
+  "refund.created",
+  "refund.succeeded",
+  "refund.updated",
+  "charge.refunded",
+  "charge.dispute.created",
+  "charge.dispute.funds_withdrawn",
+  "chargeback.created",
+  "dispute.created",
+]);
+
+export function whopPayloadReversal(payload: unknown): string | null {
+  const p = payload as {
+    data?: { status?: unknown; payment?: { status?: unknown }; checkout_session?: { status?: unknown } };
+  } | null;
+  const statuses = [p?.data?.status, p?.data?.payment?.status, p?.data?.checkout_session?.status].filter(
+    (s): s is string => typeof s === "string"
+  );
+  const byStatus = statuses.map((s) => s.toLowerCase()).find((s) => REVERSED_STATUSES.has(s));
+  if (byStatus) return `status:${byStatus}`;
+  // Lowercased where the paid path is not: for a reversal the safe direction is
+  // to over-match, because the two failure modes are not symmetric. A false
+  // positive strips a stake for money we kept — loud (the buyer complains) and
+  // recoverable (PAYMENT_REVERSED plus refundedAt name the payment, and a
+  // re-apply is a fresh charge). A false negative is the original hole:
+  // invisible, repeatable, and it hands the inventory over for free.
+  const type = whopEventType(payload).toLowerCase();
+  return REVERSED_EVENT_TYPES.has(type) ? `type:${type}` : null;
 }
 
 /** Stable provider event id for replay detection (Phase 2, webhook item 5).

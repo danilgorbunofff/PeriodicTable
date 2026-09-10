@@ -33,8 +33,13 @@ export async function GET(req: NextRequest) {
         domain: true,
         title: true,
         logoUrl: true,
-        _count: { select: { stakes: true } },
+        // A fully reversed stake is no longer a bid: it must not surface a
+        // startup as bidding somewhere (amount $0 reads as a live bid on the
+        // row). elementCount is filtered the same way so the row's own numbers
+        // agree with the list it renders beside.
+        _count: { select: { stakes: { where: { amountUsd: { gt: 0 } } } } },
         stakes: {
+          where: { amountUsd: { gt: 0 } },
           orderBy: [{ amountUsd: "desc" }, { createdAt: "asc" }, { id: "asc" }],
           take: 5,
           include: { element: { select: { symbol: true, name: true } } },

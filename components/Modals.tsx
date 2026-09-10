@@ -75,7 +75,10 @@ export function CheckoutPreview({
   const elSafe = el;
   if (!elSafe) return null;
   const elSymbol = elSafe.symbol;
-  const leaderTotal = data?.stakes[0]?.amount;
+  // The API flags the top LIVE bid. Row 0 alone is not enough: a reversed $0
+  // stake sorts last but is still row 0 on an element with nothing else, and
+  // quoting it would advertise a $1 takeover the server refuses.
+  const leaderTotal = data?.stakes.find((s) => s.isLeader)?.amount;
   const badUrl = url.length > 0 && !/^https?:\/\/.+\..+/.test(tab === "url" ? url : `https://x.com/${url.replace(/^@/, "")}`);
   const badEmail = email.length > 0 && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
   const badTitle = title.length > 0 && (title.trim().length < 2 || title.trim().length > 32);
@@ -90,10 +93,13 @@ export function CheckoutPreview({
         : null;
   const effectiveTitle = title.trim() || domain || "";
   const effectivePitch = pitch.trim() || `Staked on ${elSafe.name}`;
-  const isNewHere = !domain || !data?.stakes.some((s) => s.domain === domain);
+  const isNewHere = !domain || !data?.stakes.some((s) => s.domain === domain && s.amount > 0);
   // Client-side preview of the server rule (Phase 3 classifyAndValidate);
   // the server re-validates authoritatively under lock.
   const stakeTotals = (data?.stakes ?? []).map((s) => s.amount);
+  // Zero-amount rows are reversed stakes: still listed, but not a prior holding
+  // (mirrors app/api/checkout/route.ts — otherwise the preview would quote a
+  // sub-$5 re-entry the server refuses).
   const myPriorTotal = !domain ? 0 : (data?.stakes.find((s) => s.domain === domain)?.amount ?? 0);
   // Returning holder? Quote the reclaim delta (leader+1 minus prior, min $1),
   // not the full take price. `need` stays null until prices load so the crown

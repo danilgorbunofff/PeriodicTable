@@ -86,6 +86,7 @@ enum ProviderEventOutcome {
   IGNORED   @map("ignored")
   FAILED    @map("failed")
   ERROR     @map("error")
+  REFUNDED  @map("refunded")
 }
 
 model Element {
@@ -184,6 +185,7 @@ model Payment {
   paidAt              DateTime?
   appliedAt           DateTime? // stake durably applied (Phase 2 sets atomically with paid)
   failedAt            DateTime?
+  refundedAt          DateTime? // refund/chargeback applied (sets REFUNDED + unwinds the stake)
   reservations        ClaimReservation[]
   auditLogs           AuditLog[]
   providerEvents      ProviderEvent[]
@@ -333,7 +335,7 @@ model ActivityLog {
   amountUsd      Int // legacy: cumulative total (kept); prefer delta/result fields
   deltaUsd       Int? // payment delta for this event (Phase 3+; null = pre-Phase-3 history)
   resultTotalUsd Int? // resulting cumulative total after this event
-  kind           String   @default("stake") // stake | reclaim | join
+  kind           String   @default("stake") // stake | reclaim | join | refund
   city           String?
   paymentId      String?
   payment        Payment? @relation(fields: [paymentId], references: [id])

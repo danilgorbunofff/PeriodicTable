@@ -157,4 +157,31 @@ describe("rankStakes", () => {
     expect(ranked[1].id).toBe("y");
     expect(ranked[1].rank).toBe(2);
   });
+  // A refund empties a stake but never deletes its row (ClickEvent.stakeId is
+  // required), so "amount 0 and still rank 1" is a reachable state. It must
+  // hold no crown: otherwise a charged-back bid keeps the tile face — and,
+  // because takeLeadPrice(0) is 1, prices the takeover at $1 instead of $5.
+  it("a zero-amount stake sorts last and never leads", () => {
+    const ranked = rankStakes([
+      { id: "refunded", amountUsd: 0, createdAt: new Date("2024-01-01") },
+      { id: "live", amountUsd: 12, createdAt: new Date("2024-03-01") },
+    ]);
+    expect(ranked.map((r) => r.id)).toEqual(["live", "refunded"]);
+    expect(ranked[0].rank).toBe(1);
+    expect(ranked[0].isLeader).toBe(true);
+    expect(ranked[1].rank).toBe(2);
+    expect(ranked[1].isLeader).toBe(false);
+  });
+  it("an all-refunded element has no leader at all", () => {
+    const ranked = rankStakes([
+      { id: "a", amountUsd: 0, createdAt: new Date("2024-01-01") },
+      { id: "b", amountUsd: 0, createdAt: new Date("2024-02-01") },
+    ]);
+    expect(ranked.map((r) => r.rank)).toEqual([1, 2]);
+    expect(ranked.some((r) => r.isLeader)).toBe(false);
+    // The reader rule shared by every leader face (checkout, element detail,
+    // tile): first live bid, else no leader — which prices a $5 takeover, not $1.
+    expect(ranked.find((r) => r.amountUsd > 0)).toBeUndefined();
+    expect(takeLeadPrice(ranked.find((r) => r.amountUsd > 0)?.amountUsd)).toBe(MIN_STAKE);
+  });
 });

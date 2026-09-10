@@ -76,7 +76,10 @@ export default async function ElementPage({ params }: { params: { sym: string } 
       </main>
     );
   }
-  const takeLead = element.stakes[0] ? element.stakes[0].amountUsd + 1 : 5;
+  // Same "row 0 is not necessarily the leader" rule as /api/elements/[sym]:
+  // a reversed $0 stake must not price the takeover at $1.
+  const lead = element.stakes.find((s) => s.amountUsd > 0);
+  const takeLead = lead ? lead.amountUsd + 1 : 5;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",

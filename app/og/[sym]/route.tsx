@@ -9,7 +9,7 @@ export async function GET(_req: NextRequest, { params }: { params: { sym: string
   const element = await prisma.element.findUnique({
     where: { symbol },
     include: {
-      stakes: { orderBy: { amountUsd: "desc" }, take: 1, include: { startup: { select: { domain: true } } } },
+      stakes: { where: { amountUsd: { gt: 0 } }, orderBy: { amountUsd: "desc" }, take: 1, include: { startup: { select: { domain: true } } } },
     },
   });
   if (!element) return NextResponse.json({ error: "Not found." }, { status: 404 });

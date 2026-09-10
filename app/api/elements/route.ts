@@ -8,10 +8,12 @@ export async function GET() {
   const elements = await prisma.element.findMany({
     orderBy: { id: "asc" },
     include: {
-      // Top directly-visible stake owns the tile face. Hidden listings never
-      // do; financial aggregates (pool/count) still count every stake.
+      // Top directly-visible LIVE stake owns the tile face. Hidden listings
+      // never do, and neither does a fully reversed stake (amount 0): keeping
+      // the face after a chargeback would hand over the very inventory the
+      // reversal was supposed to give up. Aggregates still count every stake.
       stakes: {
-        where: { startup: { moderationState: { in: DIRECT_STATES } } },
+        where: { startup: { moderationState: { in: DIRECT_STATES } }, amountUsd: { gt: 0 } },
         orderBy: { rank: "asc" },
         take: 1,
         include: { startup: { select: { domain: true, logoUrl: true } } },

@@ -148,7 +148,15 @@ export function rankStakes<T extends { amountUsd: number; createdAt?: Date | str
     if (timeOf(a) !== timeOf(b)) return timeOf(a) - timeOf(b);
     return (a.id ?? "").localeCompare(b.id ?? "");
   });
-  return sorted.map((s, i) => ({ ...s, rank: i + 1, isLeader: i === 0 }));
+  return sorted.map((s, i) => ({
+    ...s,
+    rank: i + 1,
+    // A fully reversed stake (amount 0) keeps its row — click history and
+    // first-claims hang off it — but it is not a bid, so it can never hold the
+    // rank-1 crown. Otherwise a charged-back bidder keeps the tile face for
+    // free, which is the very inventory the reversal was supposed to give up.
+    isLeader: i === 0 && s.amountUsd > 0,
+  }));
 }
 
 /**
@@ -166,11 +174,16 @@ export function assertLedgerInvariants(
     if (ranked[i].rank !== i + 1) fail(`rank gap at index ${i}`);
   }
   const leaders = ranked.filter((r) => r.isLeader);
-  if (ranked.length === 0) {
-    if (aggregate.currentLeaderId !== null) fail("leader on empty element");
+  const liveBids = ranked.filter((r) => r.amountUsd > 0);
+  if (liveBids.length === 0) {
+    // No live bid: every stake on the element was reversed away. The rows
+    // remain (click history / first-claims reference them), so there is simply
+    // no leader to point at.
+    if (leaders.length !== 0) fail(`leader without a live bid (${leaders.length})`);
+    if (aggregate.currentLeaderId !== null) fail("leader on unbid element");
   } else {
     if (leaders.length !== 1) fail(`expected 1 leader, saw ${leaders.length}`);
-    if (ranked[0].rank !== 1 || !ranked[0].isLeader) fail("rank 1 is not the leader");
+    if (!ranked[0].isLeader) fail("rank 1 is not the leader");
     if (aggregate.currentLeaderId !== leaders[0].startupId) fail("currentLeaderId mismatch");
   }
   const pool = ranked.reduce((sum, s) => sum + s.amountUsd, 0);

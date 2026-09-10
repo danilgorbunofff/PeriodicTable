@@ -8,7 +8,13 @@ import { relTime } from "../lib/relTime";
 function kindLabel(kind: string): string {
   if (kind === "join") return "bid on";
   if (kind === "reclaim") return "reclaimed";
+  if (kind === "refund") return "refunded";
   return "topped up";
+}
+
+/** First negative delta in the system: a reversal must read as a debit, not a gain. */
+function deltaText(delta: number): string {
+  return delta < 0 ? `-$${Math.abs(delta)}` : `+$${delta}`;
 }
 
 export function ActivityCard({
@@ -67,7 +73,7 @@ export function ActivityCard({
         ) : (
           <>
             <span className="text-ink">{s0.elementSymbol.toUpperCase()}</span>{" "}
-            {s0.kind === "join" ? "New bid" : s0.kind === "reclaim" ? "Crown reclaimed" : "Stake bumped"} ·{" "}
+            {s0.kind === "join" ? "New bid" : s0.kind === "reclaim" ? "Crown reclaimed" : s0.kind === "refund" ? "Stake refunded" : "Stake bumped"} ·{" "}
             <span className="text-ink">{s0.city ?? "somewhere"}</span>
           </>
         )}
@@ -93,7 +99,7 @@ export function ActivityCard({
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-end">
-                    <span className="text-sm font-black text-moneyink">+${s.delta}</span>
+                    <span className={`text-sm font-black ${s.delta < 0 ? "text-mutedink" : "text-moneyink"}`}>{deltaText(s.delta)}</span>
                     <span className="text-[11px] font-bold text-mutedink">{relTime(Date.parse(s.createdAt))}</span>
                   </div>
                 </div>

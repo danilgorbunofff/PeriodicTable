@@ -24,7 +24,11 @@ export async function GET(req: NextRequest, { params }: { params: { sym: string 
 
   if (!element) return apiError("Element not found", { status: 404, code: "NOT_FOUND" });
 
-  const leaderTotal = element.stakes[0]?.amountUsd;
+  // Leader is the top LIVE bid, not simply row 0: a fully reversed stake sits
+  // last with amountUsd 0, and reading it as the leader would advertise a $1
+  // takeover (takeLeadPrice(0)) on an element whose real floor is $5.
+  const leaderIdx = element.stakes.findIndex((s) => s.amountUsd > 0);
+  const leaderTotal = leaderIdx === -1 ? undefined : element.stakes[leaderIdx].amountUsd;
 
   const stakes = element.stakes.map((s, i) => ({
     stakeId: s.id,
@@ -37,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: { sym: string 
     amount: s.amountUsd,
     clicks: s.clicksDelivered,
     rank: i + 1,
-    isLeader: i === 0,
+    isLeader: i === leaderIdx,
   }));
 
   const meParam = req.nextUrl.searchParams.get("me");

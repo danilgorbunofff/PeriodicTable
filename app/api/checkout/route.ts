@@ -192,10 +192,19 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
     // stake could demand more than the page advertised, or classify the
     // advertised amount as a mere join. Hidden money still counts in
     // pool/count (deliberate policy); it just no longer sets the price.
-    const leader = stakes.find((s) => s.startup.moderationState !== "HIDDEN");
+    //
+    // Reversed stakes (amountUsd 0) are excluded for the same reason: they are
+    // kept as rows for click history, but a row the buyer can never be shown as
+    // leading must not price the lead. Without this, a fully refunded element
+    // quoted take-#1 at $1 (takeLeadPrice(0)) instead of the $5 floor.
+    const leader = stakes.find((s) => s.startup.moderationState !== "HIDDEN" && s.amountUsd > 0);
     const leaderTotal = leader?.amountUsd as number | undefined;
     const leaderStartupId = leader?.startupId as string | undefined;
-    const myStake = existing ? stakes.find((s) => s.startupId === existing.id) : undefined;
+    // Row existence is not the test for "returning holder" — amount is. A fully
+    // reversed stake leaves its row behind for click history, and treating that
+    // as a prior holding would let a refunded bidder re-enter below the $5
+    // first-join floor (and tie a real $5 stake) via the top-up branch.
+    const myStake = existing ? stakes.find((s) => s.startupId === existing.id && s.amountUsd > 0) : undefined;
     const isNewHere = !myStake;
     const myPriorTotal = myStake ? (myStake.amountUsd as number) : 0;
     // Deliberately unfiltered: this is the no-tie guard, and a collision with a
