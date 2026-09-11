@@ -129,6 +129,18 @@ const PROD_ENV_ADVISORIES: {
  * Non-throwing production config status. `required` findings are exactly what
  * requireProdEnv() refuses to serve without; the advisory severities degrade
  * quietly, so they are reported here rather than thrown.
+ *
+ * `ok` tracks that same split: it answers "would requireProdEnv() refuse to
+ * serve?", never "is anything at all less than perfect?". An advisory must not
+ * fail it. /api/jobs/config answers a non-2xx when `ok` is false — that status
+ * code is the only channel the external pinger can read — so a finding that is
+ * non-fatal by definition would raise an alert on every 10-minute tick,
+ * forever, and a monitor that cries wolf on schedule is muted long before a
+ * required variable actually goes missing.
+ *
+ * Nothing is hidden by this: every advisory is still reported in `findings`
+ * with its severity. /api/jobs/reconcile draws the identical line, keeping its
+ * advisory `unverified` block out of `ok` while `divergent` fails it.
  */
 export function getProdConfigReport(
   env: NodeJS.ProcessEnv = process.env
@@ -141,7 +153,7 @@ export function getProdConfigReport(
       findings.push({ key: advisory.key, severity: advisory.severity, detail: advisory.detail });
     }
   }
-  return { ok: findings.length === 0, findings };
+  return { ok: !findings.some((f) => f.severity === "required"), findings };
 }
 
 /**

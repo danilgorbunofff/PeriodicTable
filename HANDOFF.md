@@ -100,16 +100,40 @@ v1. A late tick delays a retry; it never silences first-time mail. Treat the
 in-repo cron as the fallback and the external pinger as the real schedule.
 
 **Fix (one dashboard action, user-side):** a free 10-minute pinger such as
-cron-job.org. Verified ready for it — both paths accept a plain **GET** with
-header `Authorization` set to a bearer token taken from the `CRON_SECRET`
-env var, and need no body; a deliberately wrong secret returns **401 on
-both**, so a 200 is real proof:
+cron-job.org. All four job paths accept a plain **GET** with header
+`Authorization` set to a bearer token taken from the `CRON_SECRET` env var
+(older pingers can use `?secret=<CRON_SECRET>` on the URL instead) and need no
+body:
 
 - `https://www.periodictable.lol/api/jobs/outbox`
 - `https://www.periodictable.lol/api/jobs/screenshot`
+- `https://www.periodictable.lol/api/jobs/config`
+- `https://www.periodictable.lol/api/jobs/reconcile`
+
+**Read the status code this way** (verified over real HTTP in production
+semantics on 2026-09-11):
+
+| code | meaning |
+| --- | --- |
+| `200` | authenticated **and** healthy |
+| `401` | bad or absent secret — auth is checked *before* any health is computed, so an unauthenticated caller cannot learn which variables are missing |
+| `503` | authenticated, but the check failed: a required production env var is missing/invalid (`config`), or a paid payment's stored provider figure contradicts the charge (`reconcile`) |
+
+The reasoning that used to sit here — "a wrong secret returns 401, so a 200 is
+real proof" — only ever proved *liveness*. It could not detect a real failure,
+because both reports answered **200 with `ok: false` in the body**, and a
+status-code-only pinger (cron-job.org's free tier fails a job on non-2xx only,
+with no body/keyword inspection) can never read a body. A missing
+`TURNSTILE_SECRET`, or a genuine money contradiction, would have left the pinger
+green forever. Both routes now answer `503` in exactly those cases. The
+advisory findings (`ADMIN_TOKEN`, Upstash) deliberately keep answering `200`:
+they describe degradation worth reading, not paging, and a monitor that fired on
+them every 10 minutes would be muted before the real failure ever arrived.
 
 `vercel.json` carries only `crons` entries (daily 04:00 outbox, 04:30
-screenshot); that access model belongs in the reference section next to the
+screenshot). `config` and `reconcile` are deliberately **not** cron'd — a cron
+run produces a response nobody reads — which is what puts them on the pinger's
+list instead. That access model belongs in the reference section next to the
 pinger.
 
 
@@ -184,10 +208,15 @@ pinger.
       availability** gap (no triage / outbox retry), not exposure.
 - [ ] **Stage 2, deferred deliberately: actually *calling* `requireProdEnv()`.**
       The gaps are now *visible* via **`GET /api/jobs/config`** (bearer
-      `CRON_SECRET`), reported **non-fatally** — a missing `WHOP_API_KEY` must not
-      500 public browsing, which needs none of the guard's nine vars. Wiring the
-      guard into startup is all-or-nothing and would brick the public site over an
-      operator-only gap.
+      `CRON_SECRET`). The report answers **503** when a *required* var is
+      missing and **200** when only the advisories are (`ADMIN_TOKEN`, Upstash),
+      which are listed in the body either way. Counting advisories as failure —
+      the behaviour until 2026-09-11 — would have turned every optional gap into
+      a monitor that fires every 10 minutes and gets muted before the real
+      failure arrives. Reporting stays **non-fatal to the public site**: a
+      missing `WHOP_API_KEY` must not 500 public browsing, which needs none of
+      the guard's nine vars. Wiring the guard into startup is all-or-nothing and
+      would brick the public site over an operator-only gap.
 - [x] **Fixed 2026-09-11:** the webhook **ignored money reversals**, and the
       handoff's summary of the amount handling was **backwards**. Refunds,
       chargebacks, and disputes matched neither `paid` nor `failed`, so they fell
@@ -279,7 +308,10 @@ pinger.
 - [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`:
       `verifyTurnstile` returns `true` outright when `TURNSTILE_SECRET` is unset).
       Surfaced by `/api/jobs/config`; the only thing that would have caught it
-      before was the never-called `requireProdEnv()`.
+      before was the never-called `requireProdEnv()`. It is a **`required`**
+      finding, so as of 2026-09-11 that route answers **503** for it — putting a
+      pinger on the URL (§2) is what converts a silent bot-check bypass into an
+      alert, which is why the two changes shipped together.
 - [ ] Upstash not set — rate limits are per-instance memory, bypassable on
       serverless (`lib/rateStore.ts` fails open: warns once, continues). Surfaced
       by `/api/jobs/config` as a `degraded` advisory.
@@ -327,9 +359,14 @@ pinger.
       compared the enum column to `'PAID'` (the column holds `'paid'`) and would
       have failed every call. Read-only, `jobAuth`, echoes identifiers and
       amounts only, so it is safe to run from the pinger. It is deliberately
-      **not** on a Vercel cron: a cron run produces a response nobody reads, and
-      `ok: false` is a signal for a monitor to alert on. 5 integration tests in
-      `lib/reconcile.test.ts`.
+      **not** on a Vercel cron: a cron run produces a response nobody reads,
+      which is why it belongs on the pinger's URL list instead. A divergent row
+      is answered as **503**, because the status code is the only channel a
+      status-code-only pinger can read — reporting the failure inside a 200 body
+      made it undetectable (fixed 2026-09-11). The advisory `unverified` block
+      keeps answering 200 on purpose, so the report cannot be muted before the
+      divergent case ever fires. 5 integration tests in
+      `lib/reconcile.test.ts` assert the status follows `ok`, not a fixed 200.
 - [ ] **No `PENDING` expiry sweeper** (reservations self-expire, so none is
       needed yet). Money reversals are now handled — see the 2026-09-11 entries
       above. The `CANCELED` enum value is still never written (stale Phase 2
@@ -429,11 +466,15 @@ pinger.
 ## What is next, in order
 
 1. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
-   **Add `/api/jobs/config` and `/api/jobs/reconcile` to the same URL list**
-   (bearer `CRON_SECRET`): both reports are only worth having if something calls
-   them. `reconcile` answers `ok: false` when a paid payment's stored provider
-   figure contradicts the charge, so alert on that — and on a non-2xx from
-   either path.
+   All **four** job URLs go on the same list, bearer `CRON_SECRET`
+   (or `?secret=<CRON_SECRET>` if the pinger cannot set headers): the two worker
+   paths plus `/api/jobs/config` and `/api/jobs/reconcile`. Alert on **any
+   non-2xx** — `200` now means authenticated *and* healthy. `config` names any
+   missing required production env; `reconcile` names a paid payment whose
+   stored provider figure contradicts the charge. Both used to report those
+   failures inside a 200 body, which a status-code-only pinger cannot see
+   (fixed 2026-09-11); the advisory findings they also carry still answer 200 on
+   purpose, so the monitor is not muted before the real failure fires.
 2. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
    - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **stats HIDDEN sums (deliberate — see

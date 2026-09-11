@@ -32,6 +32,16 @@ export const dynamic = "force-dynamic";
  *
  * Read-only, authenticated like its job neighbours (jobAuth). It echoes
  * identifiers and amounts only, so it is safe to run from the pinger or cron.
+ *
+ * A divergent row is answered as **503**, not as `ok: false` inside a 200.
+ * The status code is the only channel the external pinger can read — the free
+ * cron-job.org tier fails a job on non-2xx and cannot inspect the body — so
+ * this report could previously have found real money contradictions while the
+ * monitor that calls it stayed green forever. The advisory `unverified` block
+ * deliberately keeps returning 200: it describes money that was accepted
+ * correctly but never cross-checked, which is worth reading and not worth
+ * paging on, and a report that paged on it would be muted before the divergent
+ * case ever fired.
  */
 export async function GET(req: NextRequest) {
   const denied = jobAuth(req, req.nextUrl.searchParams.get("secret"));
@@ -65,17 +75,20 @@ export async function GET(req: NextRequest) {
     take: 5,
   });
 
-  return NextResponse.json({
-    ok: divergentRows.length === 0,
-    paidTotal: paidRows.length,
-    divergent: { count: divergentRows.length, samples: divergentRows.slice(0, 5) },
-    unverified: {
-      count: unverifiedCount,
-      byProvider: unverifiedByProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
-      samples: unverifiedSamples,
-      note: "Paid on our own checkout figure alone: the provider's delivery stated no amount, so nothing could be cross-checked.",
+  return NextResponse.json(
+    {
+      ok: divergentRows.length === 0,
+      paidTotal: paidRows.length,
+      divergent: { count: divergentRows.length, samples: divergentRows.slice(0, 5) },
+      unverified: {
+        count: unverifiedCount,
+        byProvider: unverifiedByProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
+        samples: unverifiedSamples,
+        note: "Paid on our own checkout figure alone: the provider's delivery stated no amount, so nothing could be cross-checked.",
+      },
     },
-  });
+    { status: divergentRows.length === 0 ? 200 : 503 }
+  );
 }
 
 /** Same auth, same report — the second verb exists so this can be put on a cron

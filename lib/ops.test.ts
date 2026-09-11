@@ -130,9 +130,15 @@ describe("config report route", () => {
     set("CRON_SECRET", "s3cr3t");
     // Outside production jobAuth permits the local rehearsal shape.
     const local = await call();
-    expect(local.status).toBe(200);
     const body = (await local.json()) as { ok: boolean; env: string; findings: { key: string; severity: string; detail: string }[] };
     expect(body.env).toBe("test");
+    // The status code — not the `ok` field — is the only thing the external
+    // pinger can read (the free cron-job.org tier fails a job on non-2xx and
+    // cannot inspect bodies), so the two must never disagree. Asserted as a
+    // coupling rather than a fixed number: this suite runs against whatever
+    // environment it is started in, and a hardcoded 200 is precisely the
+    // blindness being guarded against.
+    expect(local.status).toBe(body.ok ? 200 : 503);
     expect(Array.isArray(body.findings)).toBe(true);
     for (const f of body.findings) {
       expect(typeof f.key).toBe("string");
@@ -149,10 +155,43 @@ describe("config report route", () => {
     expect((await call()).status).toBe(401);
     expect((await call({ authorization: "Bearer wrong" })).status).toBe(401);
     const allowed = await call({ authorization: "Bearer s3cr3t" });
-    expect(allowed.status).toBe(200);
-    // The report is non-fatal: it answers even while reporting gaps.
+    // Auth is checked before health, so an authorised call is never 401. It is
+    // never a blanket 200 either: the report is non-fatal in that it always
+    // *answers* with its findings, which has never meant "answers 200" — the
+    // status code reports health so the pinger can see it.
     const prod = (await allowed.json()) as { ok: boolean };
     expect(typeof prod.ok).toBe("boolean");
+    expect(allowed.status).toBe(prod.ok ? 200 : 503);
+  });
+
+  it("answers 200 with nothing required missing, and 503 the moment one is", async () => {
+    // Deterministic, unlike the ambient assertions above: this suite's process
+    // env is bare, so `ok` is always false there and an implementation that
+    // answered 503 unconditionally would satisfy every other test in this
+    // block. Nothing would ever prove a healthy deployment reports healthy.
+    const { REQUIRED_PROD_ENV } = await import("./env");
+    const { GET } = await import("../app/api/jobs/config/route");
+    const call = () => GET(new NextRequest("http://localhost/api/jobs/config") as never);
+
+    for (const k of REQUIRED_PROD_ENV) set(k, "x");
+    set("NEXT_PUBLIC_APP_URL", "https://periodictable.lol");
+    set("CLICK_SALT", "a-private-random-value");
+
+    const healthy = await call();
+    const healthyBody = (await healthy.json()) as { ok: boolean; findings: { key: string; severity: string }[] };
+    expect(healthy.status).toBe(200);
+    expect(healthyBody.ok).toBe(true);
+    // Advisories may or may not be present depending on the host environment;
+    // what must be absent is anything that blocks serving.
+    expect(healthyBody.findings.filter((f) => f.severity === "required")).toEqual([]);
+
+    // One required variable gone is exactly the failure the pinger must see.
+    set("TURNSTILE_SECRET", undefined);
+    const gap = await call();
+    const gapBody = (await gap.json()) as { ok: boolean; findings: { key: string; severity: string }[] };
+    expect(gap.status).toBe(503);
+    expect(gapBody.ok).toBe(false);
+    expect(gapBody.findings.map((f) => f.key)).toContain("TURNSTILE_SECRET");
   });
 });
 

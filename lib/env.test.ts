@@ -180,6 +180,9 @@ describe("getProdConfigReport", () => {
       .map((f) => f.key);
     expect(required).toEqual([...REQUIRED_PROD_ENV]);
     expect(getMissingProdEnv(empty)).toHaveLength(REQUIRED_PROD_ENV.length);
+    // A missing required variable is the whole reason this report exists, and
+    // it is what the pinger needs to fail on.
+    expect(getProdConfigReport(empty).ok).toBe(false);
   });
 
   it("is clean for a fully configured production env", async () => {
@@ -203,5 +206,13 @@ describe("getProdConfigReport", () => {
     // per-instance memory, must not take down public browsing.
     prodEnv();
     expect(() => requireProdEnv(fakeEnv(noOperator))).not.toThrow();
+
+    // ...and they must not fail `ok` either. /api/jobs/config answers ok:false
+    // as a 503 that the external pinger alerts on, so an advisory reaching `ok`
+    // would page every 10 minutes for a condition that is non-fatal by
+    // definition — and a monitor that cries wolf on a schedule is muted long
+    // before a required variable actually goes missing. The findings above are
+    // still returned in full, so the degradation stays visible.
+    expect(getProdConfigReport(fakeEnv(noOperator)).ok).toBe(true);
   });
 });

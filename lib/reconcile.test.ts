@@ -34,8 +34,15 @@ type Report = {
 
 async function call(): Promise<Report> {
   const res = await GET(new NextRequest("http://localhost/api/jobs/reconcile") as never);
-  expect(res.status).toBe(200);
-  return (await res.json()) as Report;
+  const report = (await res.json()) as Report;
+  // The status code is the only channel a status-code-only monitor can read
+  // (the free cron-job.org tier fails a job on non-2xx and cannot inspect
+  // bodies), so it must agree with `ok` exactly. Asserted as a coupling rather
+  // than a fixed 200 — a hardcoded 200 here is what kept real money
+  // contradictions invisible to the pinger, and the divergent tests below are
+  // where this check earns its keep.
+  expect(res.status).toBe(report.ok ? 200 : 503);
+  return report;
 }
 
 function paid(data: { amountUsd: number; providerAmount?: number | null; providerCurrency?: string | null; minutes: number }) {
