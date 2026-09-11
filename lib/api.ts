@@ -68,8 +68,11 @@ export type BoardRow = {
   totalSpent?: number;
 };
 
-/** Tile claim from /api/elements */
-export type Claim = { price: number; contested?: boolean; logoUrl?: string };
+/** Tile claim from /api/elements. Built from `leader`, which is filtered to
+ *  directly-visible stakes — so this type must never carry a flag derived from
+ *  the hidden-inclusive `count`, or the tile would advertise a concealed
+ *  listing's existence. */
+export type Claim = { price: number; logoUrl?: string };
 
 /** Activity row from /api/activity — amount paid + resulting total. */
 export type ActivityRow = {

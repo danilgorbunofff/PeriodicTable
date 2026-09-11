@@ -30,6 +30,11 @@ export async function GET() {
       gridCol: e.gridCol,
       family: e.family,
       tier: e.tier,
+      // Deliberately hidden-inclusive (see the stakes filter above): the money
+      // stays in the totals even when the listing is concealed. These are
+      // aggregates only — `count` must never reach the UI, because a badge
+      // driven by it would reveal that a concealed stake exists. The tile face
+      // is `leader` alone.
       pool: e.totalPoolUsd,
       count: e.stakeCount,
       leader: leader

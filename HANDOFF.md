@@ -256,8 +256,26 @@ pinger.
       collision in the ledger ranking. Regression coverage in
       `lib/moderation.test.ts` asserts the advertised price is the price that takes
       the lead, and was confirmed to fail without the fix.
-- [ ] `app/api/elements/route.ts` returns unfiltered `pool`/`count` beside a
-      filtered `leader` — a self-inconsistent tile. **Still open.**
+- [x] **Fixed 2026-09-11:** `app/api/elements/route.ts` returns unfiltered
+      `pool`/`count` beside a filtered `leader`. Previously recorded here as a
+      "self-inconsistent tile" — **that consequence was wrong**, and the
+      correction matters more than the fix. `leader` is filtered to
+      `DIRECT_STATES` + `amountUsd > 0`, and it alone drives the tile face;
+      `pool` is never read by any client, and `count`'s single consumer was
+      `contested: t.count > 1` in `app/page.tsx` — while `.contested` had **zero
+      readers repo-wide** (declared in `lib/api.ts` and `components/Tile.tsx`,
+      assigned once, never read). Nothing on screen ever paired the two fields,
+      so no tile was inconsistent. The real defect was latent: `contested` was
+      derived from the hidden-**inclusive** `count`, so any future render of it —
+      the obvious "contested" badge — would have made a tile with one visible
+      leader advertise that a **concealed** stake existed, the same leak fixed in
+      `app/api/activity/route.ts` on 2026-09-10. The dead plumbing is removed and
+      the constraint recorded on the type and at the payload site. `pool`/`count`
+      stay unfiltered and stay in the payload: that is the deliberate
+      "aggregates keep the money" policy, pinned by
+      `lib/moderation.test.ts` (`expect(tile?.pool).toBe(52)` with a HIDDEN stake
+      inside the 52), so filtering them would contradict the policy and break a
+      passing test. 280 passed (280), 19 files.
 - [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`:
       `verifyTurnstile` returns `true` outright when `TURNSTILE_SECRET` is unset).
       Surfaced by `/api/jobs/config`; the only thing that would have caught it

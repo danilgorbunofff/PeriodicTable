@@ -69,7 +69,6 @@ function HomeInner() {
     if (t.leader) {
       claims[t.symbol] = {
         price: t.leader.amount,
-        contested: t.count > 1,
         logoUrl: t.leader.logoUrl,
       };
     }

@@ -7,7 +7,6 @@ import { getExoticTheme } from "../lib/exoticThemes";
 export type TileClaim = {
   price: number;
   logoUrl?: string;
-  contested?: boolean;
   selected?: boolean;
 };
 
