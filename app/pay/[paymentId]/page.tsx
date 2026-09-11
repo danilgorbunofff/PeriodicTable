@@ -49,7 +49,7 @@ export default function DevPayPage() {
           boxShadow: "0 20px 60px rgba(0,0,0,0.08)",
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: "#999" }}>DEV SIMULATOR</div>
+        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: "#666" }}>DEV SIMULATOR</div>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: "10px 0 6px" }}>Complete your stake</h1>
         <p style={{ color: "#666", fontSize: 14, lineHeight: 1.5 }}>
           No Whop keys configured — this simulator stands in for the real checkout. On Pay, the stake applies
@@ -93,7 +93,7 @@ export default function DevPayPage() {
             Simulate failure
           </button>
         </div>
-        <p style={{ fontSize: 12, color: "#999", marginTop: 14, textAlign: "center" }}>
+        <p style={{ fontSize: 12, color: "#666", marginTop: 14, textAlign: "center" }}>
           A failed simulation marks the payment failed — retry from the table with a new checkout.
         </p>
         {status && (

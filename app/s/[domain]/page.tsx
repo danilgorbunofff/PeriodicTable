@@ -99,7 +99,7 @@ export default async function Profile({ params }: { params: { domain: string } }
         <div className="flex items-center justify-between">
           <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
           <div className="bg-white rounded-full shadow px-4 py-1.5 text-sm font-display font-bold flex items-center gap-1.5">
-            <span>periodictable<span className="text-money">.lol</span></span>
+            <span>periodictable<span className="text-moneyink">.lol</span></span>
           </div>
         </div>
 

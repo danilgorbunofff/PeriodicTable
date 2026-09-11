@@ -100,6 +100,29 @@ describe("text contrast meets WCAG 2.2 AA (4.5:1 small text)", () => {
       expect(s).not.toMatch(/text-money[^-i]/);
     }
   });
+  it("the small wordmark pill (.lol) uses the AA-safe money ink", () => {
+    // The /s/[domain] pill is text-sm font-bold: 14px is *normal* text, so it
+    // needs 4.5:1, and the decorative `money` hue only manages 3.25:1 on white.
+    const domain = src("app/s/[domain]/page.tsx");
+    expect(ratio(colors.money, "#FFFFFF")).toBeLessThan(4.5);
+    expect(ratio(colors.moneyink, "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(domain).toMatch(/periodictable<span className="text-moneyink">\.lol/);
+    expect(domain).not.toMatch(/text-money[^-i]/);
+    // The homepage pill is text-[22px] font-bold — large text, 3:1 floor — so
+    // it may keep the display hue, but only for as long as it stays that large.
+    expect(src("app/page.tsx")).toMatch(
+      /text-\[22px\] font-bold shadow-float[\s\S]{0,400}?periodictable<span className="text-money">\.lol/
+    );
+    expect(ratio(colors.money, "#FFFFFF")).toBeGreaterThanOrEqual(3);
+  });
+  it("the dev pay simulator keeps its muted text at AA", () => {
+    // Inline-styled (no Tailwind tokens), so the class-based guard above misses
+    // it: the light grey #999 is only 2.84:1 on the card's #fff at 12px.
+    const pay = src("app/pay/[paymentId]/page.tsx");
+    expect(ratio("#999999", "#FFFFFF")).toBeLessThan(4.5);
+    expect(ratio("#666666", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(pay).not.toMatch(/(?<![-a-zA-Z])color:\s*"#[89abAB][0-9a-fA-F]{2}"/);
+  });
 });
 
 describe("grid navigation math (P2-08)", () => {

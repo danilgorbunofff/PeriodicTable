@@ -411,7 +411,30 @@ pinger.
       panel (the one remaining `$5` is the hero's "Claim an element · from $5",
       which is true regardless); Retry clears the warning once routes are
       removed.
-- [ ] A11y/mobile sweep + a real browser/axe E2E (today: static string tests only)
+- [x] A11y/mobile sweep + a real browser/axe E2E (today: static string tests only).
+      Done against a real browser + axe-core 4.12.1 on `/`, `/s/[domain]`,
+      `/elements/[sym]` (incl. all four exotic faces), `/legal/about`,
+      `/legal/rules`, `/pay/[paymentId]`, at 1280px **and** 390px. Two real
+      failures found and fixed: the `.lol` in the `/s/[domain]` wordmark pill
+      (`text-sm` = 14px normal text, so the decorative `money` hue's 3.25:1 fails
+      the 4.5:1 floor — now `text-moneyink`), and the dev pay simulator's `#999`
+      muted text on white (2.84:1 — now `#666`). Both are pinned in
+      `lib/a11y.test.ts`. Also verified by hand rather than waved off: the
+      homepage pill is `text-[22px] font-bold` = large text, so its `money` hue is
+      legal at the 3:1 floor; the four modal `text-money` headings are 20px/700 =
+      large text at 3.25:1, legal; and axe's "background gradient" incompletes on
+      `/s/[domain]` resolve to 10.14:1 (7.25:1 for white-on-navy) once measured
+      against the gradient stops. Remaining incompletes are the `aria-hidden`
+      decorative `bg-sym` watermarks — not real text.
+- [ ] **`/pay/[paymentId]` renders its "DEV SIMULATOR" UI in production.** The
+      *API* it calls (`POST /api/dev/pay`) is correctly 403'd whenever Whop is
+      configured, so no payment can be settled from it — but the **page** has no
+      guard (there is no `middleware.ts` at all), so anyone hitting
+      `periodictable.lol/pay/anything` sees internal dev tooling and a checkout
+      that cannot work. Found during the a11y sweep. Low severity (no data
+      exposure), and the fix is a product/routing call rather than a one-liner —
+      the page is `"use client"`, so gating on `getProviderMode()` needs either a
+      server wrapper that calls `notFound()` or a new `middleware.ts`.
 - [ ] `EMAIL_FROM` is `info@periodictable.lol`; the plan is `hi@…` — align when
       convenient (both work, same verified domain)
 - [ ] Vercel dashboard Cron Jobs tab should list both daily jobs (visual check)
