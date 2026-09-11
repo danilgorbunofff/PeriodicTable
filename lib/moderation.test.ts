@@ -1,7 +1,7 @@
 /* Phase 6 moderation + worker integration (local test DB, TST7/9993).
    Hide/unlist enforcement across surfaces, triage flow, outbox retry,
    worker auth/bounds, unsubscribe semantics. */
-import { hasTestDb, testPrisma } from "./testDb"; // must stay first
+import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { settlePayment } from "./settle";
@@ -74,7 +74,7 @@ afterAll(async () => {
   // Reservations before payments — the FK is restrictive.
   await prisma.claimReservation.deleteMany({ where: { elementId: T7 } });
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
-  await prisma.outboxEvent.deleteMany({ where: { OR: [{ dedupeKey: { contains: "p6-mod" } }] } });
+  await purgeSettledOutbox(prisma, { startup: { domain: { in: DOMAINS } } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: DOMAINS } } });
   await prisma.report.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
   await prisma.payment.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });

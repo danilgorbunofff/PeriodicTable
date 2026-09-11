@@ -137,17 +137,16 @@ export async function claimDueOutbox(limit: number, leaseMs = 5 * 60_000): Promi
     RETURNING id`;
 }
 
-/** Process due events (bounded). Returns {completed, failed}. Never throws. */
+/** Process due events (bounded). Returns {completed, failed}. Never throws.
+ * Claims first so the inline post-settle drain honours the same lease as the
+ * job worker: reading without claiming would let a row this drain is holding
+ * be delivered a second time by a worker that claims it mid-flight. */
 export async function drainDue(limit = 10): Promise<{ completed: number; failed: number }> {
   let completed = 0;
   let failed = 0;
   try {
-    const due = await prisma.outboxEvent.findMany({
-      where: { completedAt: null, nextAttemptAt: { lte: new Date() }, attempts: { lt: OUTBOX_MAX_ATTEMPTS } },
-      orderBy: { nextAttemptAt: "asc" },
-      take: limit,
-    });
-    for (const row of due) {
+    const claimed = await claimDueOutbox(limit);
+    for (const row of claimed) {
       const out = await processOutboxRowById(row.id);
       if (out === "completed") completed++;
       else if (out === "failed") failed++;

@@ -127,7 +127,7 @@ describe("reservation conflict rule", () => {
 
 // ---- integration (local test DB only; skipped elsewhere) ----
 
-import { hasTestDb, testPrisma } from "./testDb"; // must stay after pure imports? No — first is fine too; guard only.
+import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must stay after pure imports? No — first is fine too; guard only.
 import { settlePayment } from "./settle";
 import { enqueueOutbox } from "./outbox";
 import { PaymentStatus } from "@prisma/client";
@@ -153,7 +153,7 @@ afterAll(async () => {
   }
   const domains = ["settle-t.dev", "settle2-t.dev"];
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: domains } } } } });
-  await prisma.outboxEvent.deleteMany({ where: { OR: [{ dedupeKey: { contains: "settle-t" } }, { dedupeKey: { contains: "settle2-t" } }] } });
+  await purgeSettledOutbox(prisma, { startup: { domain: { in: domains } } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: domains } } });
   await prisma.claimReservation.deleteMany({ where: { startup: { domain: { in: domains } } } });
   await prisma.payment.deleteMany({ where: { startup: { domain: { in: domains } } } });

@@ -70,7 +70,7 @@ describe("withTxnRetry", () => {
 
 // ---- integration ----
 
-import { hasTestDb, testPrisma } from "./testDb";
+import { hasTestDb, settledOutboxKeys, testPrisma } from "./testDb";
 import { settlePayment } from "./settle";
 import { applyStakeTx } from "./recompute";
 
@@ -192,9 +192,12 @@ describe.skipIf(!hasDb)("ledger concurrency and pricing invariants", () => {
     const payments = await Promise.all(
       racers.map(async (d, i) => {
         const s = await startup(d);
-        return prisma.payment.create({
+        const p = await prisma.payment.create({
           data: { elementId: T5, startupId: s.id, amountUsd: 5 + i, path: "JOIN", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
         });
+        paymentIds.push(p.id);
+        previewKeys.push(`preview-${s.id}`);
+        return p;
       })
     );
     const outcomes = await Promise.all(
@@ -228,7 +231,7 @@ describe.skipIf(!hasDb)("ledger concurrency and pricing invariants", () => {
     expect(after.amountUsd).toBe(before + 3);
     await prisma.providerEvent.deleteMany({ where: { paymentId: payment.id } });
     await prisma.outboxEvent.deleteMany({
-      where: { OR: [{ dedupeKey: `receipt-${payment.id}` }, { dedupeKey: `analytics-${payment.id}` }, { dedupeKey: `preview-${s.id}` }] },
+      where: { dedupeKey: { in: settledOutboxKeys(payment.id, s.id) } },
     });
     await prisma.payment.delete({ where: { id: payment.id } });
   });

@@ -1,7 +1,7 @@
 /* Webhook reference validation (Phase 7 — P0-03 follow-through).
    A provider session id attached to two payments must fail safe (operator
    ERROR), never 500-loop or double-apply. */
-import { hasTestDb, testPrisma } from "./testDb"; // must stay first
+import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
@@ -55,7 +55,7 @@ afterAll(async () => {
   delete penv.WHOP_WEBHOOK_SECRET;
   const domains = ["wh-t.dev", "wh2-t.dev", "wh3-t.dev", "wh4-t.dev", "wh5-t.dev", "wh6-t.dev"];
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: domains } } } } });
-  await prisma.outboxEvent.deleteMany({ where: { OR: [{ dedupeKey: { contains: "wh-t" } }, { dedupeKey: { contains: "wh2-t" } }] } });
+  await purgeSettledOutbox(prisma, { startup: { domain: { in: domains } } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: domains } } });
   await prisma.payment.deleteMany({ where: { startup: { domain: { in: domains } } } });
   await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: domains } } } });

@@ -1,7 +1,7 @@
 /* Phase 4 route contract tests (validation matrix: route contract coverage).
    Calls real route handlers with constructed requests against the local test
    DB (TST6/9994 fixtures, fully cleaned up). */
-import { hasTestDb, testPrisma } from "./testDb"; // must stay first
+import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET as searchGET } from "../app/api/search/route";
@@ -53,7 +53,9 @@ afterAll(async () => {
     return;
   }
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
-  await prisma.outboxEvent.deleteMany({ where: { OR: [{ dedupeKey: { contains: "p4-route" } }] } });
+  await purgeSettledOutbox(prisma, {
+    OR: [{ startup: { domain: { in: DOMAINS } } }, { startup: { domain: { startsWith: "rl-probe-" } } }],
+  });
   await prisma.activityLog.deleteMany({ where: { domain: { in: DOMAINS } } });
   await prisma.payment.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
   await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
