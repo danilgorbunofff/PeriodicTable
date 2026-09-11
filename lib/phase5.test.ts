@@ -39,3 +39,35 @@ describe("analytics contract", () => {
     expect(src).toMatch(/waitlist/);
   });
 });
+
+/* The click path hashes the IP, but the waitlist audit write did not: it stored
+ * the raw address in AuditLog.actorRef *alongside* the email in `detail`, so a
+ * single row carried both a person and their address. These pin the invariant
+ * across every writer, since the failure mode is one route quietly differing
+ * from the rest and no behavioural test being able to see it. */
+describe("IP privacy — the address is never persisted raw", () => {
+  const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8");
+
+  it("waitlist audit stores a hash, not the raw IP", () => {
+    const src = read("app", "api", "waitlist", "route.ts");
+    expect(src).toMatch(/hashIp\(ip\)/);
+    // exactly the regression this pins: `actorRef: ip` (bare), not `hashIp(ip)`
+    expect(src).not.toMatch(/actorRef:\s*ip\s*[,}\n]/);
+  });
+
+  it("click attribution hashes before writing", () => {
+    const src = read("app", "go", "[stakeId]", "route.ts");
+    expect(src).toMatch(/hashIp\(ip\)/);
+  });
+
+  it("hashIp() is a salted digest that does not leak the address", async () => {
+    process.env.CLICK_SALT = "unit-test-salt";
+    const { hashIp } = await import("./clicks");
+    const h = hashIp("203.0.113.9");
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    expect(h).not.toContain("203.0.113.9");
+    expect(hashIp("203.0.113.9")).toBe(h); // deterministic → same-IP correlation survives
+    expect(hashIp("203.0.113.10")).not.toBe(h); // distinct addresses stay distinct
+    expect(hashIp("203.0.113.9", "other-salt")).not.toBe(h); // the salt actually does work
+  });
+});

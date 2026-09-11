@@ -4,6 +4,7 @@ import { normalizeEmail } from "@/lib/manage";
 import { domainFromUrl } from "@/lib/validate";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
+import { hashIp } from "@/lib/clicks";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,6 @@ export async function POST(req: NextRequest) {
     create: { email, domain, source },
     update: { domain, source, consentAt: new Date() },
   });
-  await audit({ action: "WAITLIST_JOINED", detail: email, actorRef: ip });
+  await audit({ action: "WAITLIST_JOINED", detail: email, actorRef: hashIp(ip) });
   return NextResponse.json({ ok: true, id: entry.id });
 }

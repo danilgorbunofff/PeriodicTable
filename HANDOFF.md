@@ -1,6 +1,7 @@
 # Handoff — periodictable.lol prod launch
 
-> Last updated: **2026-09-10** (verified against live prod at 12:45Z).
+> Last updated: **2026-09-11** (prod verified live at 19:35Z on commit `a3c385b`,
+> confirmed through the deployment's `meta.githubCommitSha`).
 > The step-by-step checklist lives in `doc/PROD-READINESS-CHECKLIST.md` and is
 > the authority for *how* to verify each item. This file is the *state of the
 > world*: what is done, what is broken, what is next.
@@ -185,6 +186,54 @@ section next to the pinger.
   turned `main`'s CI red — the DB test had always passed *because* the pipeline
   was broken, so the bug was invisible until previews started working.
 
+### 4. ✅ Report-button a11y fixed — and Vercel silently skipped a push (2026-09-11)
+
+`a3c385b` fixed `components/ReportListingButton.tsx`, which turned out to have
+**three** defects — only two of which were known when the work started.
+
+1. **Stale accessible name.** A static `aria-label={`Report ${domain}`}` outranked
+   the visible text, so after a listing was reported the button still announced
+   the *domain* (`Report adyen.com`) while displaying `reported ✓` — a WCAG 2.5.3
+   label-in-name failure. Fixed by **deleting the `aria-label`**: the accessible
+   name order is `aria-labelledby` > `aria-label` > **text content** > `title`, so
+   text content always wins. The visible text is now the name in every state, and
+   the tooltip (`title="Report listing"`) can never drift into being the name.
+2. **Result never announced.** Nothing carried `role="status"`, so a screen
+   reader got no confirmation that a report landed. Fixed with an `sr-only`
+   `role="status" aria-live="polite"` region — deliberately a **sibling of
+   `<Modal>`, not a child**, so it survives the modal unmounting.
+3. **⚠️ Focus was silently dropped.** This one was *surfaced by* the
+   investigation but **not caused by the button.**
+   `Modal` snapshots `document.activeElement` to restore focus on close
+   (`components/Modal.tsx:94`) and calls `.focus()` in its cleanup (`:91`).
+   Because the same click also set `disabled` on that very element, the restore
+   targeted a **disabled** button — where `focus()` is a silent no-op — and focus
+   fell to `<body>`, losing the user's place. Fixed by keeping the element
+   **focusable**: `aria-disabled={pending}` plus the existing click guard, instead
+   of `disabled`. `aria-disabled` announces the busy state without removing the
+   element from the tab order.
+
+   **This was proven, after one wrong attempt.** Disabling a *clone* while the
+   real button still held focus produced a false "focus works" reading — focus
+   cannot be tested while another element already holds it. A faithful
+   reproduction (focus the modal's confirm button, remove its wrapper, then
+   `focus()` the trigger) gave the real answer:
+   `focus() on a DISABLED trigger -> BODY` versus `on an ENABLED trigger -> BUTTON`.
+
+Guarded by a **new static contract test** in `lib/a11y.test.ts`, asserted against
+the *pre-fix* component to confirm it genuinely fails (1 failed / 81 skipped)
+rather than merely passing now. Gates: `tsc` clean, `next lint` clean, full suite
+green (320 passed), CI run `34636812970` success.
+
+⚠️ **Vercel silently missed the push, and nothing surfaces it.**
+`a3c385b` was pushed at 19:04Z and **no deployment ever appeared** — while every
+prior deployment carried `creator=vercel[bot]`, which proves the Git integration
+*is* wired and this delivery was simply lost. Neither GitHub nor Vercel reports
+this anywhere. Recovery was `vercel --prod --yes` from a clean tree on the pushed
+commit. **After every push, confirm a deployment actually happened — do not
+assume the webhook arrived.** The reliable check is `meta.githubCommitSha` on the
+newest production deployment, not GitHub's commit status (see the traps below).
+
 ---
 
 ## Where things stand (verified live 2026-09-10)
@@ -298,12 +347,22 @@ section next to the pinger.
       `{stakeCount} stakers · ${totalPoolUsd} pool` directly above a table built
       from filtered stakes, contradicting itself. The table still excludes hidden
       rows, and a disclosure row now explains that the totals include them.
-- [ ] `app/api/stats/route.ts` and `Element.stakeCount`/`totalPoolUsd` **still sum
-      hidden money — this is deliberate policy, not a bug.** Three independent
-      source comments say so (`lib/moderation.ts`, `app/api/elements/route.ts`,
-      and the moderate route: "Financial history is NEVER touched"). Aggregates
-      carry no identity; the feed did. Explicit decision this session: keep the
-      money, hide the listing.
+- [x] **DECIDED, no action — recorded so nobody "fixes" it.** `app/api/stats/route.ts`
+      and `Element.stakeCount`/`totalPoolUsd` **still sum hidden money — this is
+      deliberate policy, not a bug.** Three independent source comments say so
+      (`lib/moderation.ts`: *"Financial history … is NEVER deleted"*,
+      `app/api/elements/route.ts`, and the moderate route: "Financial history is
+      NEVER touched"). Aggregates carry no identity; the feed did. Explicit
+      decision: **keep the money, hide the listing.** Re-verified 2026-09-11 by
+      reading the file rather than trusting the note: `/api/stats` contains **no
+      `moderationState` filter at all** — `prisma.stake.aggregate()` sums every
+      row and `claimedElements` comes off the denormalized
+      `Element.stakeCount` — so it is hidden-inclusive *by construction*, not by a
+      filter someone could later "correct". The matching rule is pinned by a test
+      literally named **"hide removes the listing everywhere but keeps the
+      money"** (`lib/moderation.test.ts:96`, `expect(tile?.pool).toBe(52)` with a
+      HIDDEN stake inside the 52), so filtering these aggregates would break a
+      green test. Checklist item 177 now carries the same correction.
 - [x] **Fixed 2026-09-10:** `app/api/checkout/route.ts` charged a
       hidden-**inclusive** take-lead price while `app/api/elements/[sym]/route.ts`
       displayed a hidden-**excluded** one. Buying at the advertised price was then
@@ -333,14 +392,80 @@ section next to the pinger.
       "aggregates keep the money" policy, pinned by
       `lib/moderation.test.ts` (`expect(tile?.pool).toBe(52)` with a HIDDEN stake
       inside the 52), so filtering them would contradict the policy and break a
-      passing test. 303 passed (303), 21 files (2026-09-11).
-- [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`:
-      `verifyTurnstile` returns `true` outright when `TURNSTILE_SECRET` is unset).
+      passing test. 320 passed (320), 22 files (2026-09-11).
+- [x] Turnstile keys — **set, and now value-verified** (2026-09-11).
+      `TURNSTILE_SECRET` and `NEXT_PUBLIC_TURNSTILE_SITEKEY` exist on both
+      `production` and `preview`, **and** `vercel env pull --environment=production`
+      returns both in the clear (neither is marked Sensitive), where they match
+      the Cloudflare pair **byte-for-byte** — sitekey 24 chars, secret 35 chars,
+      both `0x4AAAAAA…` shaped. So this is no longer "present, might be a
+      placeholder": the values are right. See the corrected env trap below —
+      `env pull` *does* return non-Sensitive values in plaintext — see the
+      refined env trap below, which is sharper than "you cannot read Vercel env
+      values back out": you cannot read **Sensitive** ones, and these two simply
+      are not marked Sensitive.
+      ⚠️ What is *still* unproven is the end-to-end check, and it cannot be
+      proven while paused: the live checkout form is compiled out, so no widget
+      renders and no token is ever minted. `NEXT_PUBLIC_TURNSTILE_SITEKEY` is
+      **baked at build time**, so a later correction needs a redeploy, not just
+      an env edit. Keep the failure mode in mind, because it is invisible:
+      `verifyTurnstile` returns `true` outright when `TURNSTILE_SECRET` is unset
+      (`lib/abuse.ts`), i.e. bot checks **silently pass**.
       Surfaced by `/api/jobs/config`; the only thing that would have caught it
       before was the never-called `requireProdEnv()`. It is a **`required`**
-      finding, so as of 2026-09-11 that route answers **503** for it — putting a
+      finding, so that route answers **503** for it — putting a
       pinger on the URL (§2) is what converts a silent bot-check bypass into an
       alert, which is why the two changes shipped together.
+      ✅ **FIXED 2026-09-11 — both now marked Sensitive.** They had been
+      `encrypted` rather than `sensitive`, which is exactly why one
+      `env pull --environment=production` read them in the clear.
+      **`CLICK_SALT` was the worse of the two**: it is strong and correct
+      (64 chars, non-dev, `lib/env.ts:86`), but `hashIp()` is
+      `sha256(ip + ":" + CLICK_SALT)` (`lib/clicks.ts:14-16`) and IPv4 is only 2³²
+      addresses, so a readable salt makes the "never raw IP" click attribution
+      reversible by enumeration.
+      **How it was fixed without the dashboard** (also the answer to "I can't
+      find the Sensitive toggle" — you don't need to, and the toggle is not
+      available for every var):
+      ```
+      PATCH https://api.vercel.com/v9/projects/prj_5pkunCWQkezWWWbQ9N9xJ5q9p69Y/env/<envId>
+      {"type":"sensitive"}
+      ```
+      with `envId` from `GET …/env?decrypt=false` — `TURNSTILE_SECRET` is
+      `qZdvrquPekVyxSfH`, `CLICK_SALT` is `v8GTV5GQA5SXeKDQ` (**production-scope
+      copies only**; the preview-scope copies of both were *already* Sensitive,
+      which is what made the discrepancy easy to miss).
+      Safe because marking Sensitive is a **read-permission change, not a value
+      change** — Vercel injects Sensitive vars at *both* build and runtime, and
+      `isBuildPhase()` (`lib/env.ts:35`) skips env validation during a build
+      anyway. No redeploy was needed and prod stayed `200` throughout
+      (verified after). **Every production var is now Sensitive** except
+      `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_TURNSTILE_SITEKEY` — both public by
+      design (the Turnstile *sitekey* is embedded in the rendered HTML; only the
+      *secret* is secret).
+- [x] **Fixed 2026-09-11:** the waitlist stored a **raw IP next to an email**.
+      `app/api/waitlist/route.ts:43` read
+      `audit({ action: "WAITLIST_JOINED", detail: email, actorRef: ip })` — and
+      `AuditLog.actorRef` is a plain `String?` column (`prisma/schema.prisma:301`),
+      so this was the one place in the repo where a raw IP was **persisted**, and
+      it was persisted *joined to PII in the same row*. Clicks hash
+      (`lib/clicks.ts:14-16`), reports hash (`app/api/report/route.ts:36`) — the
+      waitlist was the lone outlier, which is what made it hard to see: the
+      invariant held everywhere you would look first. Now `actorRef: hashIp(ip)`,
+      which keeps the correlation value (same IP → same hash, so one-IP-many-
+      emails is still detectable) while dropping the address. Nothing had asserted
+      the raw value, so nothing caught it and nothing broke on the fix; a
+      regression test now does — `lib/phase5.test.ts` → *"IP privacy — the address
+      is never persisted raw"* (source scan for `hashIp(ip)` **and** absence of a
+      bare `actorRef: ip`, plus a behavioural check on `hashIp()`'s determinism,
+      address-distinctness and salt-sensitivity). Gate is **323 tests** (was 320);
+      `tsc --noEmit` clean. **Not retroactive** — earlier rows keep their raw IPs,
+      but prod had 0 waitlist rows, so there is nothing to scrub. Found by auditing
+      `❯ Clicks` (checklist §5) rather than by any test — and **the first attempt
+      at the fix silently did nothing**: the import was added and `actorRef: ip`
+      left in place, which typechecks (unused imports are not an error) and passes
+      every test. Only reading the `git diff` before committing caught it. Assume
+      nothing about a "clean" gate proofing a change you did not look at.
 - [ ] Upstash not set — rate limits are per-instance memory, bypassable on
       serverless (`lib/rateStore.ts` fails open: warns once, continues). Surfaced
       by `/api/jobs/config` as a `degraded` advisory.
@@ -470,7 +595,7 @@ section next to the pinger.
 
 **Environment traps — do not lose time on these**
 - **Local tests silently skip the DB suites.** Without a DB the gate in
-  `lib/testDb.ts` skips them silently (`223 passed | 57 skipped`, measured
+  `lib/testDb.ts` skips them silently (`253 passed | 67 skipped`, measured
   2026-09-11). A green local run is **not** proof the integration path works —
   that is exactly how the takedown bug sat unnoticed in `main`. Let CI be the DB
   oracle. **You can be the oracle locally too**, and it is cheap: run a throwaway
@@ -483,11 +608,12 @@ section next to the pinger.
   rather than pasted because this file passes through a secret scrubber that
   redacts anything shaped like a credential-bearing URL — which is exactly how
   earlier edits to this doc got silently mangled. Measured that way on
-  2026-09-11: **303 passed (303), 21 files, 0 skipped, ~7.5s** — older
-  revisions of this doc carry stale counts (200/215/241/256/280); 303 is the
-  current total, and the same suite without a DB reports `223 passed | 57
-  skipped`, so **57 is the number of tests a DB-less green run is not
-  exercising**. The suite now runs **test files serially**
+  2026-09-11: **320 passed (320), 22 files, 0 skipped, ~7.5s** — older
+  revisions of this doc carry stale counts (200/215/241/256/280/303); 320 is the
+  current total, and the same suite without a DB reports `253 passed | 67
+  skipped`, so **67 is the number of tests a DB-less green run is not
+  exercising** (253 + 67 = 320, so the two numbers now reconcile — earlier
+  revisions of this doc quoted counts from different revisions that did not). The suite now runs **test files serially**
   (`fileParallelism: false` in `vitest.config.ts`): every DB-backed file shares
   one database, and the outbox is a *single global queue* whose claim order is
   `nextAttemptAt` across all rows — in parallel, one file's worker or inline
@@ -524,14 +650,137 @@ section next to the pinger.
   serverless is not currently required here — but the datasource still has no
   `directUrl`, so if a *future* migration ever fails on advisory locks, that is
   the first thing to add (`DIRECT_URL` + `directUrl = env("DIRECT_URL")`).
-- **`package.json`'s `build` is only `next build`** — it does *not* run migrations.
-  `prisma migrate deploy` exists as `db:deploy`. If the Vercel project's Build
-  Command is an override (`prisma migrate deploy && next build`), it is a dashboard
-  setting and invisible from this repo — check it before assuming either way.
+- **`package.json`'s `build` is `prisma generate && next build`** — it does *not*
+  run migrations. `prisma migrate deploy` exists as `db:deploy`. **Answered
+  2026-09-11:** the Vercel project's `buildCommand` is **`null`**, i.e. there is
+  **no dashboard override**, so that script *is* the deploy build. Prod's schema is
+  current anyway only because it was migrated by hand.
+  ⚠️ **Do not add `migrate deploy` to the build while `DATABASE_URL` is scoped
+  `Production, Preview`** (same Neon DB — confirmed by `vercel env ls`): the build
+  runs for previews too, so an unmerged branch could migrate prod. Keep it manual
+  (`npm run db:deploy` against prod) or split the environments first.
+- **The Vercel project object is readable and answers several "check the dashboard"
+  questions directly.** `GET /v9/projects/{id}` (token at
+  `~/Library/Application Support/com.vercel.cli/auth.json`) exposes `buildCommand`
+  and the **`crons`** block — `enabledAt` / `disabledAt` / `definitions` /
+  `deploymentId`. Reading `crons.definitions` beats the Cron Jobs tab: it proves
+  the schedule was ingested *and* names the deployment it is bound to.
 - CI runs on `push` to `main` **and** `pull_request`. **The post-merge `push` run
   can fail even when the PR run passed** — always re-check `main` after merging.
 - Secrets must never be pasted into chat. A Resend key leaked that way once and
   had to be rotated (delete → recreate → update Vercel → redeploy).
+- ⚠️ **`NEXT_PUBLIC_*` values are baked in at build time.** Changing
+  `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `NEXT_PUBLIC_PAYMENTS_LIVE` or
+  `NEXT_PUBLIC_APP_URL` in the Vercel dashboard does **nothing** until you
+  redeploy. A var that looks correct in the dashboard can be entirely absent from
+  the running bundle — and its absence is silent, because the flag fails closed.
+- ⚠️ **You cannot read Vercel env values back out — but the rule is narrower than
+  that, and the edge is where secrets leak.** Measured 2026-09-11 with a full
+  `vercel env pull --environment=production`:
+  - **Sensitive** vars are write-only. The API returns `""`, so `len=0` is
+    **ambiguous — it means "Sensitive, redacted" *or* "genuinely empty"**, and
+    the pull cannot tell you which. (`ADMIN_TOKEN` reads as `len=0` even though
+    it demonstrably works; `NEXT_PUBLIC_PAYMENTS_LIVE` reads as `len=0` and *is*
+    genuinely empty.) Never conclude "unset" from a `0`.
+  - **Non-Sensitive** vars come back **in plaintext**, and `vercel env ls` still
+    prints `Encrypted` for them — so `ls` cannot tell you which you are looking
+    at. On this project `TURNSTILE_SECRET` (35 chars) and `CLICK_SALT` (64) came
+    back **in the clear** — **that is how the Turnstile values were finally
+    verified byte-for-byte.** ⚠️ It was also a hardening gap: `CLICK_SALT` is the
+    only thing keeping `sha256(ip + ":" + CLICK_SALT)` (`lib/clicks.ts:14-16`)
+    from being reversible over the 2³² IPv4 space. **Both were marked Sensitive
+    on 2026-09-11** (see the §2 env-trap bullet for the `PATCH …/env/{id}`
+    one-liner), so this paragraph is now history, not a live state — but the
+    *ambiguity* it describes is permanent, so a future pull still cannot
+    distinguish "Sensitive" from "empty".
+  - `type: "encrypted"` vars otherwise come back as an **encryption envelope**,
+    `{"v":"v2","c":"<ciphertext>"}`, **not** plaintext. The `decrypt=true`
+    parameter on `/v10/projects/{id}/env` does **not** decrypt; it only applies to
+    build-time-encrypted vars during a build. A script that compares that
+    ciphertext against the value you expect reports a **false mismatch** — and the
+    tell is the length (~1000 chars for a 24-char key).
+  - To confirm a Sensitive value, reveal it in the dashboard, or prove it
+    end-to-end at runtime.
+- ⚠️ **A required env var is checked for *presence*, not *shape*.**
+  `REQUIRED_PROD_ENV` (`lib/env.ts:39`) lists what must exist, but
+  `PROD_ENV_VALIDATORS` (`:84`) only validates `NEXT_PUBLIC_APP_URL` and
+  `CLICK_SALT`. So `WHOP_WEBHOOK_SECRET` can be set to literal garbage and pass
+  every gate, every test, and the whole readiness checklist — while every webhook
+  delivery 401s, the provider retries for days, and finally **disables the
+  endpoint with the buyer's money already gone**. This is the highest-value thing
+  an env validator could catch, and it currently does not exist.
+- **Whop ships two incompatible webhook signature envelopes**, and which one a
+  delivery uses is fixed when the webhook resource is created (`api_version` v1 =
+  Standard Webhooks `webhook-signature: v1,<base64>`; v2/v5 = legacy
+  `x-whop-signature: <hex>`). `whopSignatureScheme()` (`lib/whop.ts:111`)
+  **accepts both**, keyed off the delivery itself. Dual-accept adds no bypass —
+  each branch still requires a valid HMAC over data the caller cannot construct
+  without the shared secret. Do not "simplify" this to one scheme.
+- ⚠️ **`ADMIN_TOKEN` in the Vercel dashboard is not the one your local server
+  accepts**, and it is `sensitive`, so you cannot read it out. A local dev server
+  needs its own `ADMIN_TOKEN=…` passed inline. `adminAuth()` (`lib/jobs.ts:31-40`)
+  returns **403 when unset *or* mismatched, even in development** — deliberately
+  unlike `jobAuth()`, which reads `CRON_SECRET` and is permissive in dev. Expect
+  `403` from every `/api/admin/*` route in prod without the real token.
+- **There is no `/api/health` route** — it 404s in production. Use `/api/stats`
+  as the liveness probe.
+- ⚠️ **Payments flags are fail-closed in production but default-LIVE outside it**
+  (`lib/flags.ts`). `paymentsLiveServer()` is enabled in prod only when
+  `PAYMENTS_LIVE === "true"` **and** the provider is fully configured (Whop key
+  *and* secret); `paymentsLiveClient()` is enabled in prod only when
+  `NEXT_PUBLIC_PAYMENTS_LIVE === "true"`. Outside production **both default to
+  `true`** unless the var is exactly `"false"` — so a plain `next dev` renders
+  **live** money UI. To reproduce the paused experience locally you must set
+  **both** `PAYMENTS_LIVE=false` and `NEXT_PUBLIC_PAYMENTS_LIVE=false`. Note
+  `paymentsLiveClient()` also treats `NEXT_PUBLIC_VERCEL_ENV=production` as
+  production, so a preview deploy with that unset is treated as non-production.
+- ⚠️ **Checking "did Vercel deploy?" — read the creator, not the commit status.**
+  `gh api repos/{owner}/{repo}/commits/{sha}/status` returns **`pending`
+  forever** when `.statuses[]` is empty, and **Vercel never posts to that
+  endpoint at all** — it is not a deploy signal, and waiting on it wastes hours.
+  Use `gh api …/deployments` and read `.creator.login` (`vercel[bot]` = the Git
+  integration fired), or `vercel ls`, or best of all the deployment's own
+  `meta.githubCommitSha` via `https://api.vercel.com/v13/deployments/<id>?teamId=<orgId>`.
+- **`pointer:coarse` has to be emulated over raw CDP.** A headless mouse reports
+  `coarse:false`, and `agent-browser set device` does **not** flip it — use
+  `Emulation.setTouchEmulationEnabled` plus `Emulation.setEmulatedMedia`.
+  Anything gated on `[@media(pointer:coarse)]` (the 44px touch targets) is
+  otherwise invisible to an agent-browser session, so its tests pass vacuously.
+
+**Route and behaviour quirks worth knowing before they cost you an hour**
+- **`?unsub=unknown` is unreachable.** No code path produces it
+  (`app/page.tsx:118`). `GET /api/unsubscribe` **only renders a confirm form and
+  never mutates**; the `POST` does the work, is idempotent, keeps `unsubToken`,
+  and treats an unknown token as **silent success on purpose** — so the endpoint
+  is not a token-guessing oracle.
+- ⚠️ **RFC 8058 one-click unsubscribe must read the token from the *query*, not
+  the body.** A mailbox provider's one-click `POST` sends
+  `List-Unsubscribe=One-Click` **in the body**, which parses as perfectly valid
+  form data — so a body-first token read silently no-ops the unsubscribe and the
+  user stays subscribed while believing they left. Fixed in `a778c8d`.
+- **Hiding a listing clears its preview permanently, and the daily cron never
+  backfills** — only an explicit `scripts/backfill-previews.ts` run re-arms
+  burned-out rows. Hiding also deliberately **preserves**
+  `moderatedBy`/`moderatedReason`/`moderatedAt`.
+- **The waitlist join is double-submit guarded** (`waitBusy`, `components/Modals.tsx:71`,
+  re-entrancy check at `:124`) — added because the button had no busy state at all.
+  ⚠️ **That guard is also how the same button became permanently dead**
+  (fixed 2026-09-11, `4987783`): the success path called `onClose()` but never
+  `setWaitBusy(false)`, relying on unmount to clear it — and `CheckoutPreview` is
+  rendered **once and always mounted** (`app/page.tsx:364`; `onClose` only nulls
+  the `checkoutEl` prop), so it never unmounts. One successful join therefore left
+  `waitBusy=true` forever, and because the guard returns early *before* the fetch,
+  every later submit **silently no-op'd with no request and no error** — across
+  every element sitewide, since the component is shared — until a full page
+  reload. Both error paths already reset the flag; only the success path missed
+  it. **When you add a busy flag, reset it on the success path too, and never
+  assume the component unmounts** — one hidden early-return guard turns a stuck
+  flag into a dead feature. Note the suite could not catch this: `lib/phase5.test.ts`
+  greps route source for the word "waitlist" and `lib/manage.test.ts` exercises
+  `waitlistEntry.upsert` at the DB layer, but nothing renders the component.
+  The same double-submit class is what makes a paid invoice appear **twice**; the
+  webhook side answers it by auditing an already-settled payment as `DUPLICATE`
+  (`52f3fdf`).
 
 ---
 
@@ -583,8 +832,8 @@ section next to the pinger.
 
 - Live: https://www.periodictable.lol · Vercel project: `periodic-table`
   (Build Command must include `prisma migrate deploy`)
-- Git: `main` is the deploy branch. Recent: `28b2cd5` (#8) ← `e85859f` (#7) ←
-  `048f3ca` (#6) ← `107d05d` (#5) ← `63b1914` (#4) ← `17e7177` (#3)
+- Git: `main` is the deploy branch. Recent: `a3c385b` (live) ← `a778c8d` ←
+  `b9003dd` ← `4987783` ← `26f2d5e` ← `3f23d62` ← `a7e2e02` ← `7ce73a9`
 - Env vars (values in Vercel only, never in the repo): `DATABASE_URL`,
   `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL`,
   `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`,
