@@ -11,7 +11,7 @@ import {
   isSearchHits,
   isElementDetail,
 } from "./api";
-import { aggregateTableOrder, rankByElement, rankCrowns, rankEarlyAdopters } from "./boards";
+import { aggregateEarlyAdopters, aggregateTableOrder, rankByElement, rankCrowns, rankEarlyAdopters } from "./boards";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -76,9 +76,9 @@ describe("shape guards", () => {
 describe("aggregateTableOrder (P1-10: ALL stakes summed)", () => {
   it("sums non-leader stakes instead of leaders only", () => {
     const rows = aggregateTableOrder([
-      { domain: "big.dev", logoUrl: "l", amountUsd: 50, isLeader: true, elementSymbol: "C", elementName: "Carbon", id: "s1", createdAt: new Date("2024-01-01") },
-      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "C", elementName: "Carbon", id: "s2", createdAt: new Date("2024-01-01") },
-      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "Au", elementName: "Gold", id: "s3", createdAt: new Date("2024-01-02") },
+      { domain: "big.dev", logoUrl: "l", amountUsd: 50, isLeader: true, elementSymbol: "C", id: "s1", createdAt: new Date("2024-01-01") },
+      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "C", id: "s2", createdAt: new Date("2024-01-01") },
+      { domain: "wide.dev", logoUrl: "l", amountUsd: 30, isLeader: false, elementSymbol: "Au", id: "s3", createdAt: new Date("2024-01-02") },
     ]);
     expect(rows[0].domain).toBe("wide.dev");
     expect(rows[0].totalSpent).toBe(60);
@@ -89,8 +89,8 @@ describe("aggregateTableOrder (P1-10: ALL stakes summed)", () => {
   });
   it("tie-breaks by crowns then domain", () => {
     const rows = aggregateTableOrder([
-      { domain: "b.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", elementName: "C", id: "1", createdAt: new Date("2024-01-01") },
-      { domain: "a.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", elementName: "C", id: "2", createdAt: new Date("2024-01-01") },
+      { domain: "b.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", id: "1", createdAt: new Date("2024-01-01") },
+      { domain: "a.dev", logoUrl: "l", amountUsd: 10, isLeader: false, elementSymbol: "C", id: "2", createdAt: new Date("2024-01-01") },
     ]);
     expect(rows.map((r) => r.domain)).toEqual(["a.dev", "b.dev"]);
   });
@@ -128,5 +128,57 @@ describe("rankEarlyAdopters (medals from FirstClaim)", () => {
     ]);
     expect(rows.map((r) => r.domain)).toEqual(["first.dev", "late.dev", "solo.dev"]);
     expect(rows[0].total).toBe(2);
+  });
+});
+
+describe("aggregateEarlyAdopters (element must match the row's own date)", () => {
+  // logoUrl is startup-scoped, so every claim for a domain carries the same value.
+  const logo = "logo.png";
+
+  it("counts one medal per claim and names the EARLIEST claim's element", () => {
+    const rows = aggregateEarlyAdopters([
+      { domain: "s.dev", logoUrl: logo, elementSymbol: "Au", elementName: "Gold", claimedAt: new Date("2024-01-01") },
+      { domain: "s.dev", logoUrl: logo, elementSymbol: "C", elementName: "Carbon", claimedAt: new Date("2024-05-01") },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].medals).toBe(2);
+    expect(rows[0].elementSymbol).toBe("Au");
+    expect(rows[0].elementName).toBe("Gold");
+  });
+
+  it("names the earliest element even when claims arrive NEWEST-FIRST", () => {
+    // Regression: the route's findMany had no orderBy, so "first on {element}"
+    // could name a later claim's element while firstClaimedAt still pointed at
+    // the earliest one — the row contradicted its own date.
+    const rows = aggregateEarlyAdopters([
+      { domain: "s.dev", logoUrl: logo, elementSymbol: "C", elementName: "Carbon", claimedAt: new Date("2024-05-01") },
+      { domain: "s.dev", logoUrl: logo, elementSymbol: "Au", elementName: "Gold", claimedAt: new Date("2024-01-01") },
+    ]);
+    expect(rows[0].elementSymbol).toBe("Au");
+    expect(rows[0].elementName).toBe("Gold");
+    expect(rows[0].medals).toBe(2);
+  });
+
+  it("composes with rankEarlyAdopters into an order-independent board", () => {
+    // Encounter order out of the aggregator is deliberately unsorted; the
+    // board's contract is the composition, which must be a total order.
+    const claims = [
+      { domain: "a.dev", logoUrl: logo, elementSymbol: "H", elementName: "Hydrogen", claimedAt: new Date("2024-02-01") },
+      { domain: "b.dev", logoUrl: logo, elementSymbol: "N", elementName: "Nitrogen", claimedAt: new Date("2024-01-01") },
+      { domain: "a.dev", logoUrl: logo, elementSymbol: "O", elementName: "Oxygen", claimedAt: new Date("2024-01-15") },
+    ];
+    const forward = rankEarlyAdopters(aggregateEarlyAdopters(claims));
+    const reversed = rankEarlyAdopters(aggregateEarlyAdopters([...claims].reverse()));
+    expect(forward).toEqual(reversed);
+    expect(forward.find((r) => r.domain === "a.dev")?.elementSym).toBe("O");
+  });
+
+  it("breaks identical timestamps by element symbol", () => {
+    const at = new Date("2024-01-01");
+    const rows = aggregateEarlyAdopters([
+      { domain: "s.dev", logoUrl: logo, elementSymbol: "Ne", elementName: "Neon", claimedAt: at },
+      { domain: "s.dev", logoUrl: logo, elementSymbol: "Ar", elementName: "Argon", claimedAt: at },
+    ]);
+    expect(rows[0].elementSymbol).toBe("Ar");
   });
 });

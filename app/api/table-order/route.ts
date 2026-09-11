@@ -28,7 +28,6 @@ export async function GET() {
       amountUsd: s.amountUsd,
       isLeader: s.isLeader,
       elementSymbol: s.element.symbol,
-      elementName: s.element.symbol,
       id: s.id,
       createdAt: s.createdAt,
     }))

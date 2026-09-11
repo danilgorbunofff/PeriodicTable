@@ -13,7 +13,6 @@ export type SpendRow = {
   amountUsd: number;
   isLeader: boolean;
   elementSymbol: string;
-  elementName: string;
   id: string;
   createdAt: Date | string;
 };
@@ -96,6 +95,55 @@ export type MedalRow = {
   elementSymbol: string;
   elementName: string;
 };
+
+export type ClaimRow = {
+  domain: string;
+  logoUrl: string;
+  elementSymbol: string;
+  elementName: string;
+  claimedAt: Date | string;
+};
+
+/** Early Adopter, one row per startup: how many FirstClaim records it holds and
+ * which element the tile names when it says "first on <element>".
+ *
+ * That element must belong to the startup's EARLIEST claim, because
+ * `firstClaimedAt` is what the sort and the copy both point at — naming the
+ * element of some other claim would assert a "first" the row's own date
+ * contradicts. Ties on an identical timestamp fall back to the element symbol
+ * so the answer never depends on the order rows arrive in.
+ *
+ * Deliberately consumes unordered input: the caller's query order is not a
+ * contract, and this must not become one. */
+export function aggregateEarlyAdopters(claims: ClaimRow[]): MedalRow[] {
+  const ms = (v: Date | string) => (v instanceof Date ? v.getTime() : new Date(v).getTime());
+  const byDomain = new Map<string, MedalRow>();
+  for (const c of claims) {
+    const row = byDomain.get(c.domain);
+    if (!row) {
+      byDomain.set(c.domain, {
+        domain: c.domain,
+        logoUrl: c.logoUrl,
+        medals: 1,
+        firstClaimedAt: c.claimedAt,
+        elementSymbol: c.elementSymbol,
+        elementName: c.elementName,
+      });
+      continue;
+    }
+    row.medals += 1;
+    row.logoUrl = c.logoUrl;
+    if (
+      ms(c.claimedAt) < ms(row.firstClaimedAt) ||
+      (ms(c.claimedAt) === ms(row.firstClaimedAt) && c.elementSymbol < row.elementSymbol)
+    ) {
+      row.firstClaimedAt = c.claimedAt;
+      row.elementSymbol = c.elementSymbol;
+      row.elementName = c.elementName;
+    }
+  }
+  return [...byDomain.values()];
+}
 
 /** Early Adopter: first-claim medals from immutable FirstClaim records. */
 export function rankEarlyAdopters(rows: MedalRow[]): BoardRow[] {
