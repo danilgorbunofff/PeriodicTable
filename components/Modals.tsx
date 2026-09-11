@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Modal } from "./Modal";
+import { TurnstileWidget } from "./TurnstileWidget";
 import { ChunkyButton } from "./ChunkyButton";
 import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
@@ -385,10 +386,7 @@ export function CheckoutPreview({
         <span>I am 18+ and I own or may promote this URL. No refunds/withdrawals — stake = ad inventory.</span>
       </label>
       {process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ? (
-        <div
-          className="cf-turnstile mt-2"
-          data-sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY}
-        />
+        <TurnstileWidget sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY} />
       ) : null}
       <ChunkyButton
         type="submit"
