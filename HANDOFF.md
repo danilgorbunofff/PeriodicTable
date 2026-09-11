@@ -151,10 +151,19 @@ they describe degradation worth reading, not paging, and a monitor that fired on
 them every 10 minutes would be muted before the real failure ever arrived.
 
 `vercel.json` carries only `crons` entries (daily 04:00 outbox, 04:30
-screenshot). `config` and `reconcile` are deliberately **not** cron'd — a cron
-run produces a response nobody reads — which is what puts them on the pinger's
-list instead. That access model belongs in the reference section next to the
-pinger.
+screenshot). `config` and `reconcile` stay **out** of it — a Vercel cron's
+response goes to a log nobody reads — but as of 2026-09-11 both are on the
+**GitHub tick** (`.github/workflows/outbox-tick.yml`), which *does* alert: a
+non-2xx fails a step, the run goes red, and GitHub notifies the owner. Nothing
+called either route before that — no workflow, no `vercel.json` entry, no script,
+only tests and docs — so the sole reader for a money contradiction was a URL
+nobody requested. That makes the independent pinger no longer the *only* way to
+cover them; it now buys **cadence** and nothing else. Expect the tick's `config`
+step to be **red until `TURNSTILE_SECRET` is set** — that is a `required`
+finding, so `503` is the correct answer, not a broken workflow. Both diagnostic
+steps carry `if: !cancelled()` so neither can suppress the other, and neither is
+skipped by a failure above them. That access model belongs in the reference
+section next to the pinger.
 
 
 ### 3. ✅ `main` is green, and two real prod bugs were found and fixed today
@@ -528,10 +537,14 @@ pinger.
 
 ## What is next, in order
 
-1. **Decide on the independent 10-min pinger** (§2) — this is now a *tightening*
-   (4 h 38 m worst-case retry latency → 10 min), not a fix: the GitHub timer is
-   proven to fire and authenticate, just at ~7 % of cadence. Either set up the
-   pinger or consciously accept the daily `vercel.json` backstop as the floor.
+1. **The independent 10-min pinger is now optional** — decided 2026-09-11.
+   Coverage is closed without it: `/api/jobs/config` and `/api/jobs/reconcile`
+   are on the GitHub tick as of that date (which alerts), so the two diagnostics
+   are no longer unwatched. What the pinger would still buy is **cadence**: the
+   GitHub timer is proven to fire and authenticate (6 schedule runs, all green)
+   but at ~7 % of the requested rate, gaps 1 h 53 m–4 h 38 m, so worst-case
+   retry latency stays 4 h 38 m and the daily `vercel.json` backstop is the
+   accepted floor.
    If you do set it up, all **four** job URLs go on the same list, bearer `CRON_SECRET`
    (or `?secret=<CRON_SECRET>` if the pinger cannot set headers): the two worker
    paths plus `/api/jobs/config` and `/api/jobs/reconcile`. Alert on **any

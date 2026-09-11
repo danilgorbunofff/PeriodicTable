@@ -56,3 +56,42 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "Content-Type: application/json" \
             -d '{"limit":10}'
+
+      # --- Diagnostics, deliberately LAST ------------------------------------
+      # These fail the run on a non-2xx, which is the point: until now NOTHING
+      # called either route -- no workflow, no vercel.json cron, no script, only
+      # tests and docs. GET /api/jobs/reconcile is the sole reader for a PAID
+      # payment whose stored provider figure diverges from the provider's
+      # (real money, never merely a warning), and GET /api/jobs/config answers
+      # 503 when a REQUIRED_PROD_ENV var is missing. Both deliberately answer
+      # 200 for their advisory findings, so red here always means something real.
+      #
+      # `if: ${{ !cancelled() }}` on both is load-bearing, not decoration: by
+      # default a failed step skips every step after it, so without the guard a
+      # non-200 from the first would keep the second from ever running -- a
+      # missing secret would leave the money check dark. They must also still
+      # report during an incident, which is precisely when a failed earlier step
+      # would otherwise suppress them.
+      #
+      # Expect this red until TURNSTILE_SECRET is set: it is a `required`
+      # finding, so 503 is the correct answer, not a regression in this workflow.
+      - name: Config gaps — a required prod secret is missing
+        if: ${{ !cancelled() }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/config.json" -w '%{http_code}' \
+            "$BASE_URL/api/jobs/config" -H "Authorization: Bearer $CRON_SECRET")
+          cat "$RUNNER_TEMP/config.json"; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::/api/jobs/config answered $code — read the findings above: a 'required' entry is missing."
+            exit 1
+          fi
+      - name: Reconcile — money that contradicts itself
+        if: ${{ !cancelled() }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/reconcile.json" -w '%{http_code}' \
+            "$BASE_URL/api/jobs/reconcile" -H "Authorization: Bearer $CRON_SECRET")
+          cat "$RUNNER_TEMP/reconcile.json"; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::/api/jobs/reconcile answered $code — a PAID row's stored provider figure diverges. Read the body above."
+            exit 1
+          fi
