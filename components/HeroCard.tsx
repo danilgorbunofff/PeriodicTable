@@ -69,7 +69,7 @@ export function HeroCard({
           Put your startup on the table. Literally.
         </h1>
         <div className="mt-[13px] flex items-center gap-[9px] flex-nowrap">
-          <ChunkyButton className="text-sm px-[18px] h-10 whitespace-nowrap shrink-0 !rounded-full !border-b-[3px]" onClick={onClaim}>
+          <ChunkyButton className="text-sm px-[18px] h-10 whitespace-nowrap shrink-0 !rounded-full !border-b-[3px] [@media(pointer:coarse)]:min-h-[44px]" onClick={onClaim}>
             Claim an element · from $5
           </ChunkyButton>
           <IconBtn label="Board" onClick={onBoard}>🏆</IconBtn>
