@@ -82,22 +82,42 @@ artifacts folder.
 
 `.github/workflows/outbox-tick.yml` is registered on `main`, `state:active`,
 cron `*/10 * * * *`. The original version of this section said it had "never
-once fired" — that is **stale**. It has fired: exactly **2 `schedule` runs**,
-both `success`:
+once fired"; a later one recorded only 2 runs. Both are **stale**. As of
+2026-09-11T05:09:52Z it has fired **6 `schedule` runs, all `success`**:
 
-- `2026-09-10T14:39:33Z`
-- `2026-09-10T17:51:34Z`
+| fired (UTC) | gap from previous |
+| --- | --- |
+| `2026-09-10T14:39:33Z` | — |
+| `2026-09-10T17:51:34Z` | 3 h 12 m |
+| `2026-09-10T20:15:55Z` | 2 h 24 m |
+| `2026-09-10T22:37:58Z` | 2 h 22 m |
+| `2026-09-11T00:31:23Z` | 1 h 53 m |
+| `2026-09-11T05:09:52Z` | 4 h 38 m |
 
-But that is **3 h 12 m apart**. In a window that should hold ~20 ticks, 2
-landed. The timer is not dead — it is throttled into uselessness, which is
-normal for GitHub scheduled workflows (best-effort, de-prioritised; a `*/10`
-expression on a low-traffic repo will never hold cadence). Do not design around
-it.
+**The timer is proven to work, and that is the part that was actually in
+doubt.** In a 14 h 30 m window that should hold ~87 ticks, 6 landed — about
+**7 %**. So do not design around the cadence; but do not treat it as dead
+either. The 05:09 run's log confirms a *scheduled* run really does the job end
+to end, not just start up:
+
+```
+{"ok":true,"claimed":0,"completed":0,"failed":0}     # /api/jobs/outbox
+{"ok":true,"checked":0,"updated":0,"failed":0}       # /api/jobs/screenshot
+```
+
+`claimed:0` means the queue was empty, which is the expected steady state, not a
+failure. Before this, only a **manual dispatch** had ever returned `ok:true` —
+which proves auth but says nothing about whether the timer runs. Now a real
+`schedule`-triggered run has authenticated to production and drained. GitHub's
+scheduler is best-effort and de-prioritised, so a `*/10` expression on a
+low-traffic repo will never hold cadence; ~2.4 h is what to expect.
 
 **Not launch-blocking** because receipts and outbid mail are sent **inline** at
 webhook time — the outbox is the *retry* path, and previews render nowhere in
-v1. A late tick delays a retry; it never silences first-time mail. Treat the
-in-repo cron as the fallback and the external pinger as the real schedule.
+v1. A late tick delays a retry; it never silences first-time mail. Worst case
+observed is ~4 h 38 m of retry latency, with the daily `vercel.json` backstop
+(04:00/04:30) as a floor. Adding the external pinger tightens that to 10 min;
+skipping it is a defensible choice, not a risk.
 
 **Fix (one dashboard action, user-side):** a free 10-minute pinger such as
 cron-job.org. All four job paths accept a plain **GET** with header
@@ -304,7 +324,7 @@ pinger.
       "aggregates keep the money" policy, pinned by
       `lib/moderation.test.ts` (`expect(tile?.pool).toBe(52)` with a HIDDEN stake
       inside the 52), so filtering them would contradict the policy and break a
-      passing test. 280 passed (280), 19 files.
+      passing test. 303 passed (303), 21 files (2026-09-11).
 - [ ] Turnstile keys not set — bot checks **silently pass** (`lib/abuse.ts`:
       `verifyTurnstile` returns `true` outright when `TURNSTILE_SECRET` is unset).
       Surfaced by `/api/jobs/config`; the only thing that would have caught it
@@ -454,11 +474,31 @@ pinger.
   rather than pasted because this file passes through a secret scrubber that
   redacts anything shaped like a credential-bearing URL — which is exactly how
   earlier edits to this doc got silently mangled. Measured that way on
-  2026-09-11: **280 passed (280), 19 files, 0 skipped, ~3.2s** — three different
-  counts appear in older revisions of this doc (200/215/241/256); 280 is the
+  2026-09-11: **303 passed (303), 21 files, 0 skipped, ~7.5s** — older
+  revisions of this doc carry stale counts (200/215/241/256/280); 303 is the
   current total, and the same suite without a DB reports `223 passed | 57
   skipped`, so **57 is the number of tests a DB-less green run is not
-  exercising**. `prisma migrate deploy`
+  exercising**. The suite now runs **test files serially**
+  (`fileParallelism: false` in `vitest.config.ts`): every DB-backed file shares
+  one database, and the outbox is a *single global queue* whose claim order is
+  `nextAttemptAt` across all rows — in parallel, one file's worker or inline
+  drain picks up another file's fixtures. That produced rare (~1 in 4 runs),
+  load-dependent failures with nothing to do with the product, which is worse
+  than a slow gate: a flaky gate is not a gate. Do **not** reach for
+  `--maxWorkers` to speed it up; ~7.5s buys a suite that passed **13 consecutive
+  times** (`0` outbox rows leaked across all 13). **One caveat, found while
+  re-running it on 2026-09-11:** across 10 further runs, one failed *a single
+  test* (`lib/routes.test.ts`, `prisma.startup.findMany`) with `Can't reach
+  database server at localhost:55432`. That is a client-side TCP blip to the
+  Docker-published port, **not** the fixture-stealing class above and not an
+  assertion: the container stayed `Up` with `RestartCount 0`, and Postgres
+  logged **no** refused or exhausted connection (`max_connections` 100, 6 in
+  use, no `too many clients`). The identical command then passed 9 of 10 times,
+  so **read a lone connection error as infrastructure and re-run before
+  investigating**. If it ever does recur, the knob is a smaller test pool
+  (`?connection_limit=1` on `TEST_DATABASE_URL`) — **not** re-enabling
+  `fileParallelism`, which is what makes files steal each other's fixtures.
+  `prisma migrate deploy`
   followed by `prisma migrate diff --from-schema-datasource … --to-schema-datamodel …`
   on that fresh DB returns "No difference detected", which independently proves
   the migration baseline is sound.
@@ -488,8 +528,11 @@ pinger.
 
 ## What is next, in order
 
-1. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
-   All **four** job URLs go on the same list, bearer `CRON_SECRET`
+1. **Decide on the independent 10-min pinger** (§2) — this is now a *tightening*
+   (4 h 38 m worst-case retry latency → 10 min), not a fix: the GitHub timer is
+   proven to fire and authenticate, just at ~7 % of cadence. Either set up the
+   pinger or consciously accept the daily `vercel.json` backstop as the floor.
+   If you do set it up, all **four** job URLs go on the same list, bearer `CRON_SECRET`
    (or `?secret=<CRON_SECRET>` if the pinger cannot set headers): the two worker
    paths plus `/api/jobs/config` and `/api/jobs/reconcile`. Alert on **any
    non-2xx** — `200` now means authenticated *and* healthy. `config` names any
