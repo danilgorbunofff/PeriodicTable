@@ -6,7 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 import { POST as webhookPOST } from "../app/api/webhooks/whop/route";
-import { whopPayloadReversal } from "./whop";
+import { whopPayloadReversal, whopSignatureScheme } from "./whop";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -25,6 +25,25 @@ async function signed(body: object) {
     new NextRequest("http://localhost/api/webhooks/whop", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-whop-signature": sig },
+      body: raw,
+    })
+  );
+}
+
+/* The same delivery, shaped as a Standard Webhooks request (api_version v1). */
+async function signedStandard(body: object, id = `sm_${Date.now()}_${keyN++}`) {
+  const raw = JSON.stringify(body);
+  const timestamp = "1700000000";
+  const sig = createHmac("sha256", SECRET).update(`${id}.${timestamp}.${raw}`, "utf8").digest("base64");
+  return webhookPOST(
+    new NextRequest("http://localhost/api/webhooks/whop", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "webhook-id": id,
+        "webhook-timestamp": timestamp,
+        "webhook-signature": `v1,${sig}`,
+      },
       body: raw,
     })
   );
@@ -151,6 +170,22 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
     const ev = await prisma.providerEvent.findFirstOrThrow({ where: { paymentId: p.id, outcome: "APPLIED" } });
     expect(ev.detail).toBe(null);
+  });
+
+  it("a Standard Webhooks delivery settles too", async () => {
+    // Whop fixes the envelope when the webhook resource is created
+    // (api_version: v1 = Standard Webhooks; v2/v5 = legacy). A deployment that
+    // understood only the legacy one would 401 every real delivery — silently,
+    // for as long as the provider keeps retrying, with the stake never applied.
+    const p = await pendingPayment("wh2-t.dev", 18, null);
+    const res = await signedStandard({
+      id: `wh-std-${Date.now()}`,
+      type: "payment.succeeded",
+      data: { status: "succeeded", amount: 18, currency: "usd", id: `cs_std_${keyN++}`, metadata: { paymentId: p.id } },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("PAID");
   });
 });
 
@@ -328,6 +363,85 @@ describe("whopPayloadReversal", () => {
     ];
     for (const [payload, expected] of cases) {
       expect(whopPayloadReversal(payload), JSON.stringify(payload)).toBe(expected);
+    }
+  });
+});
+
+/* Envelope selection. The two schemes sign *different bytes* with the same
+   secret, so implementing one and receiving the other 401s every delivery. */
+describe("whop signature envelopes", () => {
+  const ENV_SECRET = "envelope-test-secret";
+  const previousSecret = process.env.WHOP_WEBHOOK_SECRET;
+  const raw = '{"type":"payment.succeeded"}';
+  const ID = "msg_2A0u1";
+  const TS = "1700000000";
+
+  const hexSig = (s: string) => createHmac("sha256", ENV_SECRET).update(s, "utf8").digest("hex");
+  const b64Sig = (s: string) => createHmac("sha256", ENV_SECRET).update(s, "utf8").digest("base64");
+  const standard = (signature: string, id: string | null = ID, timestamp: string | null = TS) => ({
+    id,
+    timestamp,
+    signature,
+  });
+
+  beforeAll(() => {
+    process.env.WHOP_WEBHOOK_SECRET = ENV_SECRET;
+  });
+  afterAll(() => {
+    if (previousSecret === undefined) delete process.env.WHOP_WEBHOOK_SECRET;
+    else process.env.WHOP_WEBHOOK_SECRET = previousSecret;
+  });
+
+  it("accepts a legacy hex signature over the raw body", () => {
+    expect(whopSignatureScheme(raw, hexSig(raw))).toBe("legacy");
+  });
+
+  it("accepts a Standard Webhooks v1 signature", () => {
+    expect(whopSignatureScheme(raw, null, standard(`v1,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe("standard");
+  });
+
+  it("accepts an unpadded base64 signature", () => {
+    const sig = b64Sig(`${ID}.${TS}.${raw}`).replace(/=+$/, "");
+    expect(whopSignatureScheme(raw, null, standard(`v1,${sig}`))).toBe("standard");
+  });
+
+  it("accepts any matching entry when several are sent during rotation", () => {
+    const good = b64Sig(`${ID}.${TS}.${raw}`);
+    expect(whopSignatureScheme(raw, null, standard(`v1,bm90LXJlYWw= v1,${good}`))).toBe("standard");
+  });
+
+  it("ignores a non-v1 version tag", () => {
+    expect(whopSignatureScheme(raw, null, standard(`v2,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe(null);
+  });
+
+  it("rejects a v1 signature computed over the body alone", () => {
+    // The precise confusion this guards against: right secret, wrong bytes.
+    expect(whopSignatureScheme(raw, null, standard(`v1,${b64Sig(raw)}`))).toBe(null);
+  });
+
+  it("rejects a legacy signature computed over the signed-content form", () => {
+    expect(whopSignatureScheme(raw, hexSig(`${ID}.${TS}.${raw}`))).toBe(null);
+  });
+
+  it("rejects a v1 signature when webhook-id or webhook-timestamp is absent", () => {
+    const sig = `v1,${b64Sig(`${ID}.${TS}.${raw}`)}`;
+    expect(whopSignatureScheme(raw, null, standard(sig, null))).toBe(null);
+    expect(whopSignatureScheme(raw, null, standard(sig, ID, null))).toBe(null);
+  });
+
+  it("rejects a signature over a different body, in either scheme", () => {
+    expect(whopSignatureScheme(`${raw} `, hexSig(raw))).toBe(null);
+    expect(whopSignatureScheme(`${raw} `, null, standard(`v1,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe(null);
+  });
+
+  it("rejects everything when no secret is configured", () => {
+    const kept = process.env.WHOP_WEBHOOK_SECRET;
+    delete process.env.WHOP_WEBHOOK_SECRET;
+    try {
+      expect(whopSignatureScheme(raw, hexSig(raw))).toBe(null);
+      expect(whopSignatureScheme(raw, null, standard(`v1,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe(null);
+    } finally {
+      process.env.WHOP_WEBHOOK_SECRET = kept;
     }
   });
 });

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaymentStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
-  verifyWhopSignature,
+  whopSignatureScheme,
   paymentIdFromWhopPayload,
   whopPayloadIsPaid,
   whopPayloadIsFailed,
@@ -19,7 +19,10 @@ export const dynamic = "force-dynamic";
 /**
  * Whop webhook (Phase 2 rewrite).
  *
- * - Verifies the HMAC signature against raw bytes; 401 otherwise.
+ * - Verifies the HMAC signature against raw bytes; 401 otherwise. Accepts both
+ *   the Standard Webhooks envelope (`webhook-signature`) and the legacy
+ *   `x-whop-signature`, because which one a delivery uses is decided when the
+ *   webhook resource is created, not by us.
  * - Classifies paid ONLY on explicit provider signals (P0-03: statusless or
  *   unknown events are IGNORED with 200 — they must never apply a stake).
  * - Classifies refunds/chargebacks/disputes BEFORE paid/failed and unwinds the
@@ -31,12 +34,19 @@ export const dynamic = "force-dynamic";
  *   the provider redelivers (item 7).
  */
 export async function POST(req: NextRequest) {
-  const sig = req.headers.get("x-whop-signature") ?? "";
   const raw = await req.text();
+  const scheme = whopSignatureScheme(raw, req.headers.get("x-whop-signature"), {
+    id: req.headers.get("webhook-id"),
+    timestamp: req.headers.get("webhook-timestamp"),
+    signature: req.headers.get("webhook-signature"),
+  });
 
-  if (!verifyWhopSignature(raw, sig)) {
+  if (!scheme) {
     return NextResponse.json({ error: "bad signature" }, { status: 401 });
   }
+  // Otherwise unobservable from our side, and guessing wrong fails silently:
+  // a 401 per delivery, retried for days, then the endpoint is disabled.
+  console.log(`[whop-webhook] verified via ${scheme} signature`);
 
   let payload: unknown;
   try {

@@ -75,17 +75,76 @@ export async function createWhopCheckoutSession(params: {
   }
 }
 
-/** HMAC-SHA256 verify of the raw webhook body (Whop sends X-Whop-Signature). */
-export function verifyWhopSignature(rawBody: string, signature: string | null): boolean {
-  if (!process.env.WHOP_WEBHOOK_SECRET || !signature) return false;
-  const digest = crypto
-    .createHmac("sha256", process.env.WHOP_WEBHOOK_SECRET)
-    .update(rawBody, "utf8")
-    .digest("hex");
-  const a = Buffer.from(digest, "utf8");
-  const b = Buffer.from(signature, "utf8");
+/** Constant-time compare of two ASCII digests. Length is not secret, so an
+ * early length check is fine; the compare itself never short-circuits. */
+function digestMatches(expected: string, presented: string): boolean {
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(presented, "utf8");
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
+}
+
+export type StandardWebhookHeaders = {
+  id: string | null;
+  timestamp: string | null;
+  signature: string | null;
+};
+
+/**
+ * Whop ships two incompatible webhook signature envelopes, and which one a
+ * delivery uses is fixed when the webhook resource is created (`api_version`
+ * v1 = Standard Webhooks; v2/v5 = legacy). A webhook created under one scheme
+ * is verified by code implementing the other only by accident — and the
+ * failure is silent: every delivery 401s, the provider retries for days, then
+ * disables the endpoint, while the buyer's money is already gone. So accept
+ * both and let the delivery itself say which one it uses.
+ *
+ *  - Standard Webhooks (v1): `webhook-signature: v1,<base64>` — HMAC-SHA256
+ *    over `{webhook-id}.{webhook-timestamp}.{rawBody}`.
+ *  - Legacy (v2/v5): `x-whop-signature: <hex>` — HMAC-SHA256 over the raw body.
+ *
+ * Dual-accept adds no bypass: each branch requires a valid HMAC over data the
+ * caller cannot construct without the shared secret.
+ */
+export function whopSignatureScheme(
+  rawBody: string,
+  legacySignature: string | null,
+  standard?: StandardWebhookHeaders | null
+): "standard" | "legacy" | null {
+  const secret = process.env.WHOP_WEBHOOK_SECRET;
+  if (!secret) return null;
+
+  if (legacySignature) {
+    const expected = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+    if (digestMatches(expected, legacySignature)) return "legacy";
+  }
+
+  if (standard?.id && standard.timestamp && standard.signature) {
+    const signed = `${standard.id}.${standard.timestamp}.${rawBody}`;
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(signed, "utf8")
+      .digest("base64")
+      .replace(/=+$/, "");
+    // The header may carry several space-separated signatures while a secret
+    // is being rotated, so any matching `v1` entry is enough.
+    for (const entry of standard.signature.split(" ")) {
+      const comma = entry.indexOf(",");
+      if (comma < 0 || entry.slice(0, comma) !== "v1") continue;
+      if (digestMatches(expected, entry.slice(comma + 1).replace(/=+$/, ""))) return "standard";
+    }
+  }
+
+  return null;
+}
+
+/** True when the delivery carries a signature this deployment can verify. */
+export function verifyWhopSignature(
+  rawBody: string,
+  legacySignature: string | null,
+  standard?: StandardWebhookHeaders | null
+): boolean {
+  return whopSignatureScheme(rawBody, legacySignature, standard) !== null;
 }
 
 /** Extract our paymentId from Whop payload metadata (checks both plan and checkout session levels). */

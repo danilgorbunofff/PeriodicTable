@@ -73,7 +73,8 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [ ] Statusless event → `ignored`, settled payment untouched
 - [ ] `payment.failed` → `failed`; later `succeeded` for same payment → `already-settled` (terminal)
 - [ ] Amount 999 vs local 7 → `amount-mismatch`, nothing applied
-- [ ] Missing/bad `x-whop-signature` → rejected; unknown `paymentId` → recorded, nothing applied
+- [ ] Missing/bad signature (either envelope) → rejected; unknown `paymentId` → recorded, nothing applied
+- [ ] ⚠️ Whop fixes the signature envelope when the webhook is created (`api_version`: v1 = Standard Webhooks `webhook-signature`; v2/v5 = legacy `x-whop-signature`). The two sign **different bytes** with the same secret, so implementing one and receiving the other 401s every delivery — silently, until the endpoint is auto-disabled. Both are accepted (dual-accept, 2026); on the first real delivery read the `[whop-webhook] verified via …` line in Vercel logs to learn which one actually arrives
 - [ ] Prove contract in test mode before live: endpoint shape, signature header name, payment-id location (`data.plan.metadata` vs `data.metadata`), paid event types — save signed fixtures as tests in `lib/whop.ts` area
 
 ## 4. Email + background jobs
