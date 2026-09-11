@@ -334,8 +334,46 @@ pinger.
       needed yet). Money reversals are now handled — see the 2026-09-11 entries
       above. The `CANCELED` enum value is still never written (stale Phase 2
       comment).
-- [ ] Grid/stats failure honesty: a blocked API must show error panels, never a
-      fake all-`Unclaimed $5` / zeros
+- [x] **Fixed 2026-09-11** — Grid/stats failure honesty: a blocked API must show
+      error panels, never a fake all-`Unclaimed $5` / zeros. The bug was wider
+      than this line implied. With `/api/stats` down, `app/page.tsx` rendered
+      "🧪 **0** elements live · 💰 **$0** in bids · **122** unclaimed" as plain
+      fact — and `?? 122` was the sneakiest part, because it is *plausible*, so
+      nothing looked broken. With `/api/elements` down, `tiles ?? []` left the
+      `claims` map empty and every tile fell back to `claim?.price ?? 5`, i.e.
+      the page advertised the entire periodic table as free. Both fixed by
+      making the page distinguish *unknown* from *zero*:
+      `lib/liveState.ts` maps `(hasData, error)` to
+      `loading | ok | stale | unavailable`; `components/StatsCard.tsx` now takes
+      `{ stats?, stale? }` and renders `—` until real numbers exist (no `= 0` /
+      `= 122` defaults); `components/LiveDataNotice.tsx` draws a blocking panel
+      in place of the grid when tiles are unavailable, and a "last known"
+      marker when SWR is serving last-good data after a failed refresh. 10 tests
+      in `lib/liveState.test.ts` cover the truth table, the copy contract, and
+      three source pins that fail if `?? 0` / `?? 122` / `= 0` defaults return.
+      Measured: **290 passed (290), 20 files** (was 280/19). Note this only bit
+      on first load or hard failure — SWR retains last-good data on a refresh
+      error, which is why `stale` is a separate state from `unavailable`.
+
+      **Verified in a real browser**, not just by reading source — which was
+      worth doing, because the first placement was wrong in a way no test here
+      can catch. The marker was originally at `bottom-[18px] left-1/2`, which is
+      exactly where `components/FooterBar.tsx` already sits at the same z-layer
+      (`--z-cards: 40`); same z, later in DOM, so the legal links painted over
+      the Retry button and swallowed its clicks. Overlap detection needs
+      geometry, and this repo has no React/jsdom test infra, so it is invisible
+      to the static-scan idiom. Moved to `bottom-[72px]`, which clears the 44px
+      FABs (62px) on mobile and the footer (51px) on desktop; re-measured at
+      1440×900 and 390×844 with the aborts armed. Method, if this needs redoing:
+      `next dev` against the **local** test DB, then
+      `agent-browser network route "**/api/elements*" --abort` (plus `/api/stats`)
+      to force the failure — first load gives `unavailable`, and arming the
+      aborts *after* a healthy load and waiting out the 30s refresh gives
+      `stale`. Confirmed: blocked stats render `— / — / —` instead of
+      `0 / $0 / 122`; blocked tiles replace 123 `$5 Unclaimed` tiles with the
+      panel (the one remaining `$5` is the hero's "Claim an element · from $5",
+      which is true regardless); Retry clears the warning once routes are
+      removed.
 - [ ] A11y/mobile sweep + a real browser/axe E2E (today: static string tests only)
 - [ ] `EMAIL_FROM` is `info@periodictable.lol`; the plan is `hi@…` — align when
       convenient (both work, same verified domain)
@@ -399,7 +437,9 @@ pinger.
 2. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
    - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **stats HIDDEN sums (deliberate — see
-     above)**, honest error panels, board sorting, click salt
+     above)**, honest error panels (code landed 2026-09-11 — the §5 pass is now a
+     visual check of the blocked-API panels, not a build), board sorting, click
+     salt
    - §4c: receipt / outbid / unsubscribe **hand tests with two real inboxes**
    - §6: hand journeys J1–J8
    - §7: GO / NO-GO

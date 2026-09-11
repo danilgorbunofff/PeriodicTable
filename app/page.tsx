@@ -9,6 +9,8 @@ import { ELEMENTS, ElementNode } from "../lib/elements";
 import { HeroCard } from "../components/HeroCard";
 import { SearchPill, SearchPick } from "../components/SearchPill";
 import { StatsCard } from "../components/StatsCard";
+import { LiveDataNotice } from "../components/LiveDataNotice";
+import { liveState } from "../lib/liveState";
 import { ActivityCard } from "../components/ActivityCard";
 import { WorldOrder, RailShell } from "../components/WorldOrder";
 import { TerritoryView } from "../components/TerritoryView";
@@ -56,8 +58,16 @@ function HomeInner() {
   const [expandOpen, setExpandOpen] = useState(false);
 
   // live table data (30s poll)
-  const { data: tiles, mutate: mutateTiles } = useSWR<Tile[]>("/api/elements", fetchJson, { refreshInterval: 30000 });
-  const { data: statsData, mutate: mutateStats } = useSWR<StatsResponse>("/api/stats", (url: string) => fetchJson(url, isStatsResponse), {
+  const {
+    data: tiles,
+    error: tilesError,
+    mutate: mutateTiles,
+  } = useSWR<Tile[]>("/api/elements", fetchJson, { refreshInterval: 30000 });
+  const {
+    data: statsData,
+    error: statsError,
+    mutate: mutateStats,
+  } = useSWR<StatsResponse>("/api/stats", (url: string) => fetchJson(url, isStatsResponse), {
     refreshInterval: 30000,
   });
   const { data: activity, mutate: mutateActivity } = useSWR<ActivityRow[]>("/api/activity?limit=6", (url: string) => fetchJson(url, isActivityRows), {
@@ -110,8 +120,16 @@ function HomeInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const claimedCount = statsData?.claimedElements ?? 0;
-  const totalStakedUsd = statsData?.totalStakedUsd ?? 0;
+  // The board may only draw its defaults when it is entitled to them; see
+  // lib/liveState.ts. Tiles and stats fail independently, so they are tracked
+  // separately: the table can be trustworthy while the totals are not.
+  const tileState = liveState(!!tiles, tilesError);
+  const statsState = liveState(!!statsData, statsError);
+
+  const retryLiveData = useCallback(() => {
+    void mutateTiles();
+    void mutateStats();
+  }, [mutateTiles, mutateStats]);
 
   const openStake = useCallback((el: ElementNode, amount: number) => {
     setCheckoutEl(el);
@@ -163,11 +181,20 @@ function HomeInner() {
       <BackgroundSymbols />
       <TableCamera focusId={selected?.id ?? null}>
         <div className="periodic-object p-2">
-          <PeriodicGrid
-            claims={claims}
-            selectedId={selected?.id ?? null}
-            onSelect={onSelectTile}
-          />
+          {tileState === "unavailable" ? (
+            // There is nothing trustworthy to draw, and the table's default
+            // face is "$5 · unclaimed" — so it is not drawn at all. Rendering
+            // it and hoping the notice is read would advertise the whole
+            // periodic table as free. TableCamera null-guards its tile lookup,
+            // so an empty board is safe.
+            <LiveDataNotice state={tileState} onRetry={retryLiveData} />
+          ) : (
+            <PeriodicGrid
+              claims={claims}
+              selectedId={selected?.id ?? null}
+              onSelect={onSelectTile}
+            />
+          )}
         </div>
       </TableCamera>
 
@@ -190,8 +217,22 @@ function HomeInner() {
 
       {/* stats */}
       <div className="absolute right-[18px] top-[18px] z-[var(--z-cards)] hidden sm:block">
-        <StatsCard totalStakedUsd={totalStakedUsd} claimedCount={claimedCount} elementsLive={statsData?.elementsTotal ?? 122} />
+        <StatsCard stats={statsData} stale={statsState === "stale"} />
       </div>
+
+      {/* stale marker — the table is still drawing real values, but they are no
+          longer current, and a stale tile reads exactly like a fresh one: a
+          visitor would click through to a price this page never advertised.
+          Lifted clear of the bottom edge on purpose: the bottom corners hold a
+          44px FAB at every breakpoint, and bottom-centre is already taken by
+          FooterBar at the same z-layer, so a pill placed at 18px would sit
+          under the legal links and swallow their clicks. 72px clears both the
+          FABs (62px on mobile) and the footer (51px on desktop). */}
+      {tileState === "stale" && (
+        <div className="absolute bottom-[72px] left-1/2 z-[var(--z-cards)] w-max max-w-[calc(100%-24px)] -translate-x-1/2">
+          <LiveDataNotice state={tileState} onRetry={retryLiveData} />
+        </div>
+      )}
 
       {/* activity — desktop (minimize button collapses it to the same FAB as mobile) */}
       <div className="absolute bottom-[18px] left-[18px] z-[var(--z-cards)] hidden md:block">
