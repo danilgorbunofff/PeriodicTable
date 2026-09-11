@@ -198,6 +198,20 @@ describe("form + status contracts (static)", () => {
     expect(src("components/Toast.tsx")).toMatch(/aria-live="polite"/);
     expect(src("components/Toast.tsx")).toMatch(/role="status"/);
   });
+  it("the report button's name follows its visible text and the result is announced", () => {
+    const report = src("components/ReportListingButton.tsx");
+    // A static aria-label would override "reported ✓" / "failed — retry?", so
+    // AT would announce the wrong state and voice control could not match the
+    // name it can see (WCAG 2.5.3). The visible text is the name instead.
+    expect(report).not.toMatch(/aria-label=/);
+    expect(report).toMatch(/role="status"/);
+    expect(report).toMatch(/aria-live="polite"/);
+    // send() closes the modal and flips pending in the same render, so a real
+    // `disabled` would make Modal's focus-restore miss and drop focus to
+    // <body>. aria-disabled plus the click guard keeps that impossible.
+    expect(report).not.toMatch(/(?<!aria-)disabled=\{/);
+    expect(report).toMatch(/aria-disabled=\{pending\}/);
+  });
   it("legal links exist on mobile (never viewport-gated)", () => {
     const footer = src("components/FooterBar.tsx");
     expect(footer).not.toMatch(/hidden md:block/);

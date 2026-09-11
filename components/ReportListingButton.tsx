@@ -15,6 +15,7 @@ export function ReportListingButton({
 }) {
   const [confirm, setConfirm] = useState(false);
   const [state, setState] = useState<"idle" | "pending" | "done" | "error">("idle");
+  const pending = state === "pending";
 
   async function send() {
     setState("pending");
@@ -34,17 +35,25 @@ export function ReportListingButton({
 
   return (
     <>
+      {/* The visible text is the accessible name in every state — no aria-label.
+          A static "Report …" label would override "reported ✓" / "failed —
+          retry?", so AT would announce the wrong state and voice control could
+          not match the name it can see (WCAG 2.5.3).
+
+          aria-disabled rather than disabled: send() closes the modal and flips
+          this in the same render, so Modal's focus-restore would land on a
+          genuinely disabled button, silently dropping focus to <body> for the
+          whole round-trip. The click guard keeps double-submits impossible. */}
       <button
-        aria-label={`Report ${domain}`}
         title="Report listing"
-        disabled={state === "pending"}
+        aria-disabled={pending}
         onClick={() => {
-          if (state === "pending") return;
+          if (pending) return;
           setConfirm(true);
         }}
-        className="text-xs text-mutedink hover:text-ink underline disabled:no-underline"
+        className={`text-xs text-mutedink hover:text-ink underline ${pending ? "no-underline" : ""}`}
       >
-        {state === "pending"
+        {pending
           ? "reporting…"
           : state === "done"
             ? "reported ✓"
@@ -52,6 +61,17 @@ export function ReportListingButton({
               ? "failed — retry?"
               : "Report listing"}
       </button>
+      {/* The name change alone is not announced, so the result also goes out as
+          a polite status — same pattern as the checkout modal. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {pending
+          ? `Reporting ${domain}…`
+          : state === "done"
+            ? `Report submitted for ${domain}. An operator will review it.`
+            : state === "error"
+              ? `Report failed for ${domain}. Please try again.`
+              : ""}
+      </div>
       <Modal open={confirm} onClose={() => setConfirm(false)} label="Confirm report" size="md">
         <h2 className="font-display text-xl font-bold pr-10">Report {domain}?</h2>
         <p className="text-sm text-mutedink mt-2">
