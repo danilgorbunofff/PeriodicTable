@@ -50,12 +50,18 @@ export async function POST(req: NextRequest) {
     await clearEmail(token);
     return NextResponse.json({ ok: true });
   }
-  // Form submit (confirm page + RFC 8058 one-click clients).
-  try {
-    const form = await req.formData();
-    token = String(form.get("token") ?? "");
-  } catch {
-    token = req.nextUrl.searchParams.get("token") ?? "";
+  // RFC 8058 one-click clients POST the token in the URL with a
+  // `List-Unsubscribe=One-Click` body, so the query string wins here; the
+  // confirm page posts the token in the body instead. Reading the body first
+  // would silently drop every one-click request: the one-click body parses as
+  // valid form data, so the catch below would never fire.
+  token = req.nextUrl.searchParams.get("token") ?? "";
+  if (!token) {
+    try {
+      token = String((await req.formData()).get("token") ?? "");
+    } catch {
+      token = "";
+    }
   }
   await clearEmail(token);
   return NextResponse.redirect(new URL("/?unsub=done", req.nextUrl.origin));
