@@ -7,6 +7,8 @@
 # Usage:
 #   BASE_URL=http://localhost:3100 scripts/rehearse-release.sh [live|paused]
 #   ADMIN_TOKEN=... WHOP_WEBHOOK_SECRET=... [WHOP_API_KEY=...] for full coverage.
+#   Signed webhooks use the Standard Webhooks envelope (api_version v1 — what
+#   Whop actually delivers); one case also re-delivers legacy to guard v2/v5.
 #   Expiry coverage needs RESERVATION_TTL_MS=2000 on the server (else skipped).
 #
 # Requires: curl, python3. Server needs a migrated + seeded database.
@@ -21,6 +23,7 @@ RUN="${REHEARSE_RUN:-$(date +%s)}"
 PASS=0
 SKIP=0
 CALLN=0
+WH_COUNT=0
 TMPD=$(mktemp -d)
 trap 'rm -rf "$TMPD" /tmp/whbody.json' EXIT
 BODY="$TMPD/body.txt"
@@ -59,7 +62,18 @@ admin_call() { # admin_call METHOD PATH [DATA]
     call "$method" "$path" "" "Authorization: Bearer $ADMIN_TOKEN"
   fi
 }
-sign_post() { # sign_post PATH JSON_BODY
+sign_post() { # sign_post PATH JSON_BODY — Standard Webhooks envelope (what Whop v1 delivers)
+  WH_COUNT=$((WH_COUNT + 1))
+  echo "$2" > /tmp/whbody.json
+  local id="msg_rehearse_$RUN-$WH_COUNT" ts sig
+  ts=$(date +%s)
+  sig=$(WHS_ID="$id" WHS_TS="$ts" python3 -c "import hmac,hashlib,os,base64; key=os.environ['WHOP_WEBHOOK_SECRET'].encode(); signed=('%s.%s.' % (os.environ['WHS_ID'], os.environ['WHS_TS'])).encode() + open('/tmp/whbody.json','rb').read(); print('v1,' + base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode().rstrip('='))")
+  curl -s --max-time 15 -w "\n%{http_code}" -X POST "$BASE$1" -H 'Content-Type: application/json' -H "webhook-id: $id" -H "webhook-timestamp: $ts" -H "webhook-signature: $sig" --data-binary @/tmp/whbody.json > "$TMPD/out.txt"
+  tail -n 1 "$TMPD/out.txt" > "$STATUS"
+  sed '$d' "$TMPD/out.txt" > "$BODY"
+}
+
+sign_post_legacy() { # sign_post_legacy PATH JSON_BODY — legacy envelope (v2/v5 resources)
   echo "$2" > /tmp/whbody.json
   local sig
   sig=$(python3 -c "import hmac,hashlib,os; print(hmac.new(os.environ['WHOP_WEBHOOK_SECRET'].encode(), open('/tmp/whbody.json','rb').read(), hashlib.sha256).hexdigest())")
@@ -180,6 +194,9 @@ if [ -n "${WHOP_WEBHOOK_SECRET:-}" ]; then
   sign_post /api/webhooks/whop "$B1"
   grep -Eq '"outcome":"(duplicate|already-settled)"' "$BODY" || fail "replay deduped" "$(cat "$BODY")"
   pass "signed paid webhook applies once; replay deduped"
+  sign_post_legacy /api/webhooks/whop "$B1"
+  [ "$(st)" = "200" ] || fail "legacy envelope accepted" "got $(st): $(cat "$BODY")"
+  pass "legacy envelope still verified (v2/v5 webhooks unregressed)"
   B2="{\"id\":\"rehearse-$RUN-evt-2\",\"data\":{\"metadata\":{\"paymentId\":\"$PAYW\"}}}"
   sign_post /api/webhooks/whop "$B2"
   grep -q '"outcome":"ignored"' "$BODY" || fail "statusless ignored" "$(cat "$BODY")"
