@@ -1,7 +1,15 @@
 /** Append-only audit trail (Phase 1). Every profile, management, waitlist,
- * and checkout mutation writes one row; notification/worker delivery never
- * blocks on it (best-effort within the request, failures are swallowed after
- * a console error so audit can never break money paths).
+ * and checkout mutation writes one row. Failures are best-effort: outside a
+ * transaction they are swallowed after a console error, so a bare audit write
+ * can never break a caller.
+ *
+ * Inside a transaction they MUST propagate. Postgres aborts the whole
+ * transaction on any failed statement, so a swallowed error there does not
+ * "continue anyway" — it just moves the failure to the *next* statement, which
+ * raises 25P02 ("current transaction is aborted, commands ignored until end of
+ * transaction block"). 25P02 is neither retryable nor diagnosable: a retryable
+ * serialization conflict becomes a hard 500, and the real cause is hidden in a
+ * "non-blocking" log line. Throwing lets the transaction be retried intact.
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
@@ -42,6 +50,7 @@ export async function audit(
       },
     });
   } catch (e) {
+    if (db !== prisma) throw e;
     console.error("auditLog write failed (non-blocking):", e);
   }
 }

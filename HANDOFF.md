@@ -265,20 +265,57 @@ pinger.
 - [ ] Upstash not set — rate limits are per-instance memory, bypassable on
       serverless (`lib/rateStore.ts` fails open: warns once, continues). Surfaced
       by `/api/jobs/config` as a `degraded` advisory.
+- [x] **Fixed 2026-09-11:** `audit()` **swallowed its own failure inside a
+      transaction** — and inside one that is not a non-blocking write. Postgres
+      aborts the whole transaction on any failed statement, so the failure did
+      not "continue anyway"; it surfaced on the *next* statement as **25P02**
+      ("current transaction is aborted, commands ignored until end of transaction
+      block"). 25P02 is neither retryable nor diagnosable, so a **retryable
+      serialization conflict became a hard 500 for the buyer**, with the real
+      cause hidden in a "non-blocking" log line. `audit()` now rethrows when
+      handed a `tx` client and keeps the swallow only outside a transaction, so
+      the transaction can be retried intact. Two tests in `lib/routes.test.ts`
+      pin both halves (the in-transaction one asserts on the audit write's own
+      `P2003`, and explicitly asserts the message is **not** 25P02).
 - [ ] Whop contract **still guessed** (`lib/whop.ts`): endpoint shape, signature
       header, payment-id location, paid event types. Needs signed fixtures.
-- [ ] Webhook **does not trust** the amount it is told — this was previously
-      listed backwards. Every money path uses our own checkout-time
-      `payment.amountUsd`; the provider's figure only cross-checks it
-      (`validateWhopMoney`) and is stored as audit metadata. The real remaining
-      gap is narrower: an **absent** provider amount is indistinguishable from a
-      verified one (`validateWhopMoney` returns `null` in both cases), and
-      `providerAmount` / `providerCurrency` are **write-only** — nothing
-      reconciles them against `amountUsd`.
+- [x] **Fixed 2026-09-11:** Webhook **does not trust** the amount it is told —
+      this was previously listed backwards. Every money path uses our own
+      checkout-time `payment.amountUsd`; the provider's figure only cross-checks
+      it and is stored as audit metadata. The real gap was narrower: an
+      **absent** provider amount was **indistinguishable from a verified one**,
+      because `validateWhopMoney` returned `null` in both cases — so a charge
+      nothing had cross-checked looked exactly like one that had been. It now
+      returns a three-state `WhopMoneyCheck` (`ok` / `absent` / `rejected`) rather
+      than `string | null`, and `absent` settles while recording the delivery as
+      `amount-unverified:provider-stated-none`. `providerAmount` /
+      `providerCurrency` are no longer write-only — see the reconciliation entry
+      below.
+- [x] **Fixed 2026-09-11:** **no reconciliation** of `providerAmount` vs
+      `amountUsd` — both columns were written on every paid settle and read by
+      nothing. **`GET /api/jobs/reconcile`** is now the reader. It reports
+      `paidTotal`, a **`divergent`** count, and an advisory **`unverified`**
+      count. `divergent` is a PAID payment whose stored provider figure
+      contradicts the charge; it is impossible by construction, since the webhook
+      rejects contradictions before settling — which is exactly why a hit must be
+      loud: it means the acceptance rule, or a path that bypassed it, is wrong.
+      `unverified` is a charge paid on our own checkout figure alone, disclosed
+      rather than treated as a defect, because providers may legitimately state
+      no amount. Two details are load-bearing: both questions are asked through
+      the **same predicates the live webhook uses** (`providerAmountAgrees` /
+      `providerCurrencyAgrees`, now exported from `lib/whop.ts`) — a second copy
+      of the rule would bless a figure the webhook itself rejects — and the
+      comparison runs in **TypeScript, not SQL**, because the first draft
+      compared the enum column to `'PAID'` (the column holds `'paid'`) and would
+      have failed every call. Read-only, `jobAuth`, echoes identifiers and
+      amounts only, so it is safe to run from the pinger. It is deliberately
+      **not** on a Vercel cron: a cron run produces a response nobody reads, and
+      `ok: false` is a signal for a monitor to alert on. 5 integration tests in
+      `lib/reconcile.test.ts`.
 - [ ] **No `PENDING` expiry sweeper** (reservations self-expire, so none is
-      needed yet) and **no reconciliation** of `providerAmount` vs `amountUsd`.
-      Money reversals are now handled — see the 2026-09-11 entries above. The
-      `CANCELED` enum value is still never written (stale Phase 2 comment).
+      needed yet). Money reversals are now handled — see the 2026-09-11 entries
+      above. The `CANCELED` enum value is still never written (stale Phase 2
+      comment).
 - [ ] Grid/stats failure honesty: a blocked API must show error panels, never a
       fake all-`Unclaimed $5` / zeros
 - [ ] A11y/mobile sweep + a real browser/axe E2E (today: static string tests only)
@@ -288,7 +325,7 @@ pinger.
 
 **Environment traps — do not lose time on these**
 - **Local tests silently skip the DB suites.** Without a DB the gate in
-  `lib/testDb.ts` skips them silently (`222 passed | 48 skipped`, measured
+  `lib/testDb.ts` skips them silently (`223 passed | 57 skipped`, measured
   2026-09-11). A green local run is **not** proof the integration path works —
   that is exactly how the takedown bug sat unnoticed in `main`. Let CI be the DB
   oracle. **You can be the oracle locally too**, and it is cheap: run a throwaway
@@ -301,9 +338,11 @@ pinger.
   rather than pasted because this file passes through a secret scrubber that
   redacts anything shaped like a credential-bearing URL — which is exactly how
   earlier edits to this doc got silently mangled. Measured that way on
-  2026-09-10: **256 passed (256), 18 files, 0 skipped, ~2.4s** — three different
-  counts appear in older revisions of this doc (200/215/241); 256 is the correct
-  total. `prisma migrate deploy`
+  2026-09-11: **280 passed (280), 19 files, 0 skipped, ~3.2s** — three different
+  counts appear in older revisions of this doc (200/215/241/256); 280 is the
+  current total, and the same suite without a DB reports `223 passed | 57
+  skipped`, so **57 is the number of tests a DB-less green run is not
+  exercising**. `prisma migrate deploy`
   followed by `prisma migrate diff --from-schema-datasource … --to-schema-datamodel …`
   on that fresh DB returns "No difference detected", which independently proves
   the migration baseline is sound.
@@ -334,8 +373,11 @@ pinger.
 ## What is next, in order
 
 1. **Set up the independent 10-min pinger** (§2) — or accept the daily backstop.
-   **Add `/api/jobs/config` to the same URL list** (bearer `CRON_SECRET`): the
-   report is only worth having if something calls it.
+   **Add `/api/jobs/config` and `/api/jobs/reconcile` to the same URL list**
+   (bearer `CRON_SECRET`): both reports are only worth having if something calls
+   them. `reconcile` answers `ok: false` when a paid payment's stored provider
+   figure contradicts the charge, so alert on that — and on a non-2xx from
+   either path.
 2. Then resume `doc/PROD-READINESS-CHECKLIST.md` in order:
    - §4b: Vercel Cron Jobs tab visual check; outbox lifecycle / `ADMIN_TOKEN` retry
    - §5: Turnstile, Upstash, `ADMIN_TOKEN`, **stats HIDDEN sums (deliberate — see

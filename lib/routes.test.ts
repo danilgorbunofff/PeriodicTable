@@ -2,7 +2,7 @@
    Calls real route handlers with constructed requests against the local test
    DB (TST6/9994 fixtures, fully cleaned up). */
 import { hasTestDb, testPrisma } from "./testDb"; // must stay first
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET as searchGET } from "../app/api/search/route";
 import { GET as statsGET } from "../app/api/stats/route";
@@ -12,6 +12,7 @@ import { GET as activityGET } from "../app/api/activity/route";
 import { GET as elementGET } from "../app/api/elements/[sym]/route";
 import { POST as checkoutPOST } from "../app/api/checkout/route";
 import { settlePayment } from "./settle";
+import { audit } from "./audit";
 import { isStatsResponse, isTableOrderRows, isBoardRows, isActivityRows, isSearchHits } from "./api";
 
 const prisma = testPrisma();
@@ -170,5 +171,50 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     }
     expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
     expect(statuses[5]).toBe(429);
+  });
+});
+
+describe.skipIf(!hasDb)("audit inside a transaction", () => {
+  // A bogus startupId is an FK violation (P2003), which is the cheapest way to
+  // make auditLog.create fail on demand. Nothing is ever inserted, so these
+  // tests leave no rows behind.
+  const bad = { action: "STARTUP_CREATED" as const, startupId: "no-such-startup" };
+
+  it("a failed audit write aborts the transaction instead of being swallowed", async () => {
+    // The production shape: the checkout tx calls audit(), then continues to
+    // tx.payment.create. Swallowing the audit error left Postgres' transaction
+    // aborted, so the payment insert failed with 25P02 ("current transaction is
+    // aborted, commands ignored until end of transaction block"). 25P02 is not
+    // retryable, so a serialization conflict became a hard 500 for the buyer and
+    // the real cause was hidden in a "non-blocking" log line.
+    const failure = await prisma
+      .$transaction(async (tx) => {
+        await audit(bad, tx);
+        await tx.auditLog.count(); // stands in for tx.payment.create
+        return null;
+      })
+      .then(
+        () => null,
+        (e: unknown) => e as { name?: string; code?: string; message?: string }
+      );
+
+    // The audit write's own failure must surface — checked via `name`/`code`
+    // rather than `instanceof`, because Prisma's Unknown variant (the one the
+    // swallow produces) is a Proxy whose `code` reads as undefined.
+    expect(failure).not.toBeNull();
+    expect(failure?.name).toBe("PrismaClientKnownRequestError");
+    expect(failure?.code).toBe("P2003");
+    // And never the downstream symptom, which is unretryable and undiagnosable.
+    expect(failure?.message ?? "").not.toContain("25P02");
+    expect(failure?.message ?? "").not.toContain("current transaction is aborted");
+  });
+
+  it("a failed audit write outside a transaction is still non-blocking", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(audit(bad)).resolves.toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -26,9 +26,15 @@ export type SettleEvent = {
   eventId: string; // globally unique per delivery ("whop:..." / "dev-...")
   eventType: string;
   paid: boolean;
+  /** The PROVIDER's claimed amount, not ours — settled against
+   * `payment.amountUsd` and stored as audit metadata (`providerAmount`).
+   * Null/absent means the provider stated no figure; that is recorded as
+   * amount-unverified rather than silently treated as agreement. */
   amountUsd?: number | null;
   currency?: string | null;
   providerRef?: string | null;
+  /** The provider stated no amount, so nothing could be cross-checked. */
+  amountUnverified?: boolean;
 };
 
 export type SettleOutcome =
@@ -246,7 +252,12 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
       return { outcome: "already-settled", paymentId };
     }
 
-    await recordEvent({ ...event, paymentId, outcome: "APPLIED" });
+    await recordEvent({
+      ...event,
+      paymentId,
+      outcome: "APPLIED",
+      detail: event.amountUnverified ? "amount-unverified:provider-stated-none" : undefined,
+    });
     logSettle("payment-applied", {
       paymentId,
       eventId: event.eventId,

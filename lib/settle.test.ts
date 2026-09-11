@@ -11,6 +11,8 @@ import {
   whopEventType,
   whopMoney,
   validateWhopMoney,
+  providerAmountAgrees,
+  providerCurrencyAgrees,
   getProviderMode,
 } from "./whop";
 import { reservationConflict, isReservationLive, RESERVATION_TTL_MS } from "./reservations";
@@ -58,12 +60,28 @@ describe("provider event identity", () => {
 });
 
 describe("money validation", () => {
-  it("accepts dollars or cents, ignores absent, rejects mismatch", () => {
-    expect(validateWhopMoney(21, { amountUsd: 21, currency: "usd", providerRef: null })).toBeNull();
-    expect(validateWhopMoney(21, { amountUsd: 2100, currency: "usd", providerRef: null })).toBeNull();
-    expect(validateWhopMoney(21, { amountUsd: null, currency: null, providerRef: null })).toBeNull();
-    expect(validateWhopMoney(21, { amountUsd: 22, currency: "usd", providerRef: null })).toMatch(/amount-mismatch/);
-    expect(validateWhopMoney(21, { amountUsd: 21, currency: "eur", providerRef: null })).toMatch(/currency-mismatch/);
+  it("accepts dollars or cents, reports absent, rejects mismatch", () => {
+    expect(validateWhopMoney(21, { amountUsd: 21, currency: "usd", providerRef: null })).toEqual({ status: "ok" });
+    expect(validateWhopMoney(21, { amountUsd: 2100, currency: "usd", providerRef: null })).toEqual({ status: "ok" });
+    // `absent` is its own state: an unverified amount must never read as verified.
+    expect(validateWhopMoney(21, { amountUsd: null, currency: null, providerRef: null })).toEqual({ status: "absent" });
+    const mismatch = validateWhopMoney(21, { amountUsd: 22, currency: "usd", providerRef: null });
+    expect(mismatch).toEqual({ status: "rejected", reason: "amount-mismatch:22" });
+    expect(validateWhopMoney(21, { amountUsd: 21, currency: "eur", providerRef: null })).toEqual({
+      status: "rejected",
+      reason: "currency-mismatch:eur",
+    });
+  });
+  it("the shared acceptance predicates are the rule the report reads rows with", () => {
+    // Both the webhook and /api/jobs/reconcile call these, so pinning them here
+    // pins the only copy of "dollars or cents" that exists.
+    expect(providerAmountAgrees(21, 21)).toBe(true);
+    expect(providerAmountAgrees(21, 2100)).toBe(true);
+    expect(providerAmountAgrees(21, 22)).toBe(false);
+    expect(providerAmountAgrees(21, 2101)).toBe(false); // near-miss cents is not agreement
+    expect(providerCurrencyAgrees(null)).toBe(true); // stated none: not a contradiction
+    expect(providerCurrencyAgrees("USD")).toBe(true);
+    expect(providerCurrencyAgrees("eur")).toBe(false);
   });
   it("extracts money from known payload shapes", () => {
     expect(whopMoney({ data: { amount: 2100, currency: "USD", id: "cs_1" } })).toEqual({

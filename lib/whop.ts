@@ -255,12 +255,41 @@ export function whopMoney(payload: unknown): WhopMoney {
   };
 }
 
+/** The result of checking the provider's money claims against our payment.
+ * `absent` is a distinct state, not a synonym for `ok`: some deliveries state
+ * no amount at all, and collapsing that into "verified" is how an unverified
+ * charge becomes invisible. Callers must decide explicitly what to do with it
+ * (the webhook settles and records the delivery as amount-unverified). */
+export type WhopMoneyCheck =
+  | { status: "ok" } // provider's figure matches ours (dollars or cents)
+  | { status: "absent" } // provider stated no amount — nothing was verified
+  | { status: "rejected"; reason: string }; // contradiction: never settle this
+
+/** Does a provider's amount figure describe the money we charged?
+ *
+ * Amounts arrive in dollars or cents, so EITHER representation of the same
+ * money is agreement. Exported because the reconciliation report asks this
+ * same question of stored rows: two encodings of the rule drift, and the
+ * report would then bless a figure the webhook itself rejects. */
+export function providerAmountAgrees(ourAmountUsd: number, providerAmount: number): boolean {
+  return providerAmount === ourAmountUsd || Math.round(providerAmount) / 100 === ourAmountUsd;
+}
+
+/** Does a provider's currency claim describe money we can accept? A provider
+ * that states none is not contradicting us; one that names anything but USD
+ * is. Shared with the report for the same reason as the amount rule. */
+export function providerCurrencyAgrees(providerCurrency: string | null): boolean {
+  return !providerCurrency || providerCurrency.toLowerCase() === "usd";
+}
+
 /** Validate provider money claims against the local payment (Phase 2 item 4).
- * Returns null when consistent/absent, otherwise a machine-readable reason. */
-export function validateWhopMoney(localAmountUsd: number, money: WhopMoney): string | null {
-  if (money.currency && money.currency !== "usd") return `currency-mismatch:${money.currency}`;
-  if (money.amountUsd == null) return null;
-  if (money.amountUsd === localAmountUsd) return null; // dollars
-  if (Math.round(money.amountUsd) / 100 === localAmountUsd) return null; // cents
-  return `amount-mismatch:${money.amountUsd}`;
+ * Amounts may be dollars or cents — accept when EITHER unit matches the local
+ * payment, reject on explicit mismatch. */
+export function validateWhopMoney(localAmountUsd: number, money: WhopMoney): WhopMoneyCheck {
+  if (!providerCurrencyAgrees(money.currency)) {
+    return { status: "rejected", reason: `currency-mismatch:${money.currency}` };
+  }
+  if (money.amountUsd == null) return { status: "absent" };
+  if (providerAmountAgrees(localAmountUsd, money.amountUsd)) return { status: "ok" };
+  return { status: "rejected", reason: `amount-mismatch:${money.amountUsd}` };
 }

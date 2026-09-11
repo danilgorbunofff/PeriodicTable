@@ -118,8 +118,9 @@ export async function POST(req: NextRequest) {
   }
 
   // Paid signal: validate money claims + reference before touching the ledger.
-  const moneyErr = validateWhopMoney(payment.amountUsd, money);
-  if (moneyErr) {
+  const check = validateWhopMoney(payment.amountUsd, money);
+  if (check.status === "rejected") {
+    const moneyErr = check.reason;
     await prisma.providerEvent.upsert({
       where: { providerEventId: eventId },
       create: { provider: "WHOP", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail: moneyErr, payload: payload as object },
@@ -170,6 +171,9 @@ export async function POST(req: NextRequest) {
       amountUsd: money.amountUsd,
       currency: money.currency,
       providerRef: money.providerRef ?? payment.providerRef,
+      // `absent` settles (the provider may state no amount), but it is recorded
+      // as unverified — /api/jobs/reconcile counts exactly these.
+      amountUnverified: check.status === "absent",
     });
     // Deterministic rejections (take-below-reserve, ledger-invariant) are
     // terminal: 200 + ERROR row routes to operator review, never a 500 loop.

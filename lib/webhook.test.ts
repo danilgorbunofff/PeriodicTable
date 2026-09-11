@@ -121,6 +121,37 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
   });
+  it("a delivery stating no amount settles, recorded as unverified", async () => {
+    // Providers may omit the figure. The charge is real either way, so it must
+    // settle — but the delivery carries the marker, because "nothing was
+    // cross-checked" and "the figures agreed" are different facts.
+    const p = await pendingPayment("wh2-t.dev", 12, null);
+    const res = await signed({
+      id: `wh-noamt-${Date.now()}`,
+      type: "payment.succeeded",
+      data: { status: "succeeded", id: `cs_noamt_${keyN++}`, metadata: { paymentId: p.id } },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
+
+    const paid = await prisma.payment.findUniqueOrThrow({ where: { id: p.id } });
+    expect(paid.status).toBe("PAID");
+    expect(paid.providerAmount).toBe(null);
+    const ev = await prisma.providerEvent.findFirstOrThrow({ where: { paymentId: p.id, outcome: "APPLIED" } });
+    expect(ev.detail).toBe("amount-unverified:provider-stated-none");
+  });
+  it("a delivery stating the amount is not marked unverified", async () => {
+    const p = await pendingPayment("wh2-t.dev", 20, null);
+    const res = await signed({
+      id: `wh-amt-${Date.now()}`,
+      type: "payment.succeeded",
+      data: { status: "succeeded", amount: 20, currency: "usd", id: `cs_amt_${keyN++}`, metadata: { paymentId: p.id } },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
+    const ev = await prisma.providerEvent.findFirstOrThrow({ where: { paymentId: p.id, outcome: "APPLIED" } });
+    expect(ev.detail).toBe(null);
+  });
 });
 
 /* Refund / chargeback unwind (Phase 7). Before this path existed a reversal
