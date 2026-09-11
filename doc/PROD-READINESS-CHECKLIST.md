@@ -10,7 +10,7 @@
 - [ ] `node -v` = 20+ (22 preferred), `npm -v` present, `psql`/`curl`/`python3` present
 - [ ] `git clone <repo>` + `npm ci` clean (no errors)
 - [ ] `.env` present locally, NOT committed (`git status --porcelain` shows no `.env`)
-- [ ] `npx prisma migrate deploy` (local DB) + `npx prisma db seed` succeed
+- [x] `npx prisma migrate deploy` (local DB) + `npx prisma db seed` succeed — ✅ 2026-09-11 on a throwaway local DB: all 6 migrations applied, then `seed ok: 122 elements, 8 startups, 26 stakes, 26 activity rows`. ⚠️ **Both commands read `.env` → Neon prod if `DATABASE_URL` is not overridden** (shell env beats `.env`), and `prisma db seed` is the **demo** seeder (`prisma/seed.ts`, 8 startups + 26 mock stakes) with **no environment guard** — it is exactly what `npm run db:clear-demo` exists to undo. The launch seeder is a separate, manual file (`prisma/launch-seed.ts`). Always pass `DATABASE_URL=` explicitly.
 - [ ] Vercel → project `periodic-table` → Build Command includes `prisma migrate deploy`
 
 ## 1. Codebase gates (automated)
@@ -25,57 +25,91 @@
 | Prod-env pass | same command **with** all prod secrets exported | `production config OK` |
 | Cron file present | `cat vercel.json` | 2 daily crons (outbox 04:00, screenshot 04:30) — Vercel cannot create crons from the dashboard, and Hobby allows only 2 jobs at once-a-day frequency |
 
+> ✅ **2026-09-11 — the whole gate is green with zero skips, for the first time on a real Postgres.** `npm run test:ci` → **314 passed (21 files), 0 skipped**; `npm run typecheck` exit 0; `npm run lint` 0 warnings/errors. This retires the DB suite that had been skipped indefinitely — including the new *"a Standard Webhooks delivery settles too"* case, which passes end-to-end (signature → `ProviderEvent` → `settlePayment` → stake applied). Both envelopes are exercised in one run: `verified via legacy signature` ×19, `verified via standard signature` ×1.
+>
+> Recipe — the container is `pt-test-pg` on port **55432** (`testu`/`testpw`; `-U postgres` fails, that role does not exist):
+> ```bash
+> PGPASSWORD=testpw psql -h 127.0.0.1 -p 55432 -U testu -d pttest -c "CREATE DATABASE pt_verify;"
+> DATABASE_URL="postgresql://testu:testpw@127.0.0.1:55432/pt_verify" npx prisma migrate deploy
+> TEST_DATABASE_URL="postgresql://testu:testpw@127.0.0.1:55432/pt_verify" npm run test:ci
+> ```
+> ⚠️ **Mind the asymmetry: `migrate deploy` reads `DATABASE_URL`, the suite reads `TEST_DATABASE_URL`** (which `lib/testDb.ts` copies onto `DATABASE_URL` for the app's Prisma singleton). Setting *only* `TEST_DATABASE_URL` makes `prisma` fall back to `.env` → **Neon production**. Today that is a harmless no-op (`No pending migrations to apply`), but the day a migration is pending it would apply it **to prod**. Always set both.
+
 Known gaps (do NOT flip real money until fixed — see §7):
 `requireProdEnv()` has zero runtime call sites (only `lib/env.test.ts`); `ADMIN_TOKEN` missing from `REQUIRED_PROD_ENV`;
-`lib/manage.ts` is backend-only by design in v1 (listing edits not shipped — a listing is set at checkout and is final); `REFUNDED` enum never written; Whop contract values in `lib/whop.ts` are guesses until proven with signed fixtures.
+`lib/manage.ts` is backend-only by design in v1 (listing edits not shipped — a listing is set at checkout and is final); `REFUNDED` enum never written;
+`WHOP_WEBHOOK_SECRET` has **no validator** in `lib/env.ts`, so a mistyped or placeholder value passes `check-prod-env` while the webhook silently stays broken — the only real check is a live delivery returning `200` (§3c).
+
+> ✅ Resolved 2026-09-11: the Whop signature contract is **no longer guesswork**. A genuine v1 delivery verified as Standard Webhooks, and signed fixtures for *both* envelopes now live in `lib/webhook.test.ts` (~11 cases). See §3c.
 
 ## 2. Data, domain, DNS, headers, read APIs
 
-- [ ] DB: `SELECT count(*) FROM "Element";` → **122** (1..118 + Hbar/-1, Ps/0, Uue/119, DM/999)
+- [x] DB: `SELECT count(*) FROM "Element";` → **122** (1..118 + Hbar/-1, Ps/0, Uue/119, DM/999) — ✅ 2026-09-11: prod `/api/stats` reports `elementsTotal:122, claimed:0, unclaimed:122, stakeCount:0, totalStakedUsd:0` (the API reads the same table). A freshly seeded local DB reports the same 122.
 - [ ] DNS (GoDaddy, do NOT touch mail rows): `A @ → 216.198.79.1`, `CNAME www → periodictable.lol.`
-- [ ] Apex `curl -sI https://periodictable.lol | head -3` → `308` → `https://www.periodictable.lol`
+- [x] Apex `curl -sI https://periodictable.lol | head -3` → `308` → `https://www.periodictable.lol` — ✅ 2026-09-11
 - [ ] `MX` + `email` + `secureserver` DKIM rows still present (GoDaddy mail intact; Resend uses different hostnames, no conflict)
-- [ ] Security headers on `https://www.periodictable.lol` (prod only): `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `X-Frame-Options: SAMEORIGIN`, `Permissions-Policy`, `Strict-Transport-Security`, `Content-Security-Policy` (see `next.config.mjs`)
+- [x] Security headers on `https://www.periodictable.lol` (prod only): `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `X-Frame-Options: SAMEORIGIN`, `Permissions-Policy`, `Strict-Transport-Security`, `Content-Security-Policy` (see `next.config.mjs`) — ✅ 2026-09-11: all six present in the live prod response.
   - ✅ `img-src` must include `https://*.microlink.io` (the wildcard is required — Microlink hands back a sharded shot host, live vs cached). This was too narrow until 2026-09-10; found by §4b, fixed in PR #4, confirmed in the live prod response headers.
   - ℹ️ CSP ships **production-only** (dev needs webpack `eval()`), so a CSP symptom never reproduces under `npm run dev` — always test the deployed URL.
-- [ ] All 6 read APIs return 200 on custom domain, <2000ms each:
+- [x] All 6 read APIs return 200 on custom domain, <2000ms each — ✅ 2026-09-11: all six `200`, slowest `0.47s` (well inside the 2000ms budget). NOTE: `/api/leaderboard` and `/api/live` do **not** exist — a `404` on those means the URL was guessed, not that the app is broken. As run:
 ```
 for p in /api/stats /api/elements /api/table-order "/api/board?tab=crowns" "/api/activity?limit=6" "/api/search?q=carbon"; do
   echo "== $p"; curl -s -o /dev/null -w "%{http_code} %{time_total}s\n" "https://www.periodictable.lol$p"
 done
 ```
-- [ ] `GET /api/stats` shape: `{elementsTotal:122, claimedElements, unclaimedElements (=total-claimed), stakeCount, totalStakedUsd}` — summed dollars, not row counts
-- [ ] `GET /api/elements` tiles carry `{symbol, pool, count, leader{domain,logoUrl,amount}|null}`
-- [ ] `GET /api/elements/Li` detail: stakes ranked desc, `prices{takeLead,joinMin}`, hidden bidders excluded
+- [x] `GET /api/stats` shape: `{elementsTotal:122, claimedElements, unclaimedElements (=total-claimed), stakeCount, totalStakedUsd}` — summed dollars, not row counts — ✅ 2026-09-11: exact shape observed on prod.
+- [x] `GET /api/elements` tiles carry `{symbol, pool, count, leader{domain,logoUrl,amount}|null}` — ✅ 2026-09-11
+- [x] `GET /api/elements/Li` detail: stakes ranked desc, `prices{takeLead,joinMin}`, hidden bidders excluded — ✅ 2026-09-11: returns `prices{takeLead:5,joinMin:5}`
 
 ## 3. Money / Whop (paused now, live last)
 
 ### 3a. Paused mode (current prod expectation)
-- [ ] `POST /api/checkout` (no flags) → `403 {"waitlist":true}` and modal shows Join-waitlist card
-- [ ] `BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused` → 2/2 pass
-- [ ] `POST /api/waitlist {email}` twice → same `id` (dedupe by email), one DB row
+- [x] `POST /api/checkout` (no flags) → `403 {"waitlist":true}` — ✅ 2026-09-11 on prod
+  - [x] …**and** the modal shows the Join-waitlist card — ✅ 2026-09-11 in a real browser on prod: tile → "Be the first — from $5" → modal body is the waitlist card, no checkout form rendered
+- [x] `BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused` → 2/2 pass — ✅ 2026-09-11: `2 passed, 0 skipped` (re-run after the script's webhook-signing fix, so the edited script is itself confirmed)
+- [x] `POST /api/waitlist {email}` twice → same `id` (dedupe by email), one DB row — ✅ 2026-09-11: rehearsal asserts "waitlist stores one row per email"
 
 ### 3b. Live flows (local sim: NO Whop keys → dev simulator; WITH keys → real sessions)
 ```
 BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 # full: BASE_URL=… ADMIN_TOKEN=… WHOP_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live
 ```
-- [ ] First claim $8 → 200 `{paymentId, checkoutUrl}` → `POST /api/dev/pay {pay}` → `paid` → tile leader = payer
-- [ ] Contested $5 join → lands #2, leader untouched; tie at leader total → `409 TIE`
-- [ ] Take $9 → `guaranteedTake:true, reservation.reservedTotal:9`; rival take → `409 RESERVATION_CONFLICT`; pay → crown flips
-- [ ] Reclaim $2 by former leader → restores #1 at $10 (cumulative)
-- [ ] Same `idempotencyKey` + same payload → returns ORIGINAL `paymentId`; different payload → `409 IDEMPOTENCY_CONFLICT`
-- [ ] Expired reservation (server `RESERVATION_TTL_MS=2000`, sleep 3s) settles as ordinary stake, no crown
-- [ ] Provider outage (Whop keys set, API down) → `502`, NO `checkoutUrl` (never a dead URL)
+- [x] First claim $8 → 200 `{paymentId, checkoutUrl}` → `POST /api/dev/pay {pay}` → `paid` → tile leader = payer — ✅ 2026-09-11
+- [x] Contested $5 join → lands #2, leader untouched; tie at leader total → `409 TIE` — ✅ 2026-09-11
+- [x] Take $9 → `guaranteedTake:true, reservation.reservedTotal:9`; rival take → `409 RESERVATION_CONFLICT`; pay → crown flips — ✅ 2026-09-11
+- [x] Reclaim $2 by former leader → restores #1 at $10 (cumulative) — ✅ 2026-09-11
+- [x] Same `idempotencyKey` + same payload → returns ORIGINAL `paymentId`; different payload → `409 IDEMPOTENCY_CONFLICT` — ✅ 2026-09-11
+- [x] Expired reservation (server `RESERVATION_TTL_MS=2000`, sleep 3s) settles as ordinary stake, no crown — ✅ 2026-09-11
+- [ ] Provider outage (Whop keys set, API down) → `502`, NO `checkoutUrl` (never a dead URL) — ⏳ **still open**: this is the one gate the local rehearsal skips, because it needs `WHOP_API_KEY` set and that flips the provider out of dev mode
+
+> ✅ **2026-09-11 — live rehearsal is green: 18 passed, 1 skipped** (the skip above). Evidence per gate is the script's own output; run as documented under §3b. Two things are required to reproduce it, and both are easy to get wrong:
+>
+> 1. **An isolated database.** Migrate + seed a throwaway DB (`ptrehearse` was used) and override `DATABASE_URL` in the shell — shell env beats `.env`, which points at Neon prod. Never rehearse against prod.
+> 2. **`WHOP_WEBHOOK_SECRET` set but `WHOP_API_KEY` deliberately *not*.** `whopEnabled()` requires **both**, so setting only the secret keeps `getProviderMode() === "dev"`, which keeps `/api/dev/pay` reachable (it `403`s whenever Whop is fully enabled) — that is what makes a charge-free money rehearsal possible. The trade-off is `whopPartiallyConfigured()` logging a dev-only checkout warning; harmless locally. Since the script only needs the secret to *sign* webhooks, this costs nothing.
+>
+> Server env used: `DATABASE_URL=<throwaway>`, `PAYMENTS_LIVE=true`, `NEXT_PUBLIC_PAYMENTS_LIVE=true`, `RESERVATION_TTL_MS=2000`, `ADMIN_TOKEN=<keychain>`, `WHOP_WEBHOOK_SECRET=<self-generated>`, on port 3100.
 
 ### 3c. Webhooks (needs `WHOP_WEBHOOK_SECRET`; sign like `rehearse-release.sh:sign_post`)
-- [ ] `payment.succeeded` with matching amount → `applied` once; replay same `id` → `duplicate`/`already-settled`
-- [ ] Statusless event → `ignored`, settled payment untouched
-- [ ] `payment.failed` → `failed`; later `succeeded` for same payment → `already-settled` (terminal)
-- [ ] Amount 999 vs local 7 → `amount-mismatch`, nothing applied
-- [ ] Missing/bad signature (either envelope) → rejected; unknown `paymentId` → recorded, nothing applied
-- [ ] ⚠️ Whop fixes the signature envelope when the webhook is created (`api_version`: v1 = Standard Webhooks `webhook-signature`; v2/v5 = legacy `x-whop-signature`). The two sign **different bytes** with the same secret, so implementing one and receiving the other 401s every delivery — silently, until the endpoint is auto-disabled. Both are accepted (dual-accept, 2026); on the first real delivery read the `[whop-webhook] verified via …` line in Vercel logs to learn which one actually arrives
-- [ ] Prove contract in test mode before live: endpoint shape, signature header name, payment-id location (`data.plan.metadata` vs `data.metadata`), paid event types — save signed fixtures as tests in `lib/whop.ts` area
+- [x] `payment.succeeded` with matching amount → `applied` once; replay same `id` → `duplicate`/`already-settled` — ✅ 2026-09-11
+- [x] Statusless event → `ignored`, settled payment untouched — ✅ 2026-09-11
+- [x] `payment.failed` → `failed`; later `succeeded` for same payment → `already-settled` (terminal) — ✅ 2026-09-11
+- [x] Amount 999 vs local 7 → `amount-mismatch`, nothing applied — ✅ 2026-09-11
+- [x] Missing/bad signature (either envelope) → rejected; unknown `paymentId` → recorded, nothing applied — ✅ 2026-09-11: unsigned → `401 {"error":"bad signature"}`; bogus Standard headers → `401` (proves the new header path executes and rejects cleanly rather than `500`ing); both envelopes accepted when genuinely signed
+
+#### ✅ RESOLVED 2026-09-11 — Whop sends **Standard Webhooks** (`api_version: "v1"`)
+
+The open question was which signature envelope Whop delivers, because the two sign **different bytes** with the same secret: get it wrong and every delivery `401`s silently, the provider retries for days, then auto-disables the endpoint — while the buyer's money is gone. Implementing one and receiving the other cannot be detected by a test suite that signs with the scheme it verifies (it was green for months). **The answer is now known from a real delivery, not a guess:**
+
+- **`api_version: "v1"` ⇒ Standard Webhooks.** The endpoint was registered as v1 and the first genuine delivery from Whop's dashboard returned `200` with `[whop-webhook] verified via standard signature`. Before commit `3f23d62` (deployed 2026-09-11, ~20 min prior) **every real delivery would have `401`ed.**
+- **Dual-accept stays, deliberately.** Legacy (`x-whop-signature`, hex over the body alone) is still accepted, because the envelope is fixed when the webhook resource is created — a differently-configured or re-created endpoint would otherwise silently break again. Coverage: a `lib/webhook.test.ts` case plus a rehearsal assertion that re-delivers the same event legacy-signed, so v2/v5 does not regress unnoticed.
+- **Instrument:** every delivery logs `[whop-webhook] verified via standard|legacy signature`. That one line answered the whole question — read it in Vercel logs on the first real payment.
+- **`payment.succeeded` never 2xx on a non-paid setup:** Whop's dashboard **"Send test event"** fixture is a car-detailing demo (`inv_xxxxxxxxxxxxxx`, "Ceramic Coating Package", `marcus@shinetime.example`, `api_version:"v1"`), and it is sent **twice** (~3 s apart). It carries no `plan.metadata.paymentId`, so it always lands as `IGNORED / no-paymentId` and **can never move money**. Keep it as a negative test: `invoice.paid` *is* in `PAID_EVENT_TYPES` and the fixture says `status:"paid"`, yet the payment-id gate fails closed first — the correct failure mode.
+- ✅ **Signature secret confirmed genuine** (the signature verified), and **payment-id location confirmed aligned**: our checkout writes `data.plan.metadata.paymentId` + `metadata.paymentId` (`lib/whop.ts:46,51`), which is exactly what `paymentIdFromWhopPayload` reads first (`lib/whop.ts:151`). Real payments will settle.
+- ⏳ **Still unproven:** no *real* (non-test) Whop event has ever been received, so live settlement against actual Whop money is untested. That is what the `$1` claim in §7 exercises — watch for the `verified via standard signature` line and the `applied` outcome on that first one.
+- ℹ️ **Unrelated but worth knowing:** `WHOP_API` in `lib/whop.ts:26` still points at the deprecated `https://api.whop.com/api/v2`. This is **independent** of the webhook envelope (the webhook's `api_version` describes the delivery format, not the checkout API), so nothing is broken — but it is a maintenance item to track.
+  - **Not proven:** exact live event type names beyond `invoice.paid` (seen in the fixture), and whether failures arrive as `invoice.payment_failed` or another spelling. `PAID_EVENT_TYPES`/`PAID_STATUSES` in `lib/whop.ts:166-175` remain the best available guesses for anything not yet observed.
+- ✅ 2026-09-11: signed fixtures for **both** envelopes now exist in `lib/webhook.test.ts` (~11 cases: standard-over-body-alone and legacy-over-signed-form both rejected), so the contract is locked in tests rather than prose.
+- ℹ️ Register the webhook as **explicit events** (API) or **All** (dashboard) — a narrower selection can omit a reversal/chargeback type, and a missed reversal never unwinds the stake.
 
 ## 4. Email + background jobs
 
@@ -128,7 +162,9 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 ## 5. Trust, abuse, admin, frontend honesty
 
 - [ ] Turnstile: `TURNSTILE_SECRET` + `NEXT_PUBLIC_TURNSTILE_SITEKEY` from Cloudflare set; without them bot checks silently pass (`lib/abuse.ts`) — must not launch without
-- [ ] Upstash: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` set; without them rate limits are per-instance memory (`lib/rateStore.ts` fails open, bypassable on serverless)
+  - [x] both vars present in Vercel production, 2026-09-11
+  - [ ] …**and** the widget actually renders on a live checkout — blocked until launch: the live checkout form is compiled out while paused (see the `NEXT_PUBLIC_PAYMENTS_LIVE` note below), so this cannot be checked on the paused site
+- [x] Upstash: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` set — ✅ 2026-09-11: both present in Vercel production and `Encrypted`. (Earlier notes here said "not set / rate limits degrade to per-instance memory" — that was wrong. The *values* have not been exercised; a live probe is the only way to prove the store is reachable rather than a placeholder.)
 - [ ] `ADMIN_TOKEN` long random set; all `/api/admin/*` → `403` without it; report → triage → HIDE → verify → restore round-trip (see hand journey J6)
 - [ ] Kill switch: `PAYMENTS_LIVE=false` + `NEXT_PUBLIC_PAYMENTS_LIVE=false` → checkout flips to waitlist in <2min via env-only redeploy (see `ops/rollback.md`)
 - [ ] Grid/stats failure honesty: block API (offline/devtools) → error panels, NEVER fake all-`Unclaimed $5`/zeros. Reference pattern: `TerritoryView.tsx` error panel vs `app/page.tsx`
@@ -139,14 +175,21 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 
 ## 6. New-user hand journeys (do all, record evidence)
 
-- [ ] **J1 Browse:** open `/` desktop + mobile → table pans/zooms, tiles show claim state/price/leader, no layout break at 360px
-- [ ] **J2 Search:** open search → type `carbon` → keyboard navigates, Enter opens Li drawer; screen-reader names intact
-- [ ] **J3 Claim (paused):** click money action → waitlist card (not checkout); join waitlist → success toast
+- [x] **J1 Browse:** open `/` desktop + mobile → table pans/zooms, tiles show claim state/price/leader, no layout break at 360px
+- [x] **J2 Search:** open search → type `carbon` → keyboard navigates, Enter opens Li drawer; screen-reader names intact
+- [x] **J3 Claim (paused):** click money action → waitlist card (not checkout); join waitlist → success toast
 - [ ] **J4 Claim (live sim):** fill title/pitch/URL → checkout → pay → `?paid=SYM` toast + tiles/ranks refresh, receipt email arrives
 - [ ] **J5 Outbid/reclaim:** second user takes tile → victim outbid email → victim clicks reclaim link → prefilled amount → pays → crown returns
 - [ ] **J6 Report/moderate:** report a stake → confirm modal → admin triage → HIDE → tile/profile/`/go` hide → restore → reappears
 - [ ] **J7 Unsub (v1):** unsubscribe from a receipt footer → emails stop, the stake still counts, homepage shows the `?unsub=done` toast (unknown token → `?unsub=unknown`). **There is no manage journey in v1** — a listing is final at checkout; `POST /api/manage/request` answers politely and emails no link (§4c). Listing edits are v2.
-- [ ] **J8 Reduced-motion + keyboard:** `prefers-reduced-motion` → static but legible; Esc closes modals/drawers in order; 44px touch targets; no toast-behind-modal; axe E2E clean (today: static string tests only — run a real browser pass)
+- [ ] **J8 Reduced-motion + keyboard:** `prefers-reduced-motion` → static but legible; Esc closes modals/drawers in order; 44px touch targets; no toast-behind-modal; axe E2E clean (today: static string tests only — run a real browser pass) — **axe + reduced-motion done, Esc order + 44px targets still open**
+
+> **Journeys J1/J2/J3/J8 run against live paused production, 2026-09-11** (agent-browser, desktop 1280×577 + mobile 360×640). Evidence:
+> - **J1 ✅** Real `role="grid"` of 122 `gridcell`s, every tile `unclaimed` (prod has 0 stakes), SR names `"C Carbon, unclaimed"`. Zoom out/in + Fit table present. **360px: zero horizontal overflow** (`innerWidth` 360 = `documentElement.scrollWidth` 360).
+> - **J2 ✅** Search is a proper ARIA 1.2 combobox: focus **stays on the input** while `aria-activedescendant` moves `search-hit-1→2→3` **and resolves to a real element** (the check that usually fails silently); exactly one `aria-selected="true"`; ArrowUp reverses; `ca` → 6 results; Enter opens the **arrow-selected** result (Scandium), not the first.
+> - **J8 ✅ (axe + reduced-motion)** axe `wcag2a,wcag2aa` → **0 violations / 22 passes**. The single "incomplete" was `color-contrast` on 314 decorative `.bg-sym-tw` watermark nodes; measured manually → **13.13–20.17 ratio, 0 failures**, and the layer root is `aria-hidden` (`components/BackgroundSymbols.tsx:88`), so it is correctly hidden from AT. Reduced-motion verified live via CDP media emulation (`matchMedia` true, `animationName: none`, `transform: none`, still visible at `opacity: .125`). **Still open in J8:** Esc-closing order (note: the element drawer is **not** `role="dialog"`) and 44px touch targets.
+> - **⛔ J3 found a real launch-blocking bug — fixed in `components/Modals.tsx`.** Clicking a money action correctly rendered the paused waitlist card (no `Continue to checkout`, no `cf-turnstile`, no `No refunds` anywhere in the DOM) and joining wrote a row with `source: "checkout-paused"`. **But `joinWaitlist()`'s success path called `onDone(...)` + `onClose()` and never `setWaitBusy(false)`** — relying on unmount to clear the flag. `CheckoutPreview` is mounted **once** at `app/page.tsx:364` and `<Modal open>` never unmounts it, so after **one** successful join the button stayed `"Joining…" [disabled]` **permanently and site-wide** — `if (waitBusy) return;` swallowed every later submit, plus the typed email leaked to other elements. Reproduced live on prod (joined Scandium, then Carbon showed the dead button); verified fixed on a local server — two elements, two successful joins. **This was the only conversion action on the site while paused.**
+> - Existing tests cover the waitlist **API/DB** (`manage.test.ts`) but **nothing covered the client component's state**, which is why the suite never caught this. Consider a component-level test for the paused join path.
 
 ## 7. GO / NO-GO (all must be GO)
 
@@ -158,6 +201,39 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 | Email/jobs | fresh Resend key, inbox receipt received, cron draining outbox+screenshots |
 | Trust/frontend | Turnstile + Upstash + ADMIN_TOKEN live, no HIDDEN leaks, honest error panels, kill switch rehearsed |
 | Flip (LAST) | `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Whop live keys + webhook `https://www.periodictable.lol/api/webhooks/whop` registered → redeploy → $1 live claim → refund/keep → announce |
+
+### Live-state audit of production env, 2026-09-11
+
+Read from the Vercel API, not from memory. Two of these contradict what this
+checklist said earlier, so they are recorded here rather than fixed quietly.
+
+- **`NEXT_PUBLIC_PAYMENTS_LIVE` exists but is EMPTY** (`""`, length 0). It is
+  not unset and not `false` and not `true` — it is a zero-length value.
+  `lib/flags.ts` compares it with `=== "true"`, so an empty value is `false`:
+  the client is paused. **The server has no `PAYMENTS_LIVE` at all**, so it is
+  paused too. Both halves are consistent today, which is why nothing looks
+  broken.
+- **The consequence is bigger than a flag.** `components/Modals.tsx:121` is
+  `const paused = !paymentsLiveClient()`. With `NEXT_PUBLIC_PAYMENTS_LIVE`
+  inlined at build time as `""`, `paymentsLiveClient()` folds to `false`, so
+  `paused` folds to `true` and the bundler drops the live checkout branch as
+  dead code. Proof from the deployed chunks for `26f2d5e` (confirmed as the
+  deployed commit via `meta.githubCommitSha`): the page chunk 85,449 bytes
+  contains `How claiming works` and `waitlist` (×4) but **zero** occurrences of
+  `cf-turnstile`, `Continue to checkout`, `No refunds`, or `0x4AAAAA…`. The
+  attest checkbox and the Turnstile widget are not shipped to the browser at
+  all right now.
+- This is why the Turnstile box in §5 can only be closed after launch: there is
+  no live checkout to inspect until the flip rebuilds with the flag set.
+- **The flip must therefore include a redeploy.** `NEXT_PUBLIC_*` is inlined at
+  build time; changing the value without rebuilding ships the old bundle and
+  the site keeps showing the waitlist card forever.
+- The failure mode to watch for: if `PAYMENTS_LIVE` went live while
+  `NEXT_PUBLIC_PAYMENTS_LIVE` stayed empty, no widget renders, no token is ever
+  sent, and `verifyTurnstile` returns `false` — so every real checkout 400s with
+  "Bot check failed." with no server-side signal that anything is wrong.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` **are** present in
+  production. Corrections applied to §5 and the appendix below.
 
 ## Appendix — copy-paste cheat sheet
 
@@ -172,4 +248,4 @@ BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused
 BASE_URL=http://localhost:3100 ADMIN_TOKEN=… WHOP_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live
 curl -s https://www.periodictable.lol/api/stats | python3 -m json.tool
 ```
-Env vars (values in Vercel only): `DATABASE_URL`, `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL=https://www.periodictable.lol`, `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `CRON_SECRET`, `PAYMENTS_LIVE`, `NEXT_PUBLIC_PAYMENTS_LIVE`, `ADMIN_TOKEN`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional).
+Env vars (values in Vercel only): `DATABASE_URL`, `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL=https://www.periodictable.lol`, `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `CRON_SECRET`, `PAYMENTS_LIVE`, `NEXT_PUBLIC_PAYMENTS_LIVE`, `ADMIN_TOKEN`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional). All of these exist in production as of 2026-09-11 except `PAYMENTS_LIVE`, which is deliberately absent while paused — and `NEXT_PUBLIC_PAYMENTS_LIVE`, which exists but is an empty string. See the live-state audit in §7.

@@ -141,6 +141,7 @@ export function CheckoutPreview({
         return;
       }
       onDone("You're on the waitlist — we'll be in touch.");
+      setWaitBusy(false);
       onClose();
     } catch {
       setWaitErr("Network error. Try again.");
