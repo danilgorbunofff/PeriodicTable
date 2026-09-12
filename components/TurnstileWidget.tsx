@@ -5,7 +5,15 @@ import { useEffect, useRef } from "react";
 declare global {
   interface Window {
     turnstile?: {
-      render: (container: HTMLElement, opts: { sitekey: string }) => string;
+      render: (
+        container: HTMLElement,
+        opts: {
+          sitekey: string;
+          callback?: (token: string) => void;
+          "expired-callback"?: () => void;
+          "error-callback"?: () => void;
+        }
+      ) => string;
       remove: (widgetId: string) => void;
     };
   }
@@ -47,8 +55,18 @@ function loadTurnstile(): Promise<void> {
  * open a claim form need it, and loading it after this div is committed keeps
  * render ordering deterministic.
  */
-export function TurnstileWidget({ sitekey }: { sitekey: string }) {
+export function TurnstileWidget({
+  sitekey,
+  onToken,
+}: {
+  sitekey: string;
+  onToken?: (token: string | null) => void;
+}) {
   const container = useRef<HTMLDivElement>(null);
+  // Kept in a ref so the effect below never has to re-render the widget when
+  // the caller passes a fresh closure.
+  const notify = useRef(onToken);
+  notify.current = onToken;
 
   useEffect(() => {
     let widgetId: string | null = null;
@@ -56,14 +74,23 @@ export function TurnstileWidget({ sitekey }: { sitekey: string }) {
     loadTurnstile()
       .then(() => {
         if (cancelled || !container.current || !window.turnstile) return;
-        widgetId = window.turnstile.render(container.current, { sitekey });
+        widgetId = window.turnstile.render(container.current, {
+          sitekey,
+          callback: (token: string) => notify.current?.(token),
+          // A token is single-use and lives 300s: drop it rather than let the
+          // form submit a dead one and blame the visitor.
+          "expired-callback": () => notify.current?.(null),
+          "error-callback": () => notify.current?.(null),
+        });
       })
       .catch(() => {
         // Blocked or offline. The server still gates on TURNSTILE_SECRET, so a
         // missing token surfaces as the standard "Bot check failed." message.
+        notify.current?.(null);
       });
     return () => {
       cancelled = true;
+      notify.current?.(null);
       if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
     };
   }, [sitekey]);

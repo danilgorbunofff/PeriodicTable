@@ -86,3 +86,72 @@ describe("abuse guards", () => {
     }
   });
 });
+
+/* A refused token is a refused payment, and the buyer sees the same 400 either
+ * way — so the reason has to reach the logs or nobody can tell a broken widget
+ * from a bot wave from a bad `remoteip`. */
+describe("verifyTurnstile", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const stubVerify = (payload: unknown) => {
+    const bodies: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: unknown[]) => {
+        bodies.push(String((args[1] as { body: URLSearchParams }).body));
+        return new Response(JSON.stringify(payload), { status: 200 });
+      })
+    );
+    return bodies;
+  };
+
+  it("surfaces Cloudflare's error code when a token is refused", async () => {
+    vi.stubEnv("TURNSTILE_SECRET", "test-secret");
+    const bodies = stubVerify({ success: false, "error-codes": ["invalid-input-response"] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { verifyTurnstile } = await import("./abuse");
+
+    expect(await verifyTurnstile("tok", "1.2.3.4")).toBe(false);
+    expect(warn.mock.calls.flat().join(" ")).toContain("invalid-input-response");
+    expect(bodies[0]).toContain("remoteip=1.2.3.4");
+  });
+
+  it("omits remoteip when the caller has no IP to send", async () => {
+    vi.stubEnv("TURNSTILE_SECRET", "test-secret");
+    const bodies = stubVerify({ success: true });
+    const { verifyTurnstile } = await import("./abuse");
+
+    expect(await verifyTurnstile("tok", null)).toBe(true);
+    expect(bodies[0]).not.toContain("remoteip");
+  });
+
+  it("blocks a missing token without calling Cloudflare, and says so", async () => {
+    vi.stubEnv("TURNSTILE_SECRET", "test-secret");
+    const bodies = stubVerify({ success: true });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { verifyTurnstile } = await import("./abuse");
+
+    expect(await verifyTurnstile(undefined, "1.2.3.4")).toBe(false);
+    expect(bodies).toHaveLength(0);
+    expect(warn.mock.calls.flat().join(" ")).toContain("no token");
+  });
+
+  it("fails closed, and loudly, when siteverify is unreachable", async () => {
+    vi.stubEnv("TURNSTILE_SECRET", "test-secret");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNRESET");
+      })
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { verifyTurnstile } = await import("./abuse");
+
+    expect(await verifyTurnstile("tok", "1.2.3.4")).toBe(false);
+    expect(warn.mock.calls.flat().join(" ")).toContain("unreachable");
+  });
+});

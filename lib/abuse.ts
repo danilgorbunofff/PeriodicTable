@@ -8,7 +8,12 @@ export function turnstileEnabled(): boolean {
 
 export async function verifyTurnstile(token: string | null | undefined, ip?: string | null): Promise<boolean> {
   if (!turnstileEnabled()) return true;
-  if (!token) return false;
+  if (!token) {
+    // The widget is the only source of this token, so a missing one means the
+    // form never produced it. That is a bug in our own page, not a bot.
+    console.warn("turnstile: no token on request — checkout blocked");
+    return false;
+  }
   try {
     const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
@@ -19,9 +24,20 @@ export async function verifyTurnstile(token: string | null | undefined, ip?: str
         ...(ip ? { remoteip: ip } : {}),
       }),
     });
-    const json = (await res.json()) as { success?: boolean };
+    const json = (await res.json()) as { success?: boolean; "error-codes"?: string[] };
+    if (json.success !== true) {
+      // Cloudflare's code is the only thing that separates a duplicate token from
+      // a stale one from a wrong `remoteip` — and the buyer sees the same 400 for
+      // all of them. Codes plus an ip presence flag only: never the token, never
+      // the secret, never the raw address.
+      console.warn(
+        `turnstile: siteverify rejected (${json["error-codes"]?.join(",") ?? "no error-codes"}) remoteip=${ip ? "sent" : "omitted"}`
+      );
+    }
     return json.success === true;
-  } catch {
+  } catch (err) {
+    // Fail closed, but audibly: a broken siteverify is a dead payment path.
+    console.warn(`turnstile: siteverify unreachable — ${err instanceof Error ? err.message : "unknown error"}`);
     return false;
   }
 }

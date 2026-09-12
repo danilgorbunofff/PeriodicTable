@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Modal } from "./Modal";
@@ -70,6 +70,9 @@ export function CheckoutPreview({
   const [priceMoved, setPriceMoved] = useState<number | null>(null);
   const [waitErr, setWaitErr] = useState<string | null>(null);
   const [waitBusy, setWaitBusy] = useState(false);
+  // Token handed to us by the widget's callback. Preferred over scraping the
+  // hidden field: the DOM can hold a stale or empty input from a previous render.
+  const turnstileRef = useRef<string | null>(null);
   const { data } = useSWR<ElementDetail>(open && el ? `/api/elements/${el.symbol}` : null, (url: string) =>
     fetchJson(url, isElementDetail)
   );
@@ -158,10 +161,11 @@ export function CheckoutPreview({
     setServerField(null);
     setPriceMoved(null);
     try {
-      const turnstileToken =
-        (typeof document !== "undefined" &&
-          (document.querySelector<HTMLInputElement>('[name="cf-turnstile-response"]')?.value || undefined)) ||
-        undefined;
+      const domToken =
+        typeof document !== "undefined"
+          ? document.querySelector<HTMLInputElement>('[name="cf-turnstile-response"]')?.value || undefined
+          : undefined;
+      const turnstileToken = turnstileRef.current ?? domToken;
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -386,7 +390,12 @@ export function CheckoutPreview({
         <span>I am 18+ and I own or may promote this URL. No refunds/withdrawals — stake = ad inventory.</span>
       </label>
       {process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ? (
-        <TurnstileWidget sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY} />
+        <TurnstileWidget
+          sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY}
+          onToken={(t) => {
+            turnstileRef.current = t;
+          }}
+        />
       ) : null}
       <ChunkyButton
         type="submit"
