@@ -35,7 +35,16 @@ export async function createWhopCheckoutSession(params: {
   email?: string | null;
   redirectAfterPaid: string;
 }): Promise<WhopSession | null> {
-  if (!whopEnabled()) return null;
+  if (!whopEnabled()) {
+    console.warn(
+      `whop: checkout session unavailable — missing ${
+        [!process.env.WHOP_API_KEY && "WHOP_API_KEY", !process.env.WHOP_WEBHOOK_SECRET && "WHOP_WEBHOOK_SECRET"]
+          .filter(Boolean)
+          .join(" + ") || "nothing"
+      }`
+    );
+    return null;
+  }
   try {
     const body = {
       plan: {
@@ -64,13 +73,35 @@ export async function createWhopCheckoutSession(params: {
       },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // A rejected checkout is the difference between a buyer and no sale, and
+      // the reason lives only in this response. Report it: the status, the
+      // provider's own message, and whether the configured key is even shaped
+      // like an API key. Never the key itself.
+      const detail = await res.text().catch(() => "");
+      const auth = (process.env.WHOP_API_KEY ?? "").startsWith("apik_") ? "apik" : "unexpected-format";
+      console.warn(
+        `whop: checkout_sessions rejected (HTTP ${res.status}, key=${auth})` +
+          (detail ? ` — ${detail.replace(/\s+/g, " ").slice(0, 300)}` : "")
+      );
+      return null;
+    }
     const json = await res.json();
     const checkoutUrl: string | undefined = json?.checkout_url ?? json?.data?.checkout_url ?? json?.url;
     const providerRef: string | undefined = json?.id ?? json?.data?.id;
-    if (!checkoutUrl || !providerRef) return null;
+    if (!checkoutUrl || !providerRef) {
+      console.warn(
+        `whop: checkout_sessions response missing ${[!checkoutUrl && "checkout_url", !providerRef && "id"]
+          .filter(Boolean)
+          .join(" + ")} — keys: ${Object.keys(json ?? {}).join(",") || "none"}`
+      );
+      return null;
+    }
     return { checkoutUrl, providerRef };
-  } catch {
+  } catch (err) {
+    console.warn(
+      `whop: checkout_sessions request failed — ${err instanceof Error ? err.message : String(err)}`
+    );
     return null;
   }
 }

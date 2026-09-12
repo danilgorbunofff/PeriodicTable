@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { faviconFor, shotUrlFor, previewFor, jsonShotUrlFor, probeShot } from "./screenshots";
 import { honeypotCaught, attestValid, turnstileEnabled } from "./abuse";
+import { createWhopCheckoutSession } from "./whop";
 
 describe("previews", () => {
   it("prefers stored shot, then live shot, then favicon", () => {
@@ -153,5 +154,115 @@ describe("verifyTurnstile", () => {
 
     expect(await verifyTurnstile("tok", "1.2.3.4")).toBe(false);
     expect(warn.mock.calls.flat().join(" ")).toContain("unreachable");
+  });
+});
+
+/* Four different ways for the provider call to fail all returned the same bare
+ * `null`, so the buyer saw one generic 502 and the reason died with the
+ * request. A refused checkout is a sale that did not happen — it has to say
+ * why, without ever putting the API key in the log. */
+describe("createWhopCheckoutSession", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const params = {
+    paymentId: "pay_1",
+    amountUsd: 10,
+    title: "Hydrogen",
+    elementSymbol: "H",
+    email: "buyer@example.com",
+    redirectAfterPaid: "https://periodictable.lol/pay/pay_1",
+  };
+
+  const stubProvider = (status: number, payload: unknown) => {
+    const calls: { url: string; auth: string }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown, init: unknown) => {
+        const headers = (init as { headers: Record<string, string> }).headers;
+        calls.push({ url: String(url), auth: headers.Authorization });
+        return new Response(typeof payload === "string" ? payload : JSON.stringify(payload), { status });
+      })
+    );
+    return calls;
+  };
+
+  const liveKeys = () => {
+    vi.stubEnv("WHOP_API_KEY", "apik_test");
+    vi.stubEnv("WHOP_WEBHOOK_SECRET", "whsec_test");
+  };
+
+  it("reports the provider's status and message when it refuses the session", async () => {
+    liveKeys();
+    const calls = stubProvider(401, { error: { status: 401, message: "Your API Key is invalid." } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await createWhopCheckoutSession(params)).toBeNull();
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).toContain("HTTP 401");
+    expect(logged).toContain("Your API Key is invalid");
+    expect(logged).toContain("key=apik");
+    expect(logged).not.toContain("apik_test");
+    expect(calls[0].auth).toContain("apik_test");
+  });
+
+  it("names the field a shape-shifted response dropped", async () => {
+    liveKeys();
+    stubProvider(200, { id: "chs_1", status: "open" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await createWhopCheckoutSession(params)).toBeNull();
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).toContain("missing checkout_url");
+    expect(logged).toContain("keys: id,status");
+  });
+
+  it("returns the session the provider handed back, quietly", async () => {
+    liveKeys();
+    stubProvider(200, { id: "chs_1", checkout_url: "https://whop.com/checkout/chs_1" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await createWhopCheckoutSession(params)).toEqual({
+      checkoutUrl: "https://whop.com/checkout/chs_1",
+      providerRef: "chs_1",
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("flags a response that carries the url but no provider ref", async () => {
+    liveKeys();
+    stubProvider(200, { checkout_url: "https://whop.com/checkout/chs_1" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(warn.mock.calls.flat().join(" ")).toContain("missing id");
+  });
+
+  it("names the missing key instead of calling the provider without one", async () => {
+    vi.stubEnv("WHOP_API_KEY", "");
+    vi.stubEnv("WHOP_WEBHOOK_SECRET", "whsec_test");
+    const calls = stubProvider(200, {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(calls).toHaveLength(0);
+    expect(warn.mock.calls.flat().join(" ")).toContain("WHOP_API_KEY");
+  });
+
+  it("survives a provider that never answers, and says what happened", async () => {
+    liveKeys();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNRESET");
+      })
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(warn.mock.calls.flat().join(" ")).toContain("ECONNRESET");
   });
 });
