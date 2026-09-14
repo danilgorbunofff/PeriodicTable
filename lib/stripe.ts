@@ -35,6 +35,25 @@ export const stripePartiallyConfigured = () =>
 
 const STRIPE_API = "https://api.stripe.com/v1";
 
+/** Product tax code attached to every line item.
+ *
+ * Managed Payments is enabled on this account (it is what makes Stripe the
+ * merchant of record for tax), and under it a checkout session with a line item
+ * that carries no eligible tax code is rejected outright — HTTP 400, no session
+ * created, the buyer sees our generic 502. This omission was invisible in dev
+ * mode, which never reaches Stripe, and it took the live-mode log line to
+ * surface.
+ *
+ * `txcd_10000000` — "General – Electronically Supplied Services" — is Managed
+ * Payments' own general category for a digital service delivered through the
+ * internet with minimal human involvement: a paid tile is exactly that, and the
+ * more specific categories (hosting, software, media, courses) all describe
+ * something else. An ineligible code is refused as hard as a missing one, so
+ * this is a reviewed constant rather than an env var: reclassifying the product
+ * for tax is a decision to deploy, not to flip.
+ * https://docs.stripe.com/payments/managed-payments/eligibility#product-tax-code-requirements */
+const PRODUCT_TAX_CODE = "txcd_10000000";
+
 export type StripeSession = { checkoutUrl: string; providerRef: string };
 
 export async function createStripeCheckoutSession(params: {
@@ -77,6 +96,7 @@ export async function createStripeCheckoutSession(params: {
     // missed *100 charges a nickel for a five-dollar element.
     body.set("line_items[0][price_data][unit_amount]", String(Math.round(params.amountUsd * 100)));
     body.set("line_items[0][price_data][product_data][name]", params.title);
+    body.set("line_items[0][price_data][product_data][tax_code]", PRODUCT_TAX_CODE);
     // Metadata goes on BOTH the session and the payment intent.
     //
     // The session copy covers checkout.session.* deliveries. The intent copy is

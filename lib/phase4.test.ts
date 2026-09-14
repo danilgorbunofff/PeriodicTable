@@ -280,6 +280,18 @@ describe("createStripeCheckoutSession", () => {
     expect(body.get("mode")).toBe("payment");
   });
 
+  // Managed Payments refuses the session outright — HTTP 400, no checkout ever
+  // created — when the line item has no eligible product tax code, and dev mode
+  // cannot catch it because /pay/[paymentId] never calls Stripe. Pin the field.
+  it("tags the line item with an eligible product tax code", async () => {
+    liveKeys();
+    const calls = stubProvider(200, { id: "cs_1", url: "https://c.stripe.com/cs_1" });
+
+    await createStripeCheckoutSession(params);
+    const body = new URLSearchParams(calls[0].body);
+    expect(body.get("line_items[0][price_data][product_data][tax_code]")).toBe("txcd_10000000");
+  });
+
   it("writes the payment id to the session and to the intent", async () => {
     liveKeys();
     const calls = stubProvider(200, { id: "cs_1", url: "https://c.stripe.com/cs_1" });
