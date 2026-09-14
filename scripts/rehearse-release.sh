@@ -12,11 +12,23 @@
 #   refused, and one case asserts exactly that.
 #   Expiry coverage needs RESERVATION_TTL_MS=2000 on the server (else skipped).
 #
-# Requires: curl, python3. Server needs a migrated + seeded database.
+# Requires: curl, and a working python3 (falls back to python). On Windows the
+# Store alias stub for python3 resolves on PATH but cannot run, so the probe
+# below executes the candidate instead of trusting `command -v`.
+# Server needs a migrated + seeded database.
 #
 # Convention: call `call <args...>` (runs in THIS shell, sets $BODY/$STATUS),
 # never in $(...) — subshells cannot propagate variables under set -u.
 set -euo pipefail
+
+# MSYS rewrites path-shaped argv *and* environment values when it launches a
+# native (non-msys) executable — "/pay/abc" becomes "C:/Program Files/Git/pay/abc",
+# which corrupts values python is asked to validate. These switches are read only
+# by MSYS, so on macOS/Linux they are inert. Paths handed to python anyway go
+# through winpath() below, so nothing depends on the rewrite.
+export MSYS2_ARG_CONV_EXCL='*'
+export MSYS2_ENV_CONV_EXCL='*'
+export MSYS_NO_PATHCONV=1
 
 BASE="${BASE_URL:?set BASE_URL}"
 MODE="${1:-live}"
@@ -25,16 +37,31 @@ PASS=0
 SKIP=0
 CALLN=0
 TMPD=$(mktemp -d)
-trap 'rm -rf "$TMPD" /tmp/whbody.json' EXIT
+# Paths interpolated into the python snippets below must be readable by the
+# resolved interpreter. A native Windows python cannot open "/tmp/...", so
+# msys gets asked for the mixed form ("C:/..."), which the shell also accepts.
+# Absent cygpath (macOS, Linux) this is the identity.
+winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+# Same reason, other direction: with rewriting off, a native curl no longer has
+# "/dev/null" translated for it, so it needs the platform's own null device.
+NULLDEV=/dev/null
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) NULLDEV=NUL ;; esac
+TMPD=$(winpath "$TMPD")
+trap 'rm -rf "$TMPD"' EXIT
 BODY="$TMPD/body.txt"
 STATUS="$TMPD/status.txt"
+WHBODY="$TMPD/whbody.json"
 
 fail() { echo "❌ FAIL: $1${2:+ — $2}"; exit 1; }
 pass() { PASS=$((PASS + 1)); echo "✓ $1"; }
 skip() { SKIP=$((SKIP + 1)); echo "- SKIP: $1"; }
 need() { command -v "$1" >/dev/null || fail "missing tool" "$1"; }
 need curl
-need python3
+PY=""
+for _c in python3 python; do
+  if command -v "$_c" >/dev/null 2>&1 && "$_c" -c 'import sys' >/dev/null 2>&1; then PY="$_c"; break; fi
+done
+[ -n "$PY" ] || fail "missing tool" "python3 (or python)"
 
 call() { # call METHOD PATH [DATA] [HEADER]... -> $BODY + $STATUS
   local method="$1" path="$2" data="${3-}"
@@ -51,7 +78,7 @@ call() { # call METHOD PATH [DATA] [HEADER]... -> $BODY + $STATUS
   sed '$d' "$TMPD/out.txt" > "$BODY"
 }
 st() { cat "$STATUS"; }
-jget() { python3 -c "import json,sys; print(json.load(open('$BODY'))$1)"; }
+jget() { "$PY" -c "import json,sys; print(json.load(open('$BODY'))$1)"; }
 CK1() { call POST /api/checkout "$1"; }
 admin_call() { # admin_call METHOD PATH [DATA]
   local method="$1" path="$2" data="${3:-}"
@@ -63,11 +90,11 @@ admin_call() { # admin_call METHOD PATH [DATA]
   fi
 }
 sign_post() { # sign_post PATH JSON_BODY [TS_OFFSET] — Stripe envelope (t=...,v1=...)
-  echo "$2" > /tmp/whbody.json
+  echo "$2" > "$WHBODY"
   local ts sig
   ts=$(( $(date +%s) + ${3:-0} ))
-  sig=$(WHS_TS="$ts" python3 -c "import hmac,hashlib,os; key=os.environ['STRIPE_WEBHOOK_SECRET'].encode(); signed=('%s.' % os.environ['WHS_TS']).encode() + open('/tmp/whbody.json','rb').read(); print(hmac.new(key, signed, hashlib.sha256).hexdigest())")
-  curl -s --max-time 15 -w "\n%{http_code}" -X POST "$BASE$1" -H 'Content-Type: application/json' -H "stripe-signature: t=$ts,v1=$sig" --data-binary @/tmp/whbody.json > "$TMPD/out.txt"
+  sig=$(WHS_TS="$ts" WHBODY="$WHBODY" "$PY" -c "import hmac,hashlib,os; key=os.environ['STRIPE_WEBHOOK_SECRET'].encode(); signed=('%s.' % os.environ['WHS_TS']).encode() + open(os.environ['WHBODY'],'rb').read(); print(hmac.new(key, signed, hashlib.sha256).hexdigest())")
+  curl -s --max-time 15 -w "\n%{http_code}" -X POST "$BASE$1" -H 'Content-Type: application/json' -H "stripe-signature: t=$ts,v1=$sig" --data-binary @"$WHBODY" > "$TMPD/out.txt"
   tail -n 1 "$TMPD/out.txt" > "$STATUS"
   sed '$d' "$TMPD/out.txt" > "$BODY"
 }
@@ -80,9 +107,9 @@ if [ "$MODE" = "paused" ]; then
   pass "paused checkout → 403 waitlist:true"
   call POST /api/waitlist '{"email":"rehearse-wait@example.com","source":"rehearse"}'
   [ "$(st)" = "200" ] || fail "waitlist stores" "got $(st)"
-  ID1=$(python3 -c "import json; print(json.load(open('$BODY'))['id'])")
+  ID1=$("$PY" -c "import json; print(json.load(open('$BODY'))['id'])")
   call POST /api/waitlist '{"email":"rehearse-wait@example.com","source":"rehearse"}'
-  ID2=$(python3 -c "import json; print(json.load(open('$BODY'))['id'])")
+  ID2=$("$PY" -c "import json; print(json.load(open('$BODY'))['id'])")
   [ "$ID1" = "$ID2" ] && [ -n "$ID1" ] || fail "waitlist dedupes by email"
   pass "waitlist stores one row per email"
   echo "== $PASS passed, $SKIP skipped =="
@@ -92,24 +119,27 @@ fi
 echo "== live mode: money flows =="
 call GET /api/stats
 [ "$(st)" = "200" ] || fail "stats 200" "got $(st)"
-python3 -c "import json; d=json.load(open('$BODY')); assert d['elementsTotal']>=122 and d['unclaimedElements']==d['elementsTotal']-d['claimedElements'], d"
+"$PY" -c "import json; d=json.load(open('$BODY')); assert d['elementsTotal']>=122 and d['unclaimedElements']==d['elementsTotal']-d['claimedElements'], d"
 pass "stats shape + units"
 
 call GET /api/elements
-EMPTY=$(python3 -c "import json; print([t['symbol'] for t in json.load(open('$BODY')) if t['pool']==0][0])")
+EMPTY=$("$PY" -c "import json; print([t['symbol'] for t in json.load(open('$BODY')) if t['pool']==0][0])")
 echo "empty tile: $EMPTY"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-first-1\",\"startup\":{\"title\":\"First\",\"pitch\":\"First pitch here now\",\"url\":\"https://rehearse-first.dev\",\"linkType\":\"product\"}}"
 [ "$(st)" = "200" ] || fail "first claim checkout" "got $(st): $(cat "$BODY")"
 PAY1=$(jget "['paymentId']"); URL1=$(jget "['checkoutUrl']")
 [ -n "$PAY1" ] && [ -n "$URL1" ] || fail "first claim returns payment"
-python3 -c "import sys; u=sys.argv[1]; assert u.startswith('http://') or u.startswith('https://') or u.startswith('/'), u" "$URL1" || fail "checkout URL shape" "$URL1"
+# Passed via the environment, not argv: msys rewrites path-shaped argv
+# ("/pay/x" → "C:/Program Files/Git/pay/x") when handing args to a native
+# interpreter, and env values are exempt from that rewrite.
+U="$URL1" "$PY" -c "import os; u=os.environ['U']; assert u.startswith('http://') or u.startswith('https://') or u.startswith('/'), u" || fail "checkout URL shape" "$URL1"
 pass "first claim \$8 → checkout session"
 call POST /api/dev/pay "{\"paymentId\":\"$PAY1\",\"outcome\":\"pay\"}"
 [ "$(st)" = "200" ] || fail "dev pay" "got $(st)"
 grep -q '"status":"paid"' "$BODY" || fail "dev pay paid" "$(cat "$BODY")"
 call GET "/api/elements/$EMPTY"
-python3 -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-first.dev' and d['stakes'][0]['amount']==8, d['stakes']"
+"$PY" -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-first.dev' and d['stakes'][0]['amount']==8, d['stakes']"
 pass "first claim applied #1 at \$8"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":5,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-join-1\",\"startup\":{\"title\":\"Joiner\",\"pitch\":\"Joiner pitch here now\",\"url\":\"https://rehearse-join.dev\",\"linkType\":\"product\"}}"
@@ -117,7 +147,7 @@ CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":5,\"attest\":true,\"idempotencyKey
 PAYJ=$(jget "['paymentId']")
 call POST /api/dev/pay "{\"paymentId\":\"$PAYJ\",\"outcome\":\"pay\"}" > /dev/null
 call GET "/api/elements/$EMPTY"
-python3 -c "import json; d=json.load(open('$BODY')); ss=d['stakes']; assert len(ss)==2 and ss[0]['amount']==8 and ss[1]['domain']=='rehearse-join.dev' and ss[1]['amount']==5, ss"
+"$PY" -c "import json; d=json.load(open('$BODY')); ss=d['stakes']; assert len(ss)==2 and ss[0]['amount']==8 and ss[1]['domain']=='rehearse-join.dev' and ss[1]['amount']==5, ss"
 pass "contested \$5 join lands #2, leader untouched"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-tie-1\",\"startup\":{\"title\":\"Tier\",\"pitch\":\"Tier pitch here now\",\"url\":\"https://rehearse-tie.dev\",\"linkType\":\"product\"}}"
@@ -137,7 +167,7 @@ grep -q 'RESERVATION_CONFLICT' "$BODY" || fail "conflict code" "$(cat "$BODY")"
 pass "take quote held; rival gets RESERVATION_CONFLICT"
 call POST /api/dev/pay "{\"paymentId\":\"$PAYT\",\"outcome\":\"pay\"}" > /dev/null
 call GET "/api/elements/$EMPTY"
-python3 -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-take.dev' and d['stakes'][0]['amount']==9, d['stakes']"
+"$PY" -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-take.dev' and d['stakes'][0]['amount']==9, d['stakes']"
 pass "takeover flips the crown"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":2,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-reclaim-1\",\"startup\":{\"title\":\"First\",\"pitch\":\"First pitch here now\",\"url\":\"https://rehearse-first.dev\",\"linkType\":\"product\"}}"
@@ -145,7 +175,7 @@ CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":2,\"attest\":true,\"idempotencyKey
 PAYR=$(jget "['paymentId']")
 call POST /api/dev/pay "{\"paymentId\":\"$PAYR\",\"outcome\":\"pay\"}" > /dev/null
 call GET "/api/elements/$EMPTY"
-python3 -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-first.dev' and d['stakes'][0]['amount']==10, d['stakes']"
+"$PY" -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-first.dev' and d['stakes'][0]['amount']==10, d['stakes']"
 pass "reclaim \$2 restores #1 at \$10"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-first-1\",\"startup\":{\"title\":\"First\",\"pitch\":\"First pitch here now\",\"url\":\"https://rehearse-first.dev\",\"linkType\":\"product\"}}"
@@ -158,15 +188,15 @@ grep -q 'IDEMPOTENCY_CONFLICT' "$BODY" || fail "conflict code" "$(cat "$BODY")"
 pass "key reuse with different payload → IDEMPOTENCY_CONFLICT"
 
 call GET /api/elements
-EMPTY2=$(python3 -c "import json; print([t['symbol'] for t in json.load(open('$BODY')) if t['pool']==0][0])")
+EMPTY2=$("$PY" -c "import json; print([t['symbol'] for t in json.load(open('$BODY')) if t['pool']==0][0])")
 CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-first-2\",\"startup\":{\"title\":\"First2\",\"pitch\":\"First2 pitch here\",\"url\":\"https://rehearse-first2.dev\",\"linkType\":\"product\"}}"
 [ "$(st)" = "200" ] || fail "second tile setup" "got $(st)"
-PAYF2=$(python3 -c "import json; print(json.load(open('$BODY'))['paymentId'])")
+PAYF2=$("$PY" -c "import json; print(json.load(open('$BODY'))['paymentId'])")
 call POST /api/dev/pay "{\"paymentId\":\"$PAYF2\",\"outcome\":\"pay\"}" > /dev/null
 CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":9,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-exp-1\",\"startup\":{\"title\":\"Expy\",\"pitch\":\"Expy pitch here now\",\"url\":\"https://rehearse-expy.dev\",\"linkType\":\"product\"}}"
 [ "$(st)" = "200" ] || fail "expiry take checkout" "got $(st)"
 grep -q '"guaranteedTake":true' "$BODY" || fail "expiry take holds quote first" "$(cat "$BODY")"
-PAYE=$(python3 -c "import json; print(json.load(open('$BODY'))['paymentId'])")
+PAYE=$("$PY" -c "import json; print(json.load(open('$BODY'))['paymentId'])")
 sleep 3 # outlive RESERVATION_TTL_MS=2000 (release builds set it; else this still passes as a normal take)
 call POST /api/dev/pay "{\"paymentId\":\"$PAYE\",\"outcome\":\"pay\"}"
 [ "$(st)" = "200" ] || fail "expired settle" "got $(st)"
@@ -222,18 +252,18 @@ fi
 if [ -n "${ADMIN_TOKEN:-}" ]; then
   echo "== moderation =="
   call GET "/api/elements/$EMPTY"
-  STAKE=$(python3 -c "import json; d=json.load(open('$BODY')); print([s['stakeId'] for s in d['stakes'] if s['domain']=='rehearse-take.dev'][0])")
+  STAKE=$("$PY" -c "import json; d=json.load(open('$BODY')); print([s['stakeId'] for s in d['stakes'] if s['domain']=='rehearse-take.dev'][0])")
   call POST /api/report "{\"stakeId\":\"$STAKE\",\"reason\":\"rehearsal report\"}"
   [ "$(st)" = "200" ] || fail "report intake" "got $(st)"
   admin_call GET "/api/admin/reports?status=OPEN"
-  RID=$(python3 -c "import json; print(json.load(open('$BODY'))[0]['id'])")
+  RID=$("$PY" -c "import json; print(json.load(open('$BODY'))[0]['id'])")
   admin_call PATCH "/api/admin/reports/$RID" '{"status":"TRIAGED","note":"rehearsal","reviewedBy":"rehearse"}'
   [ "$(st)" = "200" ] || fail "triage" "got $(st)"
   admin_call POST "/api/admin/startups/rehearse-take.dev/moderate" '{"state":"HIDDEN","reason":"rehearsal","operator":"rehearse"}'
   [ "$(st)" = "200" ] || fail "hide" "got $(st)"
   call GET "/api/elements/$EMPTY"
-  python3 -c "import json; d=json.load(open('$BODY')); assert all(s['domain']!='rehearse-take.dev' for s in d['stakes']), 'hidden bidder visible'"
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/s/rehearse-take.dev")" = "404" ] || fail "hidden profile 404s"
+  "$PY" -c "import json; d=json.load(open('$BODY')); assert all(s['domain']!='rehearse-take.dev' for s in d['stakes']), 'hidden bidder visible'"
+  [ "$(curl -s -o "$NULLDEV" -w '%{http_code}' "$BASE/s/rehearse-take.dev")" = "404" ] || fail "hidden profile 404s"
   admin_call POST "/api/admin/startups/rehearse-take.dev/moderate" '{"state":"VISIBLE","operator":"rehearse"}'
   [ "$(st)" = "200" ] || fail "restore" "got $(st)"
   pass "report → triage → hide → restore with surface checks"
@@ -243,7 +273,7 @@ fi
 
 echo "== latency (budget 2000ms) =="
 for p in "/api/stats" "/api/elements" "/api/table-order" "/api/board?tab=crowns" "/api/activity?limit=6" "/api/search?q=carbon"; do
-  MS=$(curl -s -o /dev/null --max-time 15 -w "%{time_total}" "$BASE$p" | python3 -c "import sys; print(int(float(sys.stdin.read().strip())*1000))")
+  MS=$(curl -s -o "$NULLDEV" --max-time 15 -w "%{time_total}" "$BASE$p" | "$PY" -c "import sys; print(int(float(sys.stdin.read().strip())*1000))")
   [ "$MS" -lt 2000 ] || fail "latency $p" "${MS}ms"
   echo "  $p ${MS}ms"
 done
