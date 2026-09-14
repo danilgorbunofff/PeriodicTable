@@ -4,6 +4,8 @@
 > Mark each box only with evidence (command output, screenshot, inbox mail).
 > Never commit `.env`. Fresh machine: `git clone`, copy `.env` values from a safe place, `npm ci`.
 > Live: https://www.periodictable.lol · Vercel project `periodic-table` · Neon Postgres (122 elements).
+>
+> **Product review set:** [`doc/review/`](review/00-REVIEW-PLAN.md) — the phase-by-phase review of the whole app, from a crawler's first request to end of life. The plan is `doc/review/00-REVIEW-PLAN.md`; findings land in `doc/review/FINDINGS.md`. This checklist remains the launch gate and the source of settled facts; where a review finding changes a gate answer, the line below cites its `R<phase>-<n>` id rather than restating it.
 
 ## 0. Pre-flight (any machine)
 
