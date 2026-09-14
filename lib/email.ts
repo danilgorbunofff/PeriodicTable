@@ -5,6 +5,7 @@
  */
 import { prisma } from "./prisma";
 import { outbidHtml, outbidSubject } from "../emails/outbid";
+import { outbidReclaimUrl } from "./links";
 import { receiptHtml, receiptSubject } from "../emails/receipt";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -72,6 +73,7 @@ export type OutbidEmailParams = {
   unsubToken: string;
   elementSymbol: string;
   elementName?: string;
+  victimDomain: string;
   victimTotal: number;
   winnerDomain: string;
   winnerAmount: number;
@@ -85,9 +87,11 @@ export async function sendOutbidEmail(p: OutbidEmailParams) {
     winnerDomain: p.winnerDomain,
     winnerAmount: p.winnerAmount,
     reclaim,
-    // No email address in URLs (P1-18): the homepage prefill needs only
-    // element + amount; the receipt email is addressed by the envelope.
-    reclaimUrl: `${APP_URL}/?el=${p.elementSymbol}&stake=${reclaim}`,
+    reclaimUrl: outbidReclaimUrl(APP_URL, {
+      elementSymbol: p.elementSymbol,
+      reclaim,
+      domain: p.victimDomain,
+    }),
     unsubUrl: `${APP_URL}/api/unsubscribe?token=${p.unsubToken}`,
   });
   const status = await deliver(p.to, subject, html, { unsubToken: p.unsubToken });

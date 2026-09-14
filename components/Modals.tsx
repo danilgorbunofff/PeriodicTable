@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Modal } from "./Modal";
@@ -46,6 +46,7 @@ export function CheckoutPreview({
   el,
   open,
   amount,
+  prefillDomain,
   onAmount,
   onClose,
   onDone,
@@ -53,6 +54,7 @@ export function CheckoutPreview({
   el: ElementNode | null;
   open: boolean;
   amount: number;
+  prefillDomain?: string | null;
   onAmount: (n: number) => void;
   onClose: () => void;
   onDone: (msg: string) => void;
@@ -76,6 +78,49 @@ export function CheckoutPreview({
   const { data } = useSWR<ElementDetail>(open && el ? `/api/elements/${el.symbol}` : null, (url: string) =>
     fetchJson(url, isElementDetail)
   );
+
+  // Reclaim deep link (?r=DOMAIN): we sent this address the outbid mail, so it
+  // is by definition the previous leader here — fill their own listing back in
+  // (URL, name, pitch) from the live payload instead of making them retype it.
+  // Seeded on open, and retracted on close while the fields are still
+  // untouched, so a prefill can never bleed into an unrelated purchase.
+  const mine = prefillDomain ? data?.stakes.find((s) => s.domain === prefillDomain) : undefined;
+  const prefilled = useRef<{ url: string; title: string; pitch: string; seeded: boolean } | null>(null);
+  useEffect(() => {
+    if (!open) {
+      const meta = prefilled.current;
+      if (!meta) return;
+      prefilled.current = null;
+      setUrl((v) => (v === meta.url ? "" : v));
+      setTitle((v) => (v === meta.title ? "" : v));
+      setPitch((v) => (v === meta.pitch ? "" : v));
+      setTab("url");
+      return;
+    }
+    if (!prefillDomain || prefilled.current?.seeded) return;
+    if (!mine) {
+      // Domain is the identity, so the field can already be right while prices load.
+      const seed = { url: `https://${prefillDomain}`, title: "", pitch: "" };
+      if (!prefilled.current) {
+        setUrl((v) => v || seed.url);
+        setTab("url");
+      }
+      prefilled.current = { ...seed, seeded: false };
+      return;
+    }
+    const social = !!mine.siteUrl && mine.siteUrl.startsWith("@");
+    const meta = {
+      url: mine.siteUrl || `https://${prefillDomain}`,
+      title: mine.title ?? "",
+      pitch: mine.pitch ?? "",
+    };
+    prefilled.current = { ...meta, seeded: true };
+    setUrl(meta.url);
+    setTab(social ? "social" : "url");
+    if (meta.title) setTitle(meta.title);
+    if (meta.pitch) setPitch(meta.pitch);
+  }, [open, prefillDomain, mine]);
+
   const elSafe = el;
   if (!elSafe) return null;
   const elSymbol = elSafe.symbol;
