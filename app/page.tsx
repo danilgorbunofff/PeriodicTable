@@ -40,6 +40,8 @@ function HomeInner() {
   const [boardOpen, setBoardOpen] = useState(false);
   const [checkoutEl, setCheckoutEl] = useState<ElementNode | null>(null);
   const [checkoutAmt, setCheckoutAmt] = useState(5);
+  // Reclaim deep link (?r=DOMAIN): the domain whose listing the modal prefills.
+  const [checkoutDomain, setCheckoutDomain] = useState<string | null>(null);
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [actMin, setActMin] = useState(false);
@@ -85,13 +87,14 @@ function HomeInner() {
   }
 
   // Deep links: /?paid=SYM (post-checkout success), /?unsub=done|unknown,
-  // /?el=SYM&stake=N&email=E (outbid reclaim prefill from email).
+  // /?el=SYM&stake=N&r=DOMAIN (outbid reclaim prefill from email).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paid = params.get("paid");
     const unsub = params.get("unsub");
     const elParam = params.get("el");
     const stakeParam = params.get("stake");
+    const reclaimParam = params.get("r");
     if (paid) {
       if (paid !== "1") openSymbol(paid);
       toast("Payment confirmed — you're live! 🎉");
@@ -105,10 +108,18 @@ function HomeInner() {
       const found = ELEMENTS.find((e) => e.symbol === elParam);
       if (found) {
         setSelected(found);
+        // `r` is the reclaiming holder's own domain (verified by construction:
+        // only the previous leader's address gets an outbid mail), so the modal
+        // can fill their listing from the live element payload instead of
+        // making them retype it.
+        if (reclaimParam) setCheckoutDomain(reclaimParam.trim().toLowerCase());
         const reclaimAmt = stakeParam ? parseInt(stakeParam, 10) : NaN;
-        if (Number.isInteger(reclaimAmt) && reclaimAmt >= 1) {
+        const knownAmt = Number.isInteger(reclaimAmt) && reclaimAmt >= 1;
+        if (knownAmt || reclaimParam) {
           setCheckoutEl(found);
-          setCheckoutAmt(reclaimAmt);
+          if (knownAmt) setCheckoutAmt(reclaimAmt);
+        }
+        if (knownAmt) {
           toast(`Reclaim ${elParam} for $${reclaimAmt} — past stake still counts.`);
           track("reclaim_click", { element: elParam, amount: reclaimAmt });
         }
@@ -134,6 +145,8 @@ function HomeInner() {
   const openStake = useCallback((el: ElementNode, amount: number) => {
     setCheckoutEl(el);
     setCheckoutAmt(amount);
+    // A manual stake is a fresh purchase: never carry a reclaim prefill over.
+    setCheckoutDomain(null);
   }, []);
 
   const openSymbol = useCallback((symbol: string) => {
@@ -365,6 +378,7 @@ function HomeInner() {
         el={checkoutEl}
         open={!!checkoutEl}
         amount={checkoutAmt}
+        prefillDomain={checkoutDomain}
         onAmount={setCheckoutAmt}
         onClose={() => setCheckoutEl(null)}
         onDone={(m) => toast(m)}

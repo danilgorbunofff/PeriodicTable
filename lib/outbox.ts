@@ -30,6 +30,7 @@ export type OutbidPayload = {
   to: string;
   unsubToken: string;
   elementSymbol: string;
+  victimDomain: string;
   victimTotal: number;
   winnerDomain: string;
   winnerAmount: number;

@@ -218,6 +218,7 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
               to: victim.email,
               unsubToken: victim.unsubToken,
               elementSymbol: element.symbol,
+              victimDomain: victim.domain,
               victimTotal: result.info.oldLeader.amountUsd,
               winnerDomain: result.info.newLeader.domain,
               winnerAmount: result.info.newLeader.amountUsd,
