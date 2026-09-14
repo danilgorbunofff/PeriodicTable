@@ -213,7 +213,7 @@ Updated whenever a doc is written, revised, or its findings change state. `—` 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 00 | Review plan (this file) | — | draft | — | — | — | 2026-09-14 |
 | 01 | Discovery and unfurl | 1 | draft | 0 | 0 | R01-1…R01-8 (3 P2, 5 P3) | 2026-09-14 |
-| 02 | Shell and static surfaces | 1 | — | — | — | — | — |
+| 02 | Shell and static surfaces | 1 | draft | 0 | 0 | R02-1…R02-7 (5 P2, 2 P3) | 2026-09-14 |
 | 03 | The board | 1 | — | — | — | — | — |
 | 04 | Element detail and pricing | 1 | — | — | — | — | — |
 | 05 | Accessibility and content | 1 | — | — | — | — | — |
