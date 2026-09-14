@@ -52,7 +52,7 @@ export default function DevPayPage() {
         <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: "#666" }}>DEV SIMULATOR</div>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: "10px 0 6px" }}>Complete your stake</h1>
         <p style={{ color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-          No Whop keys configured — this simulator stands in for the real checkout. On Pay, the stake applies
+          No Stripe keys configured — this simulator stands in for the real checkout. On Pay, the stake applies
           instantly.
         </p>
         <div style={{ background: "#F4F4F0", borderRadius: 16, padding: 16, margin: "18px 0" }}>

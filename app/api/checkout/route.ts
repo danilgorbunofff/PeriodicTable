@@ -3,7 +3,7 @@ import { PaymentPath, PaymentProvider, PaymentStatus, ReservationStatus } from "
 import { prisma } from "@/lib/prisma";
 import { classifyAndValidate, joinMin } from "@/lib/pricing";
 import { validateCheckoutInput } from "@/lib/validate";
-import { createWhopCheckoutSession, getProviderMode, whopPartiallyConfigured } from "@/lib/whop";
+import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured } from "@/lib/stripe";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
@@ -29,7 +29,7 @@ type Body = {
 
 /** Resume (or create) the provider session for a pending payment (P1-04).
  * Returns a usable checkout URL, or null when the provider is down
- * (caller returns retryable 502 — never a dead dev URL for Whop payments). */
+ * (caller returns retryable 502 — never a dead dev URL for live payments). */
 async function resumeCheckoutUrl(
   payment: {
     id: string;
@@ -50,13 +50,14 @@ async function resumeCheckoutUrl(
   }
   const element = await prisma.element.findUniqueOrThrow({ where: { id: payment.elementId } });
   const startup = await prisma.startup.findUniqueOrThrow({ where: { id: payment.startupId } });
-  const session = await createWhopCheckoutSession({
+  const session = await createStripeCheckoutSession({
     paymentId: payment.id,
     amountUsd: payment.amountUsd,
     title: startup.title,
     elementSymbol: element.symbol,
     email: payment.email,
     redirectAfterPaid: `${origin}/?paid=${element.symbol}`,
+    cancelUrl: `${origin}/?canceled=${element.symbol}`,
   });
   if (!session) return null;
   await prisma.payment.update({
@@ -102,8 +103,8 @@ async function idempotentReplay(
 export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
     return NextResponse.json({ error: "Payments are paused — join the waitlist.", waitlist: true }, { status: 403 });
   }
-  if (whopPartiallyConfigured()) {
-    console.warn("checkout: partial Whop configuration (key without secret or vice versa) — running in dev provider mode");
+  if (stripePartiallyConfigured()) {
+    console.warn("checkout: partial Stripe configuration (key without secret or vice versa) — running in dev provider mode");
   }
   const ip = clientIp(req.headers);
   // Abuse: 5 checkout attempts / IP / hour (spec 03). 429, never 500.
@@ -274,7 +275,7 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
         startupId: startup.id,
         amountUsd,
         path,
-        provider: getProviderMode() === "whop" ? PaymentProvider.WHOP : PaymentProvider.DEV,
+        provider: getProviderMode() === "stripe" ? PaymentProvider.STRIPE : PaymentProvider.DEV,
         idempotencyKey,
         requestFingerprint: fingerprint,
         ...(email ? { email } : {}),

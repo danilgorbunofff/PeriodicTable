@@ -38,7 +38,7 @@
 Known gaps (do NOT flip real money until fixed — see §7):
 `requireProdEnv()` has zero runtime call sites (only `lib/env.test.ts`); `ADMIN_TOKEN` missing from `REQUIRED_PROD_ENV`;
 `lib/manage.ts` is backend-only by design in v1 (listing edits not shipped — a listing is set at checkout and is final); `REFUNDED` enum never written;
-`WHOP_WEBHOOK_SECRET` has **no validator** in `lib/env.ts`, so a mistyped or placeholder value passes `check-prod-env` while the webhook silently stays broken — the only real check is a live delivery returning `200` (§3c).
+`STRIPE_WEBHOOK_SECRET` has **no validator** in `lib/env.ts`, so a mistyped or placeholder value passes `check-prod-env` while the webhook silently stays broken — the only real check is a live delivery returning `200` (§3c). (`PROD_ENV_VALIDATORS` only shapes `NEXT_PUBLIC_APP_URL` and `CLICK_SALT`; every other required key is a non-empty test. This held for `WHOP_WEBHOOK_SECRET` before the migration and still holds after the rename.)
 
 > ✅ Resolved 2026-09-11: the Whop signature contract is **no longer guesswork**. A genuine v1 delivery verified as Standard Webhooks, and signed fixtures for *both* envelopes now live in `lib/webhook.test.ts` (~11 cases). See §3c.
 
@@ -63,7 +63,7 @@ done
 - [x] `GET /api/elements` tiles carry `{symbol, pool, count, leader{domain,logoUrl,amount}|null}` — ✅ 2026-09-11
 - [x] `GET /api/elements/Li` detail: stakes ranked desc, `prices{takeLead,joinMin}`, hidden bidders excluded — ✅ 2026-09-11: returns `prices{takeLead:5,joinMin:5}`
 
-## 3. Money / Whop (paused now, live last)
+## 3. Money / payments (paused now, live last)
 
 ### 3a. Paused mode (current prod expectation)
 - [x] `POST /api/checkout` (no flags) → `403 {"waitlist":true}` — ✅ 2026-09-11 on prod
@@ -71,10 +71,10 @@ done
 - [x] `BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused` → 2/2 pass — ✅ 2026-09-11: `2 passed, 0 skipped` (re-run after the script's webhook-signing fix, so the edited script is itself confirmed)
 - [x] `POST /api/waitlist {email}` twice → same `id` (dedupe by email), one DB row — ✅ 2026-09-11: rehearsal asserts "waitlist stores one row per email"
 
-### 3b. Live flows (local sim: NO Whop keys → dev simulator; WITH keys → real sessions)
+### 3b. Live flows (local sim: NO Stripe keys → dev simulator; WITH keys → real sessions)
 ```
 BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
-# full: BASE_URL=… ADMIN_TOKEN=… WHOP_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live
+# full: BASE_URL=… ADMIN_TOKEN=… STRIPE_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live
 ```
 - [x] First claim $8 → 200 `{paymentId, checkoutUrl}` → `POST /api/dev/pay {pay}` → `paid` → tile leader = payer — ✅ 2026-09-11
 - [x] Contested $5 join → lands #2, leader untouched; tie at leader total → `409 TIE` — ✅ 2026-09-11
@@ -91,7 +91,7 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 >
 > Server env used: `DATABASE_URL=<throwaway>`, `PAYMENTS_LIVE=true`, `NEXT_PUBLIC_PAYMENTS_LIVE=true`, `RESERVATION_TTL_MS=2000`, `ADMIN_TOKEN=<keychain>`, `WHOP_WEBHOOK_SECRET=<self-generated>`, on port 3100.
 
-### 3c. Webhooks (needs `WHOP_WEBHOOK_SECRET`; sign like `rehearse-release.sh:sign_post`)
+### 3c. Webhooks (needs `STRIPE_WEBHOOK_SECRET`; sign like `rehearse-release.sh:sign_post`)
 - [x] `payment.succeeded` with matching amount → `applied` once; replay same `id` → `duplicate`/`already-settled` — ✅ 2026-09-11
 - [x] Statusless event → `ignored`, settled payment untouched — ✅ 2026-09-11
 - [x] `payment.failed` → `failed`; later `succeeded` for same payment → `already-settled` (terminal) — ✅ 2026-09-11
@@ -243,9 +243,39 @@ The open question was which signature envelope Whop delivers, because the two si
 | Money | paused 403 now; live rehearsal green in sim; Whop contract proven with fixtures |
 | Email/jobs | fresh Resend key, inbox receipt received, cron draining outbox+screenshots |
 | Trust/frontend | Turnstile + Upstash + ADMIN_TOKEN live, no HIDDEN leaks, honest error panels, kill switch rehearsed |
-| Flip (LAST) | `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Whop live keys + webhook `https://www.periodictable.lol/api/webhooks/whop` registered → redeploy → $1 live claim → refund/keep → announce |
+| Flip (LAST) | `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Stripe live keys + webhook `https://www.periodictable.lol/api/webhooks/stripe` registered → redeploy → $1 live claim → refund/keep → announce |
+
+### Provider migration, 2026-09-15 — Whop → Stripe (supersedes the third blocker below)
+
+The third blocker was not fixed, it was **designed out**. The Whop app scope was never granted, and rotating the key could not grant it, so payments moved to Stripe outright. The 2026-09-14 section below is kept verbatim as the record of how the `401` was diagnosed; its two dashboard steps and its Whop env names are **obsolete**.
+
+What replaced what:
+
+| Was | Now |
+| --- | --- |
+| `lib/whop.ts` | `lib/stripe.ts` (**both files deleted/replaced**, not wrapped) |
+| `POST /api/webhooks/whop` | `POST /api/webhooks/stripe` |
+| `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET` | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
+| `whopEnabled()` / `getProviderMode() === "whop"` | `stripeEnabled()` / `getProviderMode() === "stripe"` |
+| legacy HMAC webhook envelope | `stripe-signature: t=…,v1=…` over `${t}.${body}` |
+
+Money-path rules the port had to get right, each one a way to double-credit or lose a stake if missed:
+
+- `unit_amount` is integer **cents** (`Math.round(amountUsd * 100)`), `mode=payment`.
+- One purchase emits `checkout.session.completed` **and** `payment_intent.succeeded` **and** `charge.succeeded`. Only the session event settles; the siblings are ignored, or one $5 buys two top-ups.
+- `metadata.paymentId` is written to **both** the session and the payment intent. Reversals arrive as a `charge`, which carries only the intent's metadata — without it every refund files `IGNORED/unknown-payment` and the buyer keeps both the refund and the stake.
+- `charge.refunded` is matched **by event type**, because a refunded charge's own `status` stays `succeeded`. `payment_intent.payment_failed` is not a failure (the session stays payable) and `refund.created`/`refund.updated` are not reversals (pending, can still fail).
+- `v1` signatures need an explicit 300s tolerance; the secret has no validator in `lib/env.ts`, so the only real check remains a live delivery returning `200` (§3c).
+
+`WHOP` is retained in the `PaymentProvider` enum (`STRIPE @map("stripe")` added by migration `0006`) **only** so the four legacy prod `Payment` rows still deserialize — Prisma throws when it reads an enum value it cannot map. Those four rows are unchanged and still inert.
+
+Evidence at this commit: migration `0006` applies cleanly to an empty database; `npm run typecheck` and `npm run lint` clean; `npm run test:ci` **357 passed / 0 failed** (23 files, up from 337) against the throwaway Postgres, including a new `lib/stripe.test.ts` and the ported webhook/reconcile/env/idempotency suites.
+
+Still to do before announce — all ops, no code: register the Stripe webhook endpoint for `checkout.session.completed`, `checkout.session.expired`, `charge.refunded`, `charge.dispute.*`; set both Stripe keys in Vercel Production; delete the now-unused `WHOP_*` vars **after** Stripe is proven; then re-run J4 for real (a live $5 that reaches Stripe's payment page, completes, flips `Payment.status` to `PAID`, lights the tile, and lands the receipt email).
 
 ### Where the release stands, 2026-09-14 — read this first on a fresh machine
+
+> **Superseded in part by the 2026-09-15 entry above** — the third blocker's Whop dashboard steps no longer apply, and `WHOP_WEBHOOK_SECRET` is now `STRIPE_WEBHOOK_SECRET`. Everything about Turnstile, §5, and the four orphan rows still stands.
 
 Payments are **live** in production (`PAYMENTS_LIVE=true` and `NEXT_PUBLIC_PAYMENTS_LIVE=true`, both re-confirmed 2026-09-14). The site is healthy and empty: `/api/stats` = `122` elements, `0` claimed, `0` stakes; `POST /api/checkout` with an empty body answers `400` (validation), not `403` (paused), so the live gate is open. Three launch blockers were found by going live. Two are fixed and proven against real production traffic; the third is one Whop-dashboard action.
 
@@ -317,9 +347,9 @@ TEST_DATABASE_URL=postgresql://… npm run test:ci
 npm run audit:prod
 VERCEL_ENV=production NODE_ENV=production node scripts/check-prod-env.mjs
 BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused
-BASE_URL=http://localhost:3100 ADMIN_TOKEN=… WHOP_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live
+BASE_URL=http://localhost:3100 ADMIN_TOKEN=… STRIPE_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live
 curl -s https://www.periodictable.lol/api/stats | python3 -m json.tool
 curl -s "https://www.periodictable.lol/api/jobs/config?secret=$CRON_SECRET" | python3 -m json.tool   # settles §5 (Upstash)
 ```
 A note on the env vars below: they exist in Vercel, but **their values cannot be read back** — `vercel env pull` returns `""` for every Sensitive variable (including `DATABASE_URL`, which demonstrably works), and the CLI's raw `vca_…` token 403s against `api.vercel.com` because it expires hourly. So treat *presence* as the only fact obtainable from `vercel env ls`, and prove *usability* through runtime behaviour (`/api/jobs/config` for Upstash, `/api/stats` for the DB), never through a pulled length. And never copy a pulled file back up as env: it would write empty strings over working secrets.
-Env vars (values in Vercel only): `DATABASE_URL`, `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL=https://www.periodictable.lol`, `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `CRON_SECRET`, `PAYMENTS_LIVE`, `NEXT_PUBLIC_PAYMENTS_LIVE`, `ADMIN_TOKEN`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional). All of these exist in production as of 2026-09-11 except `PAYMENTS_LIVE`, which is deliberately absent while paused — and `NEXT_PUBLIC_PAYMENTS_LIVE`, which exists but is an empty string. See the live-state audit in §7.
+Env vars (values in Vercel only): `DATABASE_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL=https://www.periodictable.lol`, `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `CRON_SECRET`, `PAYMENTS_LIVE`, `NEXT_PUBLIC_PAYMENTS_LIVE`, `ADMIN_TOKEN`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional). All of these exist in production as of 2026-09-11 except `PAYMENTS_LIVE`, which is deliberately absent while paused — and `NEXT_PUBLIC_PAYMENTS_LIVE`, which exists but is an empty string. See the live-state audit in §7. The two `WHOP_*` vars are still present from the frozen provider; they are unused by the code and should be deleted from Vercel once Stripe is proven.

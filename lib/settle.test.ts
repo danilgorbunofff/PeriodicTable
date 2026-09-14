@@ -5,69 +5,74 @@
    dedupe, statusless-event rejection path, reservation consume/expire. */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  whopPayloadIsPaid,
-  whopPayloadIsFailed,
-  whopEventId,
-  whopEventType,
-  whopMoney,
-  validateWhopMoney,
-  providerAmountAgrees,
-  providerCurrencyAgrees,
+  stripePayloadIsPaid,
+  stripePayloadIsFailed,
+  stripeEventId,
+  stripeEventType,
+  stripeMoney,
   getProviderMode,
-} from "./whop";
+} from "./stripe";
+import { validateProviderMoney, providerAmountAgrees, providerCurrencyAgrees } from "./money";
 import { reservationConflict, isReservationLive, RESERVATION_TTL_MS } from "./reservations";
 
 describe("strict paid classification (P0-03)", () => {
   it("accepts explicit paid signals only", () => {
-    expect(whopPayloadIsPaid({ data: { status: "succeeded" } })).toBe(true);
-    expect(whopPayloadIsPaid({ data: { payment: { status: "completed" } } })).toBe(true);
-    expect(whopPayloadIsPaid({ data: { checkout_session: { status: "paid" } } })).toBe(true);
-    expect(whopPayloadIsPaid({ type: "checkout.session.completed" })).toBe(true);
+    expect(stripePayloadIsPaid({ type: "checkout.session.completed", data: { object: { payment_status: "paid" } } })).toBe(true);
+    expect(stripePayloadIsPaid({ type: "checkout.session.async_payment_succeeded", data: { object: {} } })).toBe(true);
   });
   it("rejects everything else, especially statusless payloads", () => {
-    expect(whopPayloadIsPaid({})).toBe(false);
-    expect(whopPayloadIsPaid(null)).toBe(false);
-    expect(whopPayloadIsPaid({ data: {} })).toBe(false);
-    expect(whopPayloadIsPaid({ event: "payment.updated", data: {} })).toBe(false);
-    expect(whopPayloadIsPaid({ data: { status: "pending" } })).toBe(false);
-    expect(whopPayloadIsPaid({ data: { status: "failed" } })).toBe(false);
-    expect(whopPayloadIsPaid({ data: { status: "refunded" } })).toBe(false);
+    expect(stripePayloadIsPaid({})).toBe(false);
+    expect(stripePayloadIsPaid(null)).toBe(false);
+    expect(stripePayloadIsPaid({ data: {} })).toBe(false);
+    expect(stripePayloadIsPaid({ event: "payment.updated", data: {} })).toBe(false);
+    // Completing the session is not being paid: async methods finish the
+    // session before the money clears.
+    expect(stripePayloadIsPaid({ type: "checkout.session.completed", data: { object: { payment_status: "unpaid" } } })).toBe(false);
+    // One purchase emits these next to the session event, and they name the
+    // intent and the charge rather than the session we stored.
+    expect(stripePayloadIsPaid({ type: "payment_intent.succeeded", data: { object: { status: "succeeded" } } })).toBe(false);
+    expect(stripePayloadIsPaid({ type: "charge.succeeded", data: { object: { status: "succeeded" } } })).toBe(false);
+    expect(stripePayloadIsPaid({ type: "charge.refunded", data: { object: { status: "succeeded" } } })).toBe(false);
   });
   it("detects explicit failure signals only", () => {
-    expect(whopPayloadIsFailed({ data: { status: "failed" } })).toBe(true);
-    expect(whopPayloadIsFailed({ type: "payment.failed" })).toBe(true);
-    expect(whopPayloadIsFailed({ data: { status: "expired" } })).toBe(true);
-    expect(whopPayloadIsFailed({})).toBe(false);
-    expect(whopPayloadIsFailed({ data: {} })).toBe(false);
-    expect(whopPayloadIsFailed({ event: "payment.updated", data: {} })).toBe(false);
-    expect(whopPayloadIsFailed({ data: { status: "pending" } })).toBe(false);
+    expect(stripePayloadIsFailed({ type: "checkout.session.expired" })).toBe(true);
+    expect(stripePayloadIsFailed({ type: "checkout.session.async_payment_failed" })).toBe(true);
+    expect(stripePayloadIsFailed({})).toBe(false);
+    expect(stripePayloadIsFailed({ data: {} })).toBe(false);
+    expect(stripePayloadIsFailed({ event: "payment.updated", data: {} })).toBe(false);
+    // A single declined attempt leaves the session open and payable; treating
+    // it as failure kills the retry that then succeeds.
+    expect(stripePayloadIsFailed({ type: "payment_intent.payment_failed" })).toBe(false);
+    expect(stripePayloadIsFailed({ type: "checkout.session.completed" })).toBe(false);
   });
 });
 
 describe("provider event identity", () => {
   it("prefers the provider id, falls back to a stable body hash", () => {
-    expect(whopEventId({ id: "evt_1" }, "{}")).toBe("whop:evt_1");
-    expect(whopEventId({ data: { id: "evt_2" } }, "{}")).toBe("whop:evt_2");
-    const a = whopEventId({}, '{"a":1}');
-    expect(a).toBe(whopEventId({}, '{"a":1}'));
-    expect(a).not.toBe(whopEventId({}, '{"a":2}'));
+    expect(stripeEventId({ id: "evt_1" }, "{}")).toBe("stripe:evt_1");
+    // A nested id belongs to some other object; hashing the body beats filing
+    // the delivery under an id the provider never sent as an event id.
+    expect(stripeEventId({ data: { id: "evt_2" } }, '{"a":2}')).toMatch(/^stripe:sha:/);
+    const a = stripeEventId({}, '{"a":1}');
+    expect(a).toBe(stripeEventId({}, '{"a":1}'));
+    expect(a).not.toBe(stripeEventId({}, '{"a":2}'));
   });
   it("reads event types from known shapes", () => {
-    expect(whopEventType({ type: "payment.succeeded" })).toBe("payment.succeeded");
-    expect(whopEventType({ event: "payment.failed" })).toBe("payment.failed");
-    expect(whopEventType({})).toBe("unknown");
+    expect(stripeEventType({ type: "checkout.session.completed" })).toBe("checkout.session.completed");
+    expect(stripeEventType({ event: "payment.failed" })).toBe("unknown");
+    expect(stripeEventType({})).toBe("unknown");
   });
 });
 
 describe("money validation", () => {
   it("accepts dollars or cents, reports absent, rejects mismatch", () => {
-    expect(validateWhopMoney(21, { amountUsd: 21, currency: "usd", providerRef: null })).toEqual({ status: "ok" });
-    expect(validateWhopMoney(21, { amountUsd: 2100, currency: "usd", providerRef: null })).toEqual({ status: "ok" });
+    expect(validateProviderMoney(21, { amountUsd: 21, currency: "usd", providerRef: null })).toEqual({ status: "ok" });
+    expect(validateProviderMoney(21, { amountUsd: 2100, currency: "usd", providerRef: null })).toEqual({ status: "ok" });
     // `absent` is its own state: an unverified amount must never read as verified.
-    expect(validateWhopMoney(21, { amountUsd: null, currency: null, providerRef: null })).toEqual({ status: "absent" });
-    const mismatch = validateWhopMoney(21, { amountUsd: 22, currency: "usd", providerRef: null });
+    expect(validateProviderMoney(21, { amountUsd: null, currency: null, providerRef: null })).toEqual({ status: "absent" });
+    const mismatch = validateProviderMoney(21, { amountUsd: 22, currency: "usd", providerRef: null });
     expect(mismatch).toEqual({ status: "rejected", reason: "amount-mismatch:22" });
-    expect(validateWhopMoney(21, { amountUsd: 21, currency: "eur", providerRef: null })).toEqual({
+    expect(validateProviderMoney(21, { amountUsd: 21, currency: "eur", providerRef: null })).toEqual({
       status: "rejected",
       reason: "currency-mismatch:eur",
     });
@@ -83,17 +88,22 @@ describe("money validation", () => {
     expect(providerCurrencyAgrees("USD")).toBe(true);
     expect(providerCurrencyAgrees("eur")).toBe(false);
   });
-  it("extracts money from known payload shapes", () => {
-    expect(whopMoney({ data: { amount: 2100, currency: "USD", id: "cs_1" } })).toEqual({
-      amountUsd: 2100,
+  it("normalises cents to dollars and claims a ref only from a session", () => {
+    expect(stripeMoney({ data: { object: { object: "checkout.session", id: "cs_1", amount_total: 2100, currency: "USD" } } })).toEqual({
+      amountUsd: 21,
       currency: "usd",
       providerRef: "cs_1",
     });
-    expect(whopMoney({})).toEqual({ amountUsd: null, currency: null, providerRef: null });
+    expect(stripeMoney({})).toEqual({ amountUsd: null, currency: null, providerRef: null });
+    // A charge id is a different object's identity; claiming it would strand
+    // the row against the session event that follows.
+    expect(
+      stripeMoney({ data: { object: { object: "charge", id: "ch_1", amount: 2100, currency: "usd" } } }).providerRef
+    ).toBe(null);
   });
-  it("provider mode is dev without full Whop config", () => {
-    // CI/dev never sets Whop keys; production gating is covered by env tests.
-    if (!process.env.WHOP_API_KEY || !process.env.WHOP_WEBHOOK_SECRET) {
+  it("provider mode is dev without full Stripe config", () => {
+    // CI/dev never sets Stripe keys; production gating is covered by env tests.
+    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
       expect(getProviderMode()).toBe("dev");
     }
   });

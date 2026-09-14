@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaymentProvider } from "@prisma/client";
 import { settlePayment } from "@/lib/settle";
-import { getProviderMode } from "@/lib/whop";
+import { getProviderMode } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Dev-only payment simulator (Phase 2: same settle service as production).
- * Disabled whenever Whop is fully configured, and refuses non-DEV payments,
+ * Disabled whenever Stripe is fully configured, and refuses non-DEV payments,
  * so it can never grant stakes for free in production.
  */
 export async function POST(req: NextRequest) {
   if (getProviderMode() !== "dev") {
-    return NextResponse.json({ error: "Disabled when Whop is enabled." }, { status: 403 });
+    return NextResponse.json({ error: "Disabled when Stripe is enabled." }, { status: 403 });
   }
   const { paymentId, outcome } = (await req.json()) as { paymentId?: string; outcome?: string };
   if (!paymentId) return NextResponse.json({ error: "paymentId required" }, { status: 400 });

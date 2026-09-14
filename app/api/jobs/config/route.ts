@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  *
  * `required` findings are exactly what requireProdEnv() refuses to serve
  * without, but requireProdEnv() is not called at startup — so a missing
- * TURNSTILE_SECRET or Whop key would otherwise be invisible: the site serves,
+ * TURNSTILE_SECRET or Stripe key would otherwise be invisible: the site serves,
  * bot checks pass, and nothing says so. The advisory severities (operator
  * lockout, per-instance rate limits) never fail anything, so this is the only
  * place they surface.

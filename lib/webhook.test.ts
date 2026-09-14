@@ -5,53 +5,81 @@ import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must st
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
-import { POST as webhookPOST } from "../app/api/webhooks/whop/route";
-import { whopPayloadReversal, whopSignatureScheme } from "./whop";
+import { POST as webhookPOST } from "../app/api/webhooks/stripe/route";
+import { stripePayloadReversal, verifyStripeSignature } from "./stripe";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
 const T8 = 9992;
 const T9 = 9991; // free id: 9992-9999 are taken by other suites (moderation owns 9993)
-const SECRET = "test-whop-secret";
+const SECRET = "whsec_test_secret";
 
 type Env = Record<string, string | undefined>;
 const penv = process.env as unknown as Env;
 let keyN = 0;
 
+/* Stripe's envelope: `t=<unix>,v1=<hex>`, an HMAC over `${t}.${rawBody}`. The
+   timestamp is fresh on every call because the route checks freshness. */
 async function signed(body: object) {
+  return signedAt(body, Math.floor(Date.now() / 1000));
+}
+
+async function signedAt(body: object, timestamp: number) {
   const raw = JSON.stringify(body);
-  const sig = createHmac("sha256", SECRET).update(raw, "utf8").digest("hex");
+  const sig = createHmac("sha256", SECRET).update(`${timestamp}.${raw}`, "utf8").digest("hex");
   return webhookPOST(
-    new NextRequest("http://localhost/api/webhooks/whop", {
+    new NextRequest("http://localhost/api/webhooks/stripe", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-whop-signature": sig },
+      headers: { "Content-Type": "application/json", "stripe-signature": `t=${timestamp},v1=${sig}` },
       body: raw,
     })
   );
 }
 
-/* The same delivery, shaped as a Standard Webhooks request (api_version v1). */
-async function signedStandard(body: object, id = `sm_${Date.now()}_${keyN++}`) {
-  const raw = JSON.stringify(body);
-  const timestamp = "1700000000";
-  const sig = createHmac("sha256", SECRET).update(`${id}.${timestamp}.${raw}`, "utf8").digest("base64");
-  return webhookPOST(
-    new NextRequest("http://localhost/api/webhooks/whop", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "webhook-id": id,
-        "webhook-timestamp": timestamp,
-        "webhook-signature": `v1,${sig}`,
+/* A paid checkout session in the shape Stripe delivers it: integer cents,
+   `payment_status: "paid"`, our paymentId in the session's own metadata. */
+function sessionEvent(eventId: string, paymentId: string, opts: { id: string; amountCents?: number }) {
+  return {
+    id: eventId,
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        object: "checkout.session",
+        id: opts.id,
+        payment_status: "paid",
+        currency: "usd",
+        ...(opts.amountCents === undefined ? {} : { amount_total: opts.amountCents }),
+        metadata: { paymentId },
       },
-      body: raw,
-    })
-  );
+    },
+  };
+}
+
+/* A `charge.refunded` delivery. The reversal is matched on the event type,
+   because a Stripe charge's own `status` stays "succeeded" through a refund —
+   the completion signal is the type, and `amount_refunded` may be partial. */
+function refundEvent(eventId: string, paymentId: string, opts: { id?: string; amountCents?: number; refundedCents?: number }) {
+  return {
+    id: eventId,
+    type: "charge.refunded",
+    data: {
+      object: {
+        object: "charge",
+        id: opts.id ?? `ch_${keyN++}`,
+        status: "succeeded",
+        refunded: true,
+        amount: opts.amountCents ?? 0,
+        amount_refunded: opts.refundedCents ?? opts.amountCents ?? 0,
+        currency: "usd",
+        metadata: { paymentId },
+      },
+    },
+  };
 }
 
 beforeAll(async () => {
   if (!hasDb) return;
-  penv.WHOP_WEBHOOK_SECRET = SECRET;
+  penv.STRIPE_WEBHOOK_SECRET = SECRET;
   await prisma.stake.deleteMany({ where: { elementId: T8 } });
   await prisma.element.upsert({
     where: { id: T8 },
@@ -71,7 +99,7 @@ afterAll(async () => {
     await prisma.$disconnect().catch(() => undefined);
     return;
   }
-  delete penv.WHOP_WEBHOOK_SECRET;
+  delete penv.STRIPE_WEBHOOK_SECRET;
   const domains = ["wh-t.dev", "wh2-t.dev", "wh3-t.dev", "wh4-t.dev", "wh5-t.dev", "wh6-t.dev"];
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: domains } } } } });
   await purgeSettledOutbox(prisma, { startup: { domain: { in: domains } } });
@@ -97,7 +125,7 @@ async function pendingPayment(domain: string, amount: number, ref: string | null
       startupId: s.id,
       amountUsd: amount,
       path: "JOIN",
-      provider: "WHOP",
+      provider: "STRIPE",
       providerRef: ref,
       idempotencyKey: `wh-t-${Date.now()}-${keyN++}`,
       status: "PENDING",
@@ -108,11 +136,7 @@ async function pendingPayment(domain: string, amount: number, ref: string | null
 describe.skipIf(!hasDb)("webhook reference safety", () => {
   it("mismatched reference on a claimed payment fails safe", async () => {
     const p = await pendingPayment("wh-t.dev", 10, "cs_owned");
-    const res = await signed({
-      id: `wh-mismatch-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "succeeded", amount: 10, currency: "usd", id: "cs_other", metadata: { paymentId: p.id } },
-    });
+    const res = await signed(sessionEvent(`evt_mismatch_${Date.now()}`, p.id, { id: "cs_other", amountCents: 1000 }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { error?: string }).error).toMatch(/reference-mismatch/);
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("PENDING");
@@ -120,11 +144,7 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
   it("reference claimed by another payment fails safe (no 500 loop)", async () => {
     const p1 = await pendingPayment("wh-t.dev", 10, "cs_shared");
     const p2 = await pendingPayment("wh2-t.dev", 10, null);
-    const res = await signed({
-      id: `wh-claimed-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "succeeded", amount: 10, currency: "usd", id: "cs_shared", metadata: { paymentId: p2.id } },
-    });
+    const res = await signed(sessionEvent(`evt_claimed_${Date.now()}`, p2.id, { id: "cs_shared", amountCents: 1000 }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { error?: string }).error).toMatch(/reference-claimed/);
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: p2.id } })).status).toBe("PENDING");
@@ -132,11 +152,7 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
   });
   it("matching reference settles", async () => {
     const p = await pendingPayment("wh2-t.dev", 12, "cs_mine");
-    const res = await signed({
-      id: `wh-ok-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "succeeded", amount: 12, currency: "usd", id: "cs_mine", metadata: { paymentId: p.id } },
-    });
+    const res = await signed(sessionEvent(`evt_ok_${Date.now()}`, p.id, { id: "cs_mine", amountCents: 1200 }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
   });
@@ -145,11 +161,7 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
     // settle — but the delivery carries the marker, because "nothing was
     // cross-checked" and "the figures agreed" are different facts.
     const p = await pendingPayment("wh2-t.dev", 12, null);
-    const res = await signed({
-      id: `wh-noamt-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "succeeded", id: `cs_noamt_${keyN++}`, metadata: { paymentId: p.id } },
-    });
+    const res = await signed(sessionEvent(`evt_noamt_${Date.now()}`, p.id, { id: `cs_noamt_${keyN++}` }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
 
@@ -161,30 +173,26 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
   });
   it("a delivery stating the amount is not marked unverified", async () => {
     const p = await pendingPayment("wh2-t.dev", 20, null);
-    const res = await signed({
-      id: `wh-amt-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "succeeded", amount: 20, currency: "usd", id: `cs_amt_${keyN++}`, metadata: { paymentId: p.id } },
-    });
+    const res = await signed(sessionEvent(`evt_amt_${Date.now()}`, p.id, { id: `cs_amt_${keyN++}`, amountCents: 2000 }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
     const ev = await prisma.providerEvent.findFirstOrThrow({ where: { paymentId: p.id, outcome: "APPLIED" } });
     expect(ev.detail).toBe(null);
   });
 
-  it("a Standard Webhooks delivery settles too", async () => {
-    // Whop fixes the envelope when the webhook resource is created
-    // (api_version: v1 = Standard Webhooks; v2/v5 = legacy). A deployment that
-    // understood only the legacy one would 401 every real delivery — silently,
-    // for as long as the provider keeps retrying, with the stake never applied.
+  it("a delivery whose timestamp is outside the tolerance is refused", async () => {
+    // The envelope carries its own freshness proof. Without the check a single
+    // observed delivery replays forever — the signature never expires, so a
+    // re-timed copy stays valid and can settle whatever payment it names.
     const p = await pendingPayment("wh2-t.dev", 18, null);
-    const res = await signedStandard({
-      id: `wh-std-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "succeeded", amount: 18, currency: "usd", id: `cs_std_${keyN++}`, metadata: { paymentId: p.id } },
-    });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
+    const stale = Math.floor(Date.now() / 1000) - 3600;
+    const res = await signedAt(sessionEvent(`evt_stale_${Date.now()}`, p.id, { id: `cs_stale_${keyN++}`, amountCents: 1800 }), stale);
+    expect(res.status).toBe(401);
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("PENDING");
+
+    // The same bytes with a current timestamp are fine: only the age was wrong.
+    const fresh = await signed(sessionEvent(`evt_fresh_${Date.now()}`, p.id, { id: `cs_fresh_${keyN++}`, amountCents: 1800 }));
+    expect(((await fresh.json()) as { outcome?: string }).outcome).toBe("applied");
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("PAID");
   });
 });
@@ -195,11 +203,7 @@ describe.skipIf(!hasDb)("webhook reference safety", () => {
    stayed on the board and in the pool. */
 async function settledPayment(domain: string, amount: number, ref: string, elementId = T9) {
   const p = await pendingPayment(domain, amount, ref, elementId);
-  const res = await signed({
-    id: `wh-paid-${Date.now()}-${keyN++}`,
-    type: "payment.succeeded",
-    data: { status: "succeeded", amount, currency: "usd", id: ref, metadata: { paymentId: p.id } },
-  });
+  const res = await signed(sessionEvent(`evt_paid_${Date.now()}_${keyN++}`, p.id, { id: ref, amountCents: Math.round(amount * 100) }));
   expect(((await res.json()) as { outcome?: string }).outcome).toBe("applied");
   return p;
 }
@@ -213,11 +217,7 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     expect((await stakeOf(T9, p.startupId)).amountUsd).toBe(25);
     expect((await prisma.element.findUniqueOrThrow({ where: { id: T9 } })).totalPoolUsd).toBe(25);
 
-    const res = await signed({
-      id: `wh-refund-${Date.now()}`,
-      type: "refund.created",
-      data: { status: "refunded", amount: 25, currency: "usd", id: "re_1", metadata: { paymentId: p.id } },
-    });
+    const res = await signed(refundEvent(`evt_refund_${Date.now()}`, p.id, { id: "ch_1", amountCents: 2500, refundedCents: 2500 }));
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("reversed");
 
@@ -235,17 +235,13 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     expect(log.deltaUsd).toBe(-25);
     expect(log.resultTotalUsd).toBe(0);
 
-    const ev = await prisma.providerEvent.findFirstOrThrow({ where: { paymentId: p.id, detail: "status:refunded" } });
+    const ev = await prisma.providerEvent.findFirstOrThrow({ where: { paymentId: p.id, detail: "type:charge.refunded" } });
     expect(ev.outcome).toBe("REFUNDED");
   });
 
   it("a duplicate delivery cannot subtract twice", async () => {
     const p = await settledPayment("wh4-t.dev", 30, "cs_refund_2");
-    const body = {
-      id: `wh-dup-refund-${Date.now()}`,
-      type: "refund.created",
-      data: { status: "refunded", amount: 30, currency: "usd", id: "re_2", metadata: { paymentId: p.id } },
-    };
+    const body = refundEvent(`evt_dup_refund_${Date.now()}`, p.id, { id: "ch_2", amountCents: 3000, refundedCents: 3000 });
     expect(((await (await signed(body)).json()) as { outcome?: string }).outcome).toBe("reversed");
     expect(((await (await signed(body)).json()) as { outcome?: string }).outcome).toBe("duplicate");
     expect((await stakeOf(T9, p.startupId)).amountUsd).toBe(0);
@@ -253,9 +249,9 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     // A DIFFERENT event id for an already-reversed payment is still a no-op:
     // the second subtraction would drive the stake negative.
     const again = await signed({
-      id: `wh-refund-again-${Date.now()}`,
-      type: "payment.refunded",
-      data: { status: "refunded", amount: 30, currency: "usd", metadata: { paymentId: p.id } },
+      id: `evt_refund_again_${Date.now()}`,
+      type: "charge.dispute.funds_withdrawn",
+      data: { object: { object: "dispute", id: "dp_1", status: "lost", currency: "usd", metadata: { paymentId: p.id } } },
     });
     expect(again.status).toBe(200);
     expect(((await again.json()) as { outcome?: string }).outcome).toBe("already-reversed");
@@ -265,10 +261,23 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
 
   it("a reversal wins over a paid signal in the same payload", async () => {
     const p = await settledPayment("wh3-t.dev", 12, "cs_both_1");
+    // Not a shape Stripe emits today: the ordering is the subject. Classification
+    // runs reversal-first, so if it were ever paid-first this payload would apply
+    // a stake *and* unwind it, instead of unwinding.
     const res = await signed({
-      id: `wh-both-${Date.now()}`,
-      type: "payment.succeeded",
-      data: { status: "refunded", amount: 12, currency: "usd", id: "cs_both_1", metadata: { paymentId: p.id } },
+      id: `evt_both_${Date.now()}`,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          object: "checkout.session",
+          id: "cs_both_1",
+          payment_status: "paid",
+          status: "refunded",
+          amount_total: 1200,
+          currency: "usd",
+          metadata: { paymentId: p.id },
+        },
+      },
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("reversed");
@@ -282,9 +291,9 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     // row as this test's result.
     const p = await pendingPayment("wh5-t.dev", 15, "cs_pending_1", T9);
     const res = await signed({
-      id: `wh-pending-refund-${Date.now()}`,
+      id: `evt_pending_dispute_${Date.now()}`,
       type: "charge.dispute.created",
-      data: { status: "disputed", metadata: { paymentId: p.id } },
+      data: { object: { object: "dispute", id: "dp_2", status: "needs_response", currency: "usd", metadata: { paymentId: p.id } } },
     });
     expect(res.status).toBe(200);
     // Not "ignored": a dispute is money leaving, never an unrelated event.
@@ -299,11 +308,7 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     // Deliberate: the ledger moves only in whole charges it recorded. A refund
     // figure we cannot reconcile must never leave paid-for inventory behind.
     const p = await settledPayment("wh3-t.dev", 40, "cs_partial_1");
-    const res = await signed({
-      id: `wh-partial-${Date.now()}`,
-      type: "refund.created",
-      data: { status: "refunded", amount: 10, currency: "usd", id: "re_3", metadata: { paymentId: p.id } },
-    });
+    const res = await signed(refundEvent(`evt_partial_${Date.now()}`, p.id, { id: "ch_3", amountCents: 4000, refundedCents: 1000 }));
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("reversed");
     expect((await stakeOf(T9, p.startupId)).amountUsd).toBe(0);
   });
@@ -311,9 +316,11 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
   it("an unrelated event still leaves the checkout alone", async () => {
     const p = await pendingPayment("wh4-t.dev", 9, "cs_noise_1", T9);
     const res = await signed({
-      id: `wh-noise-${Date.now()}`,
-      type: "membership.created",
-      data: { status: "active", metadata: { paymentId: p.id } },
+      id: `evt_noise_${Date.now()}`,
+      type: "payment_intent.created",
+      data: {
+        object: { object: "payment_intent", id: "pi_noise_1", status: "requires_payment_method", currency: "usd", metadata: { paymentId: p.id } },
+      },
     });
     expect(((await res.json()) as { outcome?: string }).outcome).toBe("ignored");
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("PENDING");
@@ -327,11 +334,7 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     const p = await settledPayment("wh6-t.dev", 25, "cs_nostake_1");
     await prisma.stake.delete({ where: { elementId_startupId: { elementId: T9, startupId: p.startupId } } });
 
-    const res = await signed({
-      id: `wh-nostake-${Date.now()}`,
-      type: "refund.created",
-      data: { status: "refunded", amount: 25, currency: "usd", id: "re_4", metadata: { paymentId: p.id } },
-    });
+    const res = await signed(refundEvent(`evt_nostake_${Date.now()}`, p.id, { id: "ch_4", amountCents: 2500, refundedCents: 2500 }));
     const body = (await res.json()) as { ok?: boolean; error?: string };
     expect(res.status).toBe(200); // terminal: redelivery cannot fix a broken ledger
     expect(body.ok).toBe(false);
@@ -343,105 +346,100 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
   });
 });
 
-describe("whopPayloadReversal", () => {
+describe("stripePayloadReversal", () => {
   it("matches reversal statuses and event types, and nothing else", () => {
     const cases: [unknown, string | null][] = [
-      [{ data: { status: "refunded" } }, "status:refunded"],
-      [{ data: { payment: { status: "Disputed" } } }, "status:disputed"],
-      [{ data: { checkout_session: { status: "chargeback" } } }, "status:chargeback"],
-      [{ data: { status: "reversed" } }, "status:reversed"],
-      [{ type: "charge.refunded" }, "type:charge.refunded"],
-      [{ type: "PAYMENT.REFUNDED" }, "type:payment.refunded"],
-      [{ type: "charge.dispute.funds_withdrawn" }, "type:charge.dispute.funds_withdrawn"],
+      // What a real delivery looks like: the object's own `status` is not a
+      // reversal word, so the event type is what carries the signal.
+      [{ type: "charge.refunded", data: { object: { object: "charge", status: "succeeded" } } }, "type:charge.refunded"],
+      [{ type: "charge.dispute.created", data: { object: { object: "dispute", status: "needs_response" } } }, "type:charge.dispute.created"],
+      [{ type: "charge.dispute.funds_withdrawn", data: { object: { object: "dispute", status: "lost" } } }, "type:charge.dispute.funds_withdrawn"],
+      // Over-matching is the safe direction for a reversal, so the type is
+      // lowercased where the paid path is not.
+      [{ type: "CHARGE.REFUNDED", data: { object: {} } }, "type:charge.refunded"],
+      // The status branch, for any event that names a reversal outright.
+      [{ data: { object: { status: "refunded" } } }, "status:refunded"],
+      [{ data: { object: { status: "Disputed" } } }, "status:disputed"],
+      [{ data: { object: { status: "chargeback" } } }, "status:chargeback"],
+      [{ data: { object: { status: "reversed" } } }, "status:reversed"],
       // A reversal status wins over a paid type in the same payload.
-      [{ type: "payment.succeeded", data: { status: "refunded" } }, "status:refunded"],
+      [{ type: "checkout.session.completed", data: { object: { status: "refunded" } } }, "status:refunded"],
       // Non-reversals stay null: the paid/failed/unrelated classification is untouched.
-      [{ type: "payment.succeeded", data: { status: "succeeded" } }, null],
-      [{ data: { status: "canceled" } }, null],
+      [{ type: "checkout.session.completed", data: { object: { status: "complete", payment_status: "paid" } } }, null],
+      // Deliberate exclusion: a refund is pending here and can still fail, so
+      // unwinding on it would strip a stake for money we kept. `charge.refunded`
+      // is the completion signal for the same money.
+      [{ type: "refund.created", data: { object: { object: "refund", status: "pending" } } }, null],
+      [{ type: "checkout.session.expired", data: { object: { status: "expired" } } }, null],
       [{}, null],
       [null, null],
     ];
     for (const [payload, expected] of cases) {
-      expect(whopPayloadReversal(payload), JSON.stringify(payload)).toBe(expected);
+      expect(stripePayloadReversal(payload), JSON.stringify(payload)).toBe(expected);
     }
   });
 });
 
-/* Envelope selection. The two schemes sign *different bytes* with the same
-   secret, so implementing one and receiving the other 401s every delivery. */
-describe("whop signature envelopes", () => {
-  const ENV_SECRET = "envelope-test-secret";
-  const previousSecret = process.env.WHOP_WEBHOOK_SECRET;
-  const raw = '{"type":"payment.succeeded"}';
-  const ID = "msg_2A0u1";
-  const TS = "1700000000";
+/* Envelope verification. The HMAC covers `${t}.${rawBody}`, and `t` is also the
+   freshness proof — so getting either wrong 401s every real delivery, silently,
+   for as long as the provider keeps retrying. */
+describe("stripe signature verification", () => {
+  const ENV_SECRET = "whsec_envelope_test";
+  const previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const raw = '{"type":"checkout.session.completed"}';
+  const TS = 1700000000;
 
-  const hexSig = (s: string) => createHmac("sha256", ENV_SECRET).update(s, "utf8").digest("hex");
-  const b64Sig = (s: string) => createHmac("sha256", ENV_SECRET).update(s, "utf8").digest("base64");
-  const standard = (signature: string, id: string | null = ID, timestamp: string | null = TS) => ({
-    id,
-    timestamp,
-    signature,
-  });
+  const hexSig = (s: string, t: number = TS) => createHmac("sha256", ENV_SECRET).update(`${t}.${s}`, "utf8").digest("hex");
 
   beforeAll(() => {
-    process.env.WHOP_WEBHOOK_SECRET = ENV_SECRET;
+    process.env.STRIPE_WEBHOOK_SECRET = ENV_SECRET;
   });
   afterAll(() => {
-    if (previousSecret === undefined) delete process.env.WHOP_WEBHOOK_SECRET;
-    else process.env.WHOP_WEBHOOK_SECRET = previousSecret;
+    if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
   });
 
-  it("accepts a legacy hex signature over the raw body", () => {
-    expect(whopSignatureScheme(raw, hexSig(raw))).toBe("legacy");
-  });
-
-  it("accepts a Standard Webhooks v1 signature", () => {
-    expect(whopSignatureScheme(raw, null, standard(`v1,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe("standard");
-  });
-
-  it("accepts an unpadded base64 signature", () => {
-    const sig = b64Sig(`${ID}.${TS}.${raw}`).replace(/=+$/, "");
-    expect(whopSignatureScheme(raw, null, standard(`v1,${sig}`))).toBe("standard");
+  it("accepts a v1 signature over `${t}.${body}`", () => {
+    expect(verifyStripeSignature(raw, `t=${TS},v1=${hexSig(raw)}`, TS)).toBe(true);
   });
 
   it("accepts any matching entry when several are sent during rotation", () => {
-    const good = b64Sig(`${ID}.${TS}.${raw}`);
-    expect(whopSignatureScheme(raw, null, standard(`v1,bm90LXJlYWw= v1,${good}`))).toBe("standard");
-  });
-
-  it("ignores a non-v1 version tag", () => {
-    expect(whopSignatureScheme(raw, null, standard(`v2,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe(null);
+    expect(verifyStripeSignature(raw, `t=${TS},v1=bm90LXJlYWw=,v1=${hexSig(raw)}`, TS)).toBe(true);
   });
 
   it("rejects a v1 signature computed over the body alone", () => {
     // The precise confusion this guards against: right secret, wrong bytes.
-    expect(whopSignatureScheme(raw, null, standard(`v1,${b64Sig(raw)}`))).toBe(null);
+    const bodyOnly = createHmac("sha256", ENV_SECRET).update(raw, "utf8").digest("hex");
+    expect(verifyStripeSignature(raw, `t=${TS},v1=${bodyOnly}`, TS)).toBe(false);
   });
 
-  it("rejects a legacy signature computed over the signed-content form", () => {
-    expect(whopSignatureScheme(raw, hexSig(`${ID}.${TS}.${raw}`))).toBe(null);
+  it("rejects a header with no timestamp, with no v1 entry, or with no header", () => {
+    expect(verifyStripeSignature(raw, `v1=${hexSig(raw)}`, TS)).toBe(false);
+    expect(verifyStripeSignature(raw, `t=${TS}`, TS)).toBe(false);
+    expect(verifyStripeSignature(raw, null, TS)).toBe(false);
   });
 
-  it("rejects a v1 signature when webhook-id or webhook-timestamp is absent", () => {
-    const sig = `v1,${b64Sig(`${ID}.${TS}.${raw}`)}`;
-    expect(whopSignatureScheme(raw, null, standard(sig, null))).toBe(null);
-    expect(whopSignatureScheme(raw, null, standard(sig, ID, null))).toBe(null);
+  it("rejects a signature outside the tolerance window, in either direction", () => {
+    // The window is the reason the envelope carries `t` at all: without it a
+    // captured delivery is a valid signature forever.
+    expect(verifyStripeSignature(raw, `t=${TS},v1=${hexSig(raw)}`, TS + 301)).toBe(false);
+    expect(verifyStripeSignature(raw, `t=${TS},v1=${hexSig(raw)}`, TS - 301)).toBe(false);
+    expect(verifyStripeSignature(raw, `t=${TS},v1=${hexSig(raw)}`, TS + 300)).toBe(true);
   });
 
-  it("rejects a signature over a different body, in either scheme", () => {
-    expect(whopSignatureScheme(`${raw} `, hexSig(raw))).toBe(null);
-    expect(whopSignatureScheme(`${raw} `, null, standard(`v1,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe(null);
+  it("rejects a signature over a different body, and a wrong secret", () => {
+    expect(verifyStripeSignature(`${raw} `, `t=${TS},v1=${hexSig(raw)}`, TS)).toBe(false);
+    const other = createHmac("sha256", "whsec_someone_else").update(`${TS}.${raw}`, "utf8").digest("hex");
+    expect(verifyStripeSignature(raw, `t=${TS},v1=${other}`, TS)).toBe(false);
   });
 
   it("rejects everything when no secret is configured", () => {
-    const kept = process.env.WHOP_WEBHOOK_SECRET;
-    delete process.env.WHOP_WEBHOOK_SECRET;
+    const kept = process.env.STRIPE_WEBHOOK_SECRET;
+    delete process.env.STRIPE_WEBHOOK_SECRET;
     try {
-      expect(whopSignatureScheme(raw, hexSig(raw))).toBe(null);
-      expect(whopSignatureScheme(raw, null, standard(`v1,${b64Sig(`${ID}.${TS}.${raw}`)}`))).toBe(null);
+      expect(verifyStripeSignature(raw, `t=${TS},v1=${hexSig(raw)}`, TS)).toBe(false);
     } finally {
-      process.env.WHOP_WEBHOOK_SECRET = kept;
+      process.env.STRIPE_WEBHOOK_SECRET = kept;
     }
   });
 });

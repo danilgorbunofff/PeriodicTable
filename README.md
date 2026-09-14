@@ -11,7 +11,7 @@ plant a flag from $5, take the #1 crown at current-leader + $1, top up to reclai
 
 ## Stack
 
-Next.js 14 App Router + Tailwind, Prisma 6 + Postgres, Whop (payments),
+Next.js 14 App Router + Tailwind, Prisma 6 + Postgres, Stripe (payments),
 Resend (email), Cloudflare Turnstile (bot checks). Hosting: Vercel.
 
 ## Local setup
@@ -32,13 +32,13 @@ Any Postgres 16 works (Neon/Supabase pooled URI for serverless, local
 | Var | Dev | Production |
 |---|---|---|
 | `DATABASE_URL` | required | required |
-| `WHOP_API_KEY` / `WHOP_WEBHOOK_SECRET` | optional (absent = dev pay simulator) | **required** |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | optional (absent = dev pay simulator) | **required** |
 | `NEXT_PUBLIC_APP_URL` | default localhost | **required, https** |
 | `TURNSTILE_SECRET` | optional (absent = checks pass locally) | **required** |
 | `CLICK_SALT` | default dev salt | **required, private random** |
 | `CRON_SECRET` | optional locally | **required** |
 | `RESEND_API_KEY` / `EMAIL_FROM` | optional (absent = emails logged, not sent) | **required** |
-| `PAYMENTS_LIVE` / `NEXT_PUBLIC_PAYMENTS_LIVE` | default live (simulator) | **fail-closed**: payments run only when explicitly `"true"` **and** Whop keys are set |
+| `PAYMENTS_LIVE` / `NEXT_PUBLIC_PAYMENTS_LIVE` | default live (simulator) | **fail-closed**: payments run only when explicitly `"true"` **and** both Stripe keys are set |
 
 Validate production config explicitly (used by CI and the deploy runbook):
 

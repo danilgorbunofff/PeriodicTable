@@ -2,27 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaymentStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
-  whopSignatureScheme,
-  paymentIdFromWhopPayload,
-  whopPayloadIsPaid,
-  whopPayloadIsFailed,
-  whopPayloadReversal,
-  whopEventId,
-  whopEventType,
-  whopMoney,
-  validateWhopMoney,
-} from "@/lib/whop";
+  verifyStripeSignature,
+  paymentIdFromStripePayload,
+  stripePayloadIsPaid,
+  stripePayloadIsFailed,
+  stripePayloadReversal,
+  stripeEventId,
+  stripeEventType,
+  stripeMoney,
+} from "@/lib/stripe";
+import { validateProviderMoney } from "@/lib/money";
 import { settlePayment, reversePayment } from "@/lib/settle";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Whop webhook (Phase 2 rewrite).
+ * Stripe webhook.
  *
- * - Verifies the HMAC signature against raw bytes; 401 otherwise. Accepts both
- *   the Standard Webhooks envelope (`webhook-signature`) and the legacy
- *   `x-whop-signature`, because which one a delivery uses is decided when the
- *   webhook resource is created, not by us.
+ * - Verifies `stripe-signature` (HMAC-SHA256 over `${t}.${rawBody}`, 300s
+ *   tolerance) against the raw bytes; 401 otherwise.
  * - Classifies paid ONLY on explicit provider signals (P0-03: statusless or
  *   unknown events are IGNORED with 200 — they must never apply a stake).
  * - Classifies refunds/chargebacks/disputes BEFORE paid/failed and unwinds the
@@ -31,22 +29,16 @@ export const dynamic = "force-dynamic";
  *   payment before settling (item 4); mismatches are rejected loudly.
  * - Every delivery is recorded as a ProviderEvent; true duplicates get 200;
  *   settlement is atomic (settlePayment); unexpected failures get non-2xx so
- *   the provider redelivers (item 7).
+ *   Stripe redelivers (item 7).
  */
 export async function POST(req: NextRequest) {
   const raw = await req.text();
-  const scheme = whopSignatureScheme(raw, req.headers.get("x-whop-signature"), {
-    id: req.headers.get("webhook-id"),
-    timestamp: req.headers.get("webhook-timestamp"),
-    signature: req.headers.get("webhook-signature"),
-  });
-
-  if (!scheme) {
+  if (!verifyStripeSignature(raw, req.headers.get("stripe-signature"))) {
     return NextResponse.json({ error: "bad signature" }, { status: 401 });
   }
-  // Otherwise unobservable from our side, and guessing wrong fails silently:
-  // a 401 per delivery, retried for days, then the endpoint is disabled.
-  console.log(`[whop-webhook] verified via ${scheme} signature`);
+  // A silent 401 per delivery is unobservable from our side: Stripe retries for
+  // days and then disables the endpoint.
+  console.log("[stripe-webhook] verified signature");
 
   let payload: unknown;
   try {
@@ -55,13 +47,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
 
-  const eventId = whopEventId(payload, raw);
-  const eventType = whopEventType(payload);
-  const paymentId = paymentIdFromWhopPayload(payload);
+  const eventId = stripeEventId(payload, raw);
+  const eventType = stripeEventType(payload);
+  const paymentId = paymentIdFromStripePayload(payload);
   if (!paymentId) {
     await prisma.providerEvent.upsert({
       where: { providerEventId: eventId },
-      create: { provider: "WHOP", providerEventId: eventId, eventType, outcome: "IGNORED", detail: "no-paymentId", payload: payload as object },
+      create: { provider: "STRIPE", providerEventId: eventId, eventType, outcome: "IGNORED", detail: "no-paymentId", payload: payload as object },
       update: { outcome: "IGNORED", detail: "no-paymentId" },
     });
     return NextResponse.json({ ok: true, note: "no paymentId in payload" });
@@ -71,7 +63,7 @@ export async function POST(req: NextRequest) {
   if (!payment) {
     await prisma.providerEvent.upsert({
       where: { providerEventId: eventId },
-      create: { provider: "WHOP", providerEventId: eventId, eventType, outcome: "IGNORED", detail: "unknown-payment", payload: payload as object },
+      create: { provider: "STRIPE", providerEventId: eventId, eventType, outcome: "IGNORED", detail: "unknown-payment", payload: payload as object },
       update: { outcome: "IGNORED", detail: "unknown-payment" },
     });
     // 200: retrying an unknown payment can never succeed.
@@ -82,11 +74,11 @@ export async function POST(req: NextRequest) {
   // BEFORE paid/failed: a payload can carry both a paid type and a refunded
   // status, and the reversal must win — otherwise the network hands the money
   // back while our ledger keeps the stake on the board and in the pool.
-  const reversal = whopPayloadReversal(payload);
+  const reversal = stripePayloadReversal(payload);
   if (reversal) {
     try {
       const outcome = await reversePayment(paymentId, {
-        provider: "whop",
+        provider: "stripe",
         eventId,
         eventType,
         reversal,
@@ -103,23 +95,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const paid = whopPayloadIsPaid(payload);
-  const money = whopMoney(payload);
+  const paid = stripePayloadIsPaid(payload);
+  const money = stripeMoney(payload);
 
   if (!paid) {
     // Explicit failure → mark failed. Anything else is an unrelated event
     // (P0-03): record IGNORED and leave the pending payment untouched — a
     // noisy event stream must never cancel a real checkout.
-    if (!whopPayloadIsFailed(payload)) {
+    if (!stripePayloadIsFailed(payload)) {
       await prisma.providerEvent.upsert({
         where: { providerEventId: eventId },
-        create: { provider: "WHOP", providerEventId: eventId, eventType, paymentId, outcome: "IGNORED", detail: "unrelated-event", payload: payload as object },
+        create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "IGNORED", detail: "unrelated-event", payload: payload as object },
         update: { outcome: "IGNORED", detail: "unrelated-event" },
       });
       return NextResponse.json({ ok: true, outcome: "ignored" });
     }
     const outcome = await settlePayment(paymentId, {
-      provider: "whop",
+      provider: "stripe",
       eventId,
       eventType,
       paid: false,
@@ -128,12 +120,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Paid signal: validate money claims + reference before touching the ledger.
-  const check = validateWhopMoney(payment.amountUsd, money);
+  const check = validateProviderMoney(payment.amountUsd, money);
   if (check.status === "rejected") {
     const moneyErr = check.reason;
     await prisma.providerEvent.upsert({
       where: { providerEventId: eventId },
-      create: { provider: "WHOP", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail: moneyErr, payload: payload as object },
+      create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail: moneyErr, payload: payload as object },
       update: { outcome: "ERROR", detail: moneyErr },
     });
     // Non-2xx is wrong here (redelivery won't fix a mismatch); 200 + ERROR
@@ -144,7 +136,7 @@ export async function POST(req: NextRequest) {
     const detail = `reference-mismatch:${money.providerRef}`;
     await prisma.providerEvent.upsert({
       where: { providerEventId: eventId },
-      create: { provider: "WHOP", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail, payload: payload as object },
+      create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail, payload: payload as object },
       update: { outcome: "ERROR", detail },
     });
     return NextResponse.json({ ok: false, error: detail }, { status: 200 });
@@ -157,7 +149,7 @@ export async function POST(req: NextRequest) {
       const detail = `reference-claimed:${money.providerRef}`;
       await prisma.providerEvent.upsert({
         where: { providerEventId: eventId },
-        create: { provider: "WHOP", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail, payload: payload as object },
+        create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail, payload: payload as object },
         update: { outcome: "ERROR", detail },
       });
       return NextResponse.json({ ok: false, error: detail }, { status: 200 });
@@ -166,7 +158,7 @@ export async function POST(req: NextRequest) {
   if (payment.status !== PaymentStatus.PENDING) {
     await prisma.providerEvent.upsert({
       where: { providerEventId: eventId },
-      create: { provider: "WHOP", providerEventId: eventId, eventType, paymentId, outcome: "DUPLICATE", detail: `already-${payment.status.toLowerCase()}`, payload: payload as object },
+      create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "DUPLICATE", detail: `already-${payment.status.toLowerCase()}`, payload: payload as object },
       update: { outcome: "DUPLICATE", detail: `already-${payment.status.toLowerCase()}` },
     });
     return NextResponse.json({ ok: true, outcome: "already-settled" });
@@ -174,7 +166,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const outcome = await settlePayment(paymentId, {
-      provider: "whop",
+      provider: "stripe",
       eventId,
       eventType,
       paid: true,
@@ -192,7 +184,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, outcome: outcome.outcome });
   } catch {
-    // Retryable: non-2xx so Whop redelivers; the event row says ERROR.
+    // Retryable: non-2xx so Stripe redelivers; the event row says ERROR.
     return NextResponse.json({ ok: false, error: "settle-retryable" }, { status: 500 });
   }
 }

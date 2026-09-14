@@ -1,5 +1,5 @@
 /** Abuse guards (Phase 4, spec 03-abuse-legal-perf.md).
- * Turnstile is env-gated like Whop/Resend: when TURNSTILE_SECRET is absent,
+ * Turnstile is env-gated like Stripe/Resend: when TURNSTILE_SECRET is absent,
  * verification passes locally so dev/E2E still works; production must set it.
  */
 export function turnstileEnabled(): boolean {
