@@ -255,6 +255,22 @@ describe.skipIf(!hasDb)("atomic settle (P0-02)", () => {
     expect(await prisma.outboxEvent.count({ where: { dedupeKey: "settle-t-dedupe" } })).toBe(1);
     await prisma.outboxEvent.deleteMany({ where: { dedupeKey: "settle-t-dedupe" } });
   });
+  it("delivers the settle's mail before settlePayment returns", async () => {
+    const s = await fixtureStartup("settle2-t.dev");
+    const to = `settle-drain-${Date.now()}@example.com`;
+    const payment = await prisma.payment.create({
+      data: { elementId: T4, startupId: s.id, amountUsd: 5, path: "JOIN", provider: "DEV", idempotencyKey: `settle-t-drain-${Date.now()}`, status: "PENDING", email: to },
+    });
+    const out = await settlePayment(payment.id, { provider: "dev", eventId: `dev-settle-t-drain-${Date.now()}`, eventType: "dev.test", paid: true });
+    expect(out.outcome).toBe("applied");
+    // Regression guard: the inline drain used to be fire-and-forget, so it was
+    // killed with the response and the row kept its 5-minute claim lease — the
+    // receipt then waited for the next external tick, which can be hours.
+    const receipt = await prisma.outboxEvent.findUniqueOrThrow({ where: { dedupeKey: `receipt-${payment.id}` } });
+    expect(receipt.completedAt).not.toBeNull();
+    expect(await prisma.emailLog.count({ where: { to } })).toBe(1);
+    await prisma.emailLog.deleteMany({ where: { to } });
+  });
   it("a redelivery after a retryable failure still settles", async () => {
     const s = await fixtureStartup("settle-t.dev");
     const eventId = `dev-settle-t-retry-${Date.now()}`;

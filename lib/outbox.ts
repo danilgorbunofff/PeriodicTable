@@ -127,12 +127,20 @@ export async function processOutboxRowById(id: string): Promise<"completed" | "f
  * share a row. Claims push nextAttemptAt out by a lease (crashed workers
  * release automatically); failures still bump attempts + backoff.
  */
-export async function claimDueOutbox(limit: number, leaseMs = 5 * 60_000): Promise<{ id: string }[]> {
+export async function claimDueOutbox(
+  limit: number,
+  leaseMs = 5 * 60_000,
+  types?: OutboxType[]
+): Promise<{ id: string }[]> {
+  // "type" is cast to text so the parameterised list works whether the column
+  // is a Postgres enum or a plain string.
+  const typeFilter = types?.length ? Prisma.sql`AND "type"::text IN (${Prisma.join(types)})` : Prisma.empty;
   return prisma.$queryRaw<{ id: string }[]>`
     UPDATE "OutboxEvent" SET "nextAttemptAt" = NOW() + (${leaseMs} * INTERVAL '1 millisecond')
     WHERE id IN (
       SELECT id FROM "OutboxEvent"
       WHERE "completedAt" IS NULL AND "nextAttemptAt" <= NOW() AND attempts < ${OUTBOX_MAX_ATTEMPTS}
+        ${typeFilter}
       ORDER BY "nextAttemptAt" ASC LIMIT ${limit} FOR UPDATE SKIP LOCKED
     )
     RETURNING id`;
@@ -142,11 +150,11 @@ export async function claimDueOutbox(limit: number, leaseMs = 5 * 60_000): Promi
  * Claims first so the inline post-settle drain honours the same lease as the
  * job worker: reading without claiming would let a row this drain is holding
  * be delivered a second time by a worker that claims it mid-flight. */
-export async function drainDue(limit = 10): Promise<{ completed: number; failed: number }> {
+export async function drainDue(limit = 10, types?: OutboxType[]): Promise<{ completed: number; failed: number }> {
   let completed = 0;
   let failed = 0;
   try {
-    const claimed = await claimDueOutbox(limit);
+    const claimed = await claimDueOutbox(limit, undefined, types);
     for (const row of claimed) {
       const out = await processOutboxRowById(row.id);
       if (out === "completed") completed++;
@@ -156,4 +164,32 @@ export async function drainDue(limit = 10): Promise<{ completed: number; failed:
     console.error("outbox drain failed (non-blocking):", e);
   }
   return { completed, failed };
+}
+
+/**
+ * Await a drain, but never longer than `budgetMs`.
+ *
+ * The inline post-settle path MUST wait for delivery: a fire-and-forget drain
+ * is killed the moment the serverless response is flushed, which left the
+ * receipt/outbid mail sitting on its 5-minute claim lease until some later
+ * external tick picked it up. Bounded so a slow delivery cannot stall the
+ * webhook response — rows unfinished at the deadline keep their lease and are
+ * retried by the authenticated worker, exactly as before.
+ */
+export async function drainDueWithin(
+  budgetMs: number,
+  limit = 10,
+  types?: OutboxType[]
+): Promise<{ completed: number; failed: number; timedOut: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<"deadline">((resolve) => {
+      timer = setTimeout(() => resolve("deadline"), budgetMs);
+    });
+    const outcome = await Promise.race([drainDue(limit, types), deadline]);
+    if (outcome === "deadline") return { completed: 0, failed: 0, timedOut: true };
+    return { ...outcome, timedOut: false };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
