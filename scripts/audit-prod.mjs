@@ -8,7 +8,7 @@
  *
  * Usage: npm run audit:prod
  */
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,12 @@ for (const a of allowlist.accepted ?? []) {
 
 let audit;
 try {
-  const out = execFileSync("npm", ["audit", "--omit=dev", "--json"], { cwd: root, encoding: "utf8" });
+  // Single-string form on purpose: npm is a batch shim on Windows, which
+  // CreateProcess cannot launch directly (execFileSync -> EINVAL), and the
+  // args+shell workaround is deprecated in Node 22 (DEP0190) because those
+  // args are concatenated unescaped. A fixed literal through the shell is
+  // the one form that behaves identically on both platforms.
+  const out = execSync("npm audit --omit=dev --json", { cwd: root, encoding: "utf8" });
   audit = JSON.parse(out);
 } catch (e) {
   // npm exits non-zero when vulnerabilities are found; stdout still has JSON.
