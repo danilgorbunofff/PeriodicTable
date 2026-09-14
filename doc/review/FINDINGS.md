@@ -37,6 +37,8 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | R02-4 | 02 | content | The served document advertises 122 elements at `$5 · unclaimed` before hydration — the claim `lib/liveState.ts` exists to prevent | §5.6 (149431 B document, `unclaimed` ×123, tile titles); `app/page.tsx:216-233,197-203`; `lib/liveState.ts:24-27` | open | — |
 | R02-5 | 02 | ux | An empty `/api/activity` feed renders `loading…` pulsing forever above `0 recent` | §5.5 (`[]`, 200, 2 B); `components/ActivityCard.tsx:36-38,70-74` | open | — |
 | R04-1 | 04 | money | A reclaim link's pre-filled amount is set once from the quote and never reconciled with the board, so after a rival bid the older amount is charged as an ordinary top-up that retakes nothing while the modal prints the live delta beside it | `doc/review/04-element-detail-and-pricing.md` §5.1-§5.3, R04-1; `app/page.tsx:116-123,127-130`; `components/Modals.tsx:154-170,378`; `app/elements/[sym]/page.tsx:68-71` | open | — |
+| R05-1 | 05 | a11y | Error text misses the project's own contrast budget: ten `text-red-500` sites and two `ink/60` labels measure 3.49–3.95:1 against the 4.5:1 the token table documents | `doc/review/05-accessibility-and-content.md` §5.1, §5.3, R05-1; `components/Modals.tsx:284,331-372,421-422`; `components/TerritoryView.tsx:81`; `components/WorldOrder.tsx:36`; `tailwind.config.ts:17-48` | open | — |
+| R05-2 | 05 | a11y | The only focus indicator is a 1.43:1 `cta` ring and the search field has none, against 1.4.11's 3:1 | §5.1, R05-2; `components/IcyInput.tsx:11`; `components/SearchPill.tsx:117`; `components/IconBtn.tsx:23`; `components/PeriodicGrid.tsx:258`; `tailwind.config.ts:30` | open | — |
 
 ## P3
 
@@ -56,9 +58,17 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | R04-2 | 04 | correctness | A hidden holder is priced as a newcomer: `?me=` and the modal answer from the hidden-filtered list while checkout looks the caller up unfiltered and reserves only TAKE, so the modal promises a 15-minute hold no `Reservation` row backs | `doc/review/04-element-detail-and-pricing.md` §4.4, §6, R04-2; `app/api/elements/[sym]/route.ts:13,47-52`; `components/Modals.tsx:150-153`; `app/api/checkout/route.ts:215-218,296-311` | open | — |
 | R04-3 | 04 | testing | `validateTake` (`lib/pricing.ts:53-58`) is dead code: its only references are its own test, while the take floor is enforced by `reservedTotal` and `lib/settle.ts:161` — so the documented $L+1 rule has no test on its live path | `doc/review/04-element-detail-and-pricing.md` §5.7, R04-3; `lib/pricing.test.ts:11,93-95` | open | — |
 | R04-4 | 04 | seo | `/elements/<symbol>` is case-sensitive with no redirect, so `/elements/au` — the form a human types — is a 404 while `/elements/Au` is 200; `?el=` and the API agree with the strictness | `doc/review/04-element-detail-and-pricing.md` §5.5, R04-4; `app/elements/[sym]/page.tsx:15-16,26-27`; `app/api/elements/[sym]/route.ts:25`; `app/page.tsx:108` | open | — |
+| R05-3 | 05 | a11y | Home serves no `<main>` and no skip link, and the profile page has no landmark and no heading above `<h3>` | §5.2, §5.3, R05-3; `app/layout.tsx`; `app/page.tsx`; `app/s/[domain]/page.tsx:164` | open | — |
+| R05-4 | 05 | a11y | Both branches of each checkout error render the same element id, so a client and a server failure produce duplicate ids and `aria-describedby` resolves to the first div | §5.3, R05-4; `components/Modals.tsx:329-332,343-346,357-360` | open | — |
+| R05-5 | 05 | a11y | Four panels refetch every 30 s with no pause and none is `aria-live`, so a tab open an hour makes 480 requests and shifts numbers under a pointer | R05-5; `app/page.tsx:67,73,76`; `components/ActivityCard.tsx:36`; `components/TerritoryView.tsx:31`; `components/WorldOrder.tsx:23` | open | — |
+| R05-6 | 05 | content | `/legal/rules` says "we do not offer refunds" twice while the shipped path reverses a settled payment (`kind: "refund"`) on `charge.refunded` | §5.2, R05-6; `app/legal/[slug]/page.tsx:81-84`; `lib/recompute.ts:116,165`; `lib/stripe.ts:325-327,340` | open | — |
+| R05-7 | 05 | content | Two promises nothing keeps: reports "actioned within 72 hours" and a waitlist "we'll be in touch", while the report surface is a pull queue and a waitlist join sends nothing | R05-7; `app/legal/[slug]/page.tsx:104`; `app/api/admin/reports/route.ts`; `app/api/waitlist/route.ts:39,44`; `components/Modals.tsx:192` | open | — |
+| R05-8 | 05 | content | Production serves the dev-simulator copy on `/pay/[paymentId]` ("DEV SIMULATOR", "No Stripe keys configured") while the API 403s outside mode `dev` | §5.2, R05-8; `app/pay/[paymentId]/page.tsx:52,55,93`; `app/api/dev/pay/route.ts:15` | open | — |
 
 ## UNKNOWN — evidence not yet obtainable
 
+| ID | Phase | Category | Unknown | What settles it |
+| --- | --- | --- | --- | --- |
 | U01-1 | 01 | seo | Whether each platform actually renders the element card (image, or text only) | Paste `https://www.periodictable.lol/elements/H` into a private X post draft, a Slack DM, a Discord DM, an iMessage to yourself and the LinkedIn Post Inspector, and read the rendered card; delete any public post afterwards |
 | U01-2 | 01 | seo | Whether Google has the sitemap and whether the 122 element pages are indexed | Search Console → verify the `www` URL-prefix property → Sitemaps → submit `https://www.periodictable.lol/sitemap.xml` → read Pages/Coverage for the element URLs |
 | U01-3 | 01 | seo | Whether a leader domain of ~30+ characters overflows the OG card's 640 px text column (no clamp in the route) | `curl -s https://www.periodictable.lol/og/<sym> -o card.svg` for a symbol whose leader has a long domain (needs the first real stake), or substitute the text in a local copy of the SVG and measure the text element's bounding box in a browser |
@@ -73,6 +83,9 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | U04-1 | 04 | data | Whether the `ActivityLog` rows carry `deltaUsd`/`resultTotalUsd` or the pre-Phase-3 NULLs, and what the feed prints for each | `psql "$DATABASE_URL"`, SQL in a temp `.sql` piped in (`-c` breaks on PascalCase) — read only |
 | U04-2 | 04 | correctness | Whether any production `Stake` row belongs to a `HIDDEN` startup, which decides R04-2's reach from static-only to live | Same connection: `SELECT count(*) FROM "Stake" s JOIN "Startup" u ON u.id = s."startupId" WHERE u."moderationState" = 'HIDDEN';` |
 | U04-3 | 04 | money | The claimed-state render, the receipt shape and the real $5 charge on the element path | J4 — one real card payment, then `/elements/<sym>` and the Stripe dashboard; residue 1 `Payment`, 1 `Stake`, 1 `ActivityLog` |
+| U05-1 | 05 | a11y | Whether the 22 `text-money` sites render ≥18.66 px bold, which 3.00–3.25:1 passes, or are failing small text | `getComputedStyle` over `.text-money` at 1280/360 px |
+| U05-2 | 05 | a11y | Whether the white `.exotic-tile:focus-visible` outline clears 3:1 on every exotic theme, not only the worst | Focus each theme's tile and sample the outline against its background |
+| U05-3 | 05 | a11y | Tab order, focus visibility and 1.4.10 reflow at 400 % zoom on the live shell | A browser run — blocked on this host by U02-1 (`02` §5.8) |
 
 ## Summary
 
@@ -83,7 +96,7 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | 02 | Shell and static surfaces | draft | 0 | 0 | 5 | 2 | 2026-09-14 |
 | 03 | The board | draft | 0 | 0 | 0 | 4 | 2026-09-14 |
 | 04 | Element detail and pricing | draft | 0 | 0 | 1 | 3 | 2026-09-14 |
-| 05 | Accessibility and content | not started | — | — | — | — | — |
+| 05 | Accessibility and content | draft | 0 | 0 | 2 | 6 | 2026-09-14 |
 | 06 | Checkout before payment | not started | — | — | — | — | — |
 | 07 | Payment provider integration | not started | — | — | — | — | — |
 | 08 | Settlement and ledger integrity | not started | — | — | — | — | — |
