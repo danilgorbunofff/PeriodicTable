@@ -36,6 +36,7 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | R02-3 | 02 | ux | No error boundary anywhere: `error.tsx`, `global-error.tsx` and `loading.tsx` are all absent, so a client render throw or an unguarded server read reaches Next's default surface with no brand and no recovery | §5.7 (absence audit under `app/`) | open | — |
 | R02-4 | 02 | content | The served document advertises 122 elements at `$5 · unclaimed` before hydration — the claim `lib/liveState.ts` exists to prevent | §5.6 (149431 B document, `unclaimed` ×123, tile titles); `app/page.tsx:216-233,197-203`; `lib/liveState.ts:24-27` | open | — |
 | R02-5 | 02 | ux | An empty `/api/activity` feed renders `loading…` pulsing forever above `0 recent` | §5.5 (`[]`, 200, 2 B); `components/ActivityCard.tsx:36-38,70-74` | open | — |
+| R04-1 | 04 | money | A reclaim link's pre-filled amount is set once from the quote and never reconciled with the board, so after a rival bid the older amount is charged as an ordinary top-up that retakes nothing while the modal prints the live delta beside it | `doc/review/04-element-detail-and-pricing.md` §5.1-§5.3, R04-1; `app/page.tsx:116-123,127-130`; `components/Modals.tsx:154-170,378`; `app/elements/[sym]/page.tsx:68-71` | open | — |
 
 ## P3
 
@@ -52,6 +53,9 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | R03-2 | 03 | correctness | The API ships money aggregates that count stakes the tiles refuse to show — the face filter keeps only `amountUsd > 0` `DIRECT_STATES` rows while `pool`/`count` and `claimedElements` count every stake; P3 only because both sides are empty today, it becomes real the day a stake is hidden | §5.1, §5.8; `app/api/elements/route.ts:15-18,35-40`; `app/api/stats/route.ts:21,27`; `doc/PROD-READINESS-CHECKLIST.md` §J6 | open | — |
 | R03-3 | 03 | perf | The declared cache window never reaches the wire: `s-maxage=10, stale-while-revalidate=30` in the route, `public, max-age=0, must-revalidate` plus `Age: 6` and `X-Vercel-Cache: HIT` on the wire, as for all five read APIs | §5.7; `app/api/elements/route.ts:48` | open | — |
 | R03-4 | 03 | a11y | The search field announces combobox state it does not have: `aria-expanded="true"` and `aria-controls="search-results"` are hardcoded while the listbox is conditional, and the `role="option"` items carry no `aria-selected` | §5.2; `components/SearchPill.tsx:93,94,130,146,186` | open | — |
+| R04-2 | 04 | correctness | A hidden holder is priced as a newcomer: `?me=` and the modal answer from the hidden-filtered list while checkout looks the caller up unfiltered and reserves only TAKE, so the modal promises a 15-minute hold no `Reservation` row backs | `doc/review/04-element-detail-and-pricing.md` §4.4, §6, R04-2; `app/api/elements/[sym]/route.ts:13,47-52`; `components/Modals.tsx:150-153`; `app/api/checkout/route.ts:215-218,296-311` | open | — |
+| R04-3 | 04 | testing | `validateTake` (`lib/pricing.ts:53-58`) is dead code: its only references are its own test, while the take floor is enforced by `reservedTotal` and `lib/settle.ts:161` — so the documented $L+1 rule has no test on its live path | `doc/review/04-element-detail-and-pricing.md` §5.7, R04-3; `lib/pricing.test.ts:11,93-95` | open | — |
+| R04-4 | 04 | seo | `/elements/<symbol>` is case-sensitive with no redirect, so `/elements/au` — the form a human types — is a 404 while `/elements/Au` is 200; `?el=` and the API agree with the strictness | `doc/review/04-element-detail-and-pricing.md` §5.5, R04-4; `app/elements/[sym]/page.tsx:15-16,26-27`; `app/api/elements/[sym]/route.ts:25`; `app/page.tsx:108` | open | — |
 
 ## UNKNOWN — evidence not yet obtainable
 
@@ -66,6 +70,9 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | U03-2 | 03 | perf | Cold mobile load and LCP against the budget; desktop is measured (§5.6) | DevTools phone viewport with 4× CPU throttling, or `npx lighthouse <url> --output=json` |
 | U03-3 | 03 | correctness | What a claimed tile, a missing logo or a hidden listing renders — the one production write this doc defers until a go-ahead | Two stakes on a throwaway DB, then read `/api/elements` and `/api/stats`; residue 2 `Stake` rows |
 | U03-4 | 03 | ux | Whether `?el=Hbar` deep-links and scrolls without JS | `curl.exe -sS <url>/?el=Hbar` for the face, a browser for the scroll |
+| U04-1 | 04 | data | Whether the `ActivityLog` rows carry `deltaUsd`/`resultTotalUsd` or the pre-Phase-3 NULLs, and what the feed prints for each | `psql "$DATABASE_URL"`, SQL in a temp `.sql` piped in (`-c` breaks on PascalCase) — read only |
+| U04-2 | 04 | correctness | Whether any production `Stake` row belongs to a `HIDDEN` startup, which decides R04-2's reach from static-only to live | Same connection: `SELECT count(*) FROM "Stake" s JOIN "Startup" u ON u.id = s."startupId" WHERE u."moderationState" = 'HIDDEN';` |
+| U04-3 | 04 | money | The claimed-state render, the receipt shape and the real $5 charge on the element path | J4 — one real card payment, then `/elements/<sym>` and the Stripe dashboard; residue 1 `Payment`, 1 `Stake`, 1 `ActivityLog` |
 
 ## Summary
 
@@ -74,8 +81,8 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | 00 | Review plan | draft | — | — | — | — | 2026-09-14 |
 | 01 | Discovery and unfurl | draft | 0 | 0 | 3 | 5 | 2026-09-14 |
 | 02 | Shell and static surfaces | draft | 0 | 0 | 5 | 2 | 2026-09-14 |
-| 03 | The board | draft | 0 | 0 | 4 | 4 | 2026-09-14 |
-| 04 | Element detail and pricing | not started | — | — | — | — | — |
+| 03 | The board | draft | 0 | 0 | 0 | 4 | 2026-09-14 |
+| 04 | Element detail and pricing | draft | 0 | 0 | 1 | 3 | 2026-09-14 |
 | 05 | Accessibility and content | not started | — | — | — | — | — |
 | 06 | Checkout before payment | not started | — | — | — | — | — |
 | 07 | Payment provider integration | not started | — | — | — | — | — |
