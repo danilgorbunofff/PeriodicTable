@@ -8,6 +8,8 @@
 // "preview" for every branch deployment.
 //
 // Non-Vercel builds (local, CI) skip this entirely and keep migrating explicitly.
+// A Vercel build with no VERCEL_ENV at all refuses instead of skipping: that state
+// is indistinguishable from prod, and a skipped migration would surface later.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -39,6 +41,14 @@ function resolvePrismaCli() {
 }
 
 const env = process.env.VERCEL_ENV;
+
+// A Vercel build always has VERCEL_ENV set. If it is missing we cannot tell prod
+// from preview, and the safe reading of "cannot tell" is to refuse rather than skip
+// silently — a skipped migration would only surface later, at the worst moment.
+if (process.env.VERCEL === "1" && !env) {
+  console.error("[migrate] VERCEL=1 but VERCEL_ENV is unset — refusing to build");
+  process.exit(1);
+}
 
 if (env !== "production") {
   console.log(`[migrate] skipped (VERCEL_ENV=${env ?? "unset"})`);
