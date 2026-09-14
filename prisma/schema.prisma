@@ -52,8 +52,15 @@ enum PaymentPath {
 }
 
 enum PaymentProvider {
-  WHOP @map("whop")
-  DEV  @map("dev")
+  // WHOP is historical only. The adapter and its webhook route were removed
+  // when payments moved to Stripe (lib/stripe.ts), but existing Payment and
+  // ProviderEvent rows still carry it — and Prisma throws when it reads an enum
+  // value it cannot deserialize, so dropping this would strand four live
+  // production rows. Postgres cannot remove an enum value without recreating
+  // the type anyway, so retaining it is also the cheap direction.
+  WHOP   @map("whop")
+  STRIPE @map("stripe")
+  DEV    @map("dev")
 }
 
 // Short-lived take-lead quote guarantees (Phase 2 acquires/consumes these).

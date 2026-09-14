@@ -12,8 +12,8 @@ const KEYS = [
   "VITEST",
   "PAYMENTS_LIVE",
   "NEXT_PUBLIC_PAYMENTS_LIVE",
-  "WHOP_API_KEY",
-  "WHOP_WEBHOOK_SECRET",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
   "DATABASE_URL",
   "NEXT_PUBLIC_APP_URL",
   "TURNSTILE_SECRET",
@@ -69,11 +69,11 @@ describe("payments fail closed in production", () => {
     prodEnv();
     const { paymentsLiveServer } = await import("./flags");
     set("PAYMENTS_LIVE", undefined);
-    set("WHOP_API_KEY", undefined);
-    set("WHOP_WEBHOOK_SECRET", undefined);
+    set("STRIPE_SECRET_KEY", undefined);
+    set("STRIPE_WEBHOOK_SECRET", undefined);
     expect(paymentsLiveServer()).toBe(false); // absent flag must not default live
-    set("WHOP_API_KEY", "k");
-    set("WHOP_WEBHOOK_SECRET", "s");
+    set("STRIPE_SECRET_KEY", "k");
+    set("STRIPE_WEBHOOK_SECRET", "s");
     expect(paymentsLiveServer()).toBe(false); // keys alone are not enough
     set("PAYMENTS_LIVE", "true");
     expect(paymentsLiveServer()).toBe(true);
@@ -120,8 +120,8 @@ describe("requireProdEnv", () => {
       requireProdEnv(
         fakeEnv({
           DATABASE_URL: "x",
-          WHOP_API_KEY: "x",
-          WHOP_WEBHOOK_SECRET: "x",
+          STRIPE_SECRET_KEY: "x",
+          STRIPE_WEBHOOK_SECRET: "x",
           NEXT_PUBLIC_APP_URL: "http://localhost:3000",
           TURNSTILE_SECRET: "x",
           CLICK_SALT: "change-me-in-prod",
@@ -138,8 +138,8 @@ describe("requireProdEnv", () => {
     const { requireProdEnv } = await import("./env");
     const good = fakeEnv({
       DATABASE_URL: "postgresql://x",
-      WHOP_API_KEY: "x",
-      WHOP_WEBHOOK_SECRET: "x",
+      STRIPE_SECRET_KEY: "x",
+      STRIPE_WEBHOOK_SECRET: "x",
       NEXT_PUBLIC_APP_URL: "https://periodictable.lol",
       TURNSTILE_SECRET: "x",
       CLICK_SALT: "a-private-random-value",
@@ -156,8 +156,8 @@ describe("requireProdEnv", () => {
 describe("getProdConfigReport", () => {
   const FULL: Env = {
     DATABASE_URL: "postgresql://x",
-    WHOP_API_KEY: "x",
-    WHOP_WEBHOOK_SECRET: "x",
+    STRIPE_SECRET_KEY: "x",
+    STRIPE_WEBHOOK_SECRET: "x",
     NEXT_PUBLIC_APP_URL: "https://periodictable.lol",
     TURNSTILE_SECRET: "x",
     CLICK_SALT: "a-private-random-value",

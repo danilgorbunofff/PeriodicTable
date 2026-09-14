@@ -16,22 +16,24 @@
   production builds on 2026-09-11 took 1.1–1.6 min (median 1.3), which leaves under a
   minute of headroom — the "<2min" figure holds but is not comfortable. **If you need
   payments stopped NOW** (runaway price, exploit, abuse), redeploying is the wrong
-  lever: disable the plan/product in the Whop dashboard. That is provider-side and
-  immediate, and it stops the charge rather than the button.
-- ⚠️ **The webhook stays live on purpose.** `app/api/webhooks/whop/route.ts` does
+  lever: roll (or restrict) the `STRIPE_SECRET_KEY` in the Stripe dashboard. That
+  is provider-side and immediate — every checkout then fails closed with a 502
+  instead of charging, and it keeps holding after the redeploy lands.
+- ⚠️ **The webhook stays live on purpose.** `app/api/webhooks/stripe/route.ts` does
   *not* consult the flag: a payment already taken must still settle, or we hold the
   money and hand over nothing. So the switch stops *new* checkouts only. Forging a
-  delivery needs `WHOP_WEBHOOK_SECRET` — HMAC-SHA256, timing-safe compare, and a
-  hard `401` when no secret or no valid signature is present (fail-closed).
+  delivery needs `STRIPE_WEBHOOK_SECRET` — HMAC-SHA256 over `t.<raw body>` with a
+  300s tolerance, timing-safe compare, and a hard `401` when no secret or no valid
+  signature is present (fail-closed).
 - Rehearsal: set flag off → assert waitlist copy → set back on → assert checkout
   returns. The **off** half is verified on production itself; the **on** half requires
-  live Whop keys, so it is the go-live ladder (Deploy order step 2-3), not a
+  live Stripe keys, so it is the go-live ladder (Deploy order step 2-3), not a
   pre-launch check.
 
 ## Deploy order (prod)
 0. `node scripts/check-prod-env.mjs` with production env (must pass) + `npm run audit:prod`
 1. `prisma migrate deploy` + `tsx prisma/seed.ts` + `tsx prisma/launch-seed.ts`
-2. Env: Whop live keys, Resend domain, Turnstile, `CRON_SECRET`, `PAYMENTS_LIVE=true`
+2. Env: Stripe live keys + webhook endpoint, Resend domain, Turnstile, `CRON_SECRET`, `PAYMENTS_LIVE=true`
 3. Deploy Vercel prod 4. Smoke $1 claim → refund/keep 5. Announce
 
 ## DB incidents
@@ -44,4 +46,4 @@
 
 ## Abuse/spam
 - Blocklist domain in `lib/validate.ts` `BLOCKED_DOMAINS`, hide stake via report triage,
-  refund via provider dashboard (Whop). Takedown playbook: `ops/takedown.md`.
+  refund via provider dashboard (Stripe). Takedown playbook: `ops/takedown.md`.

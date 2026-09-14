@@ -22,8 +22,8 @@ async function main() {
   if (!mod) {
     const required = [
       "DATABASE_URL",
-      "WHOP_API_KEY",
-      "WHOP_WEBHOOK_SECRET",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
       "NEXT_PUBLIC_APP_URL",
       "TURNSTILE_SECRET",
       "CLICK_SALT",

@@ -38,8 +38,8 @@ export function isBuildPhase(): boolean {
 
 export const REQUIRED_PROD_ENV = [
   "DATABASE_URL",
-  "WHOP_API_KEY",
-  "WHOP_WEBHOOK_SECRET",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
   "NEXT_PUBLIC_APP_URL",
   "TURNSTILE_SECRET",
   "CLICK_SALT",
@@ -70,8 +70,8 @@ export type RequiredProdEnvKey = (typeof REQUIRED_PROD_ENV)[number];
  */
 const PROD_ENV_REASONS: Record<RequiredProdEnvKey, string> = {
   DATABASE_URL: "DATABASE_URL is required in production",
-  WHOP_API_KEY: "WHOP_API_KEY is required in production",
-  WHOP_WEBHOOK_SECRET: "WHOP_WEBHOOK_SECRET is required in production",
+  STRIPE_SECRET_KEY: "STRIPE_SECRET_KEY is required in production",
+  STRIPE_WEBHOOK_SECRET: "STRIPE_WEBHOOK_SECRET is required in production",
   NEXT_PUBLIC_APP_URL: "NEXT_PUBLIC_APP_URL must be an https URL in production (no localhost)",
   TURNSTILE_SECRET: "TURNSTILE_SECRET is required in production (bot checks must not bypass)",
   CLICK_SALT: "CLICK_SALT must be set to a private random value in production",

@@ -22,8 +22,8 @@ import { audit } from "./audit";
 import { withTxnRetry } from "./txn";
 
 export type SettleEvent = {
-  provider: "whop" | "dev";
-  eventId: string; // globally unique per delivery ("whop:..." / "dev-...")
+  provider: "stripe" | "dev";
+  eventId: string; // globally unique per delivery ("stripe:..." / "dev-...")
   eventType: string;
   paid: boolean;
   /** The PROVIDER's claimed amount, not ours — settled against
@@ -54,10 +54,10 @@ export type SettleOutcome =
  * ever used.
  */
 export type ReversalEvent = {
-  provider: "whop" | "dev";
+  provider: "stripe" | "dev";
   eventId: string;
   eventType: string;
-  /** Which status/type matched (whopPayloadReversal) — recorded for operators. */
+  /** Which status/type matched (stripePayloadReversal) — recorded for operators. */
   reversal: string;
   payload?: unknown;
 };
@@ -73,7 +73,7 @@ function logSettle(msg: string, fields: Record<string, unknown>): void {
 
 /** Record a provider delivery outcome (best-effort, never throws). */
 async function recordEvent(params: {
-  provider: "whop" | "dev";
+  provider: "stripe" | "dev";
   eventId: string;
   eventType: string;
   paymentId: string | null;
@@ -85,7 +85,7 @@ async function recordEvent(params: {
     await prisma.providerEvent.upsert({
       where: { providerEventId: params.eventId },
       create: {
-        provider: params.provider === "whop" ? "WHOP" : "DEV",
+        provider: params.provider === "stripe" ? "STRIPE" : "DEV",
         providerEventId: params.eventId,
         eventType: params.eventType,
         paymentId: params.paymentId,

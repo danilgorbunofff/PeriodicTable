@@ -52,7 +52,7 @@ function paid(data: { amountUsd: number; providerAmount?: number | null; provide
       startupId,
       amountUsd: data.amountUsd,
       path: "JOIN",
-      provider: "WHOP",
+      provider: "STRIPE",
       idempotencyKey: `rec-${Date.now()}-${keyN++}`,
       status: "PAID",
       paidAt: future(data.minutes),

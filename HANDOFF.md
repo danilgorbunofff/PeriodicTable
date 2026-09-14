@@ -9,6 +9,17 @@
 > Work continues on another PC: `git clone`, copy `.env` values from a safe
 > place (never commit `.env`), `npm ci`.
 
+> **2026-09-15 — provider migration: Whop → Stripe.** The Whop API key could
+> never be granted `create_checkout_session` scope (401 on every live
+> checkout, unchanged by rotation), so payments moved to Stripe outright.
+> Everything below that mentions Whop — the 09-12 timeline, the `WHOP_*` env
+> names, `lib/whop.ts`, `/api/webhooks/whop`, `apik_…` — is history, kept
+> because it is the record of how the third blocker was found. The live
+> references are `lib/stripe.ts`, `/api/webhooks/stripe`,
+> `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`. `WHOP` survives in the
+> `PaymentProvider` enum only so the four legacy prod `Payment` rows stay
+> readable (see `prisma/schema.prisma`).
+
 ---
 
 ## Read this first — what is still open
@@ -812,9 +823,11 @@ newest production deployment, not GitHub's commit status (see the traps below).
    - §4c: receipt / outbid / unsubscribe **hand tests with two real inboxes**
    - §6: hand journeys J1–J8
    - §7: GO / NO-GO
-3. **LAST:** `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Whop live
-   keys + webhook `https://www.periodictable.lol/api/webhooks/whop` registered →
-   redeploy → $1 live claim → refund/keep → announce. The refund leg is no longer
+3. **LAST:** `PAYMENTS_LIVE=true` + `NEXT_PUBLIC_PAYMENTS_LIVE=true` + Stripe
+   live keys + webhook `https://www.periodictable.lol/api/webhooks/stripe`
+   registered (events: `checkout.session.completed`, `checkout.session.expired`,
+   `charge.refunded`, `charge.dispute.*`) → redeploy → $1 live claim →
+   refund/keep → announce. The refund leg is no longer
    a manual no-op: a real provider reversal now unwinds the stake, so confirm
    four things at once — the stake is back to $0 / **no leader** (tile face
    clears, take-lead price returns to the $5 floor), a negative `refund` row
@@ -835,14 +848,14 @@ newest production deployment, not GitHub's commit status (see the traps below).
 - Git: `main` is the deploy branch. Recent: `a3c385b` (live) ← `a778c8d` ←
   `b9003dd` ← `4987783` ← `26f2d5e` ← `3f23d62` ← `a7e2e02` ← `7ce73a9`
 - Env vars (values in Vercel only, never in the repo): `DATABASE_URL`,
-  `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL`,
+  `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL`,
   `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`,
   `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `CRON_SECRET`, `PAYMENTS_LIVE`,
   `NEXT_PUBLIC_PAYMENTS_LIVE`, `ADMIN_TOKEN`, `UPSTASH_REDIS_REST_URL`,
   `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional)
 - Money smoke tests:
   - `BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused`
-  - `BASE_URL=http://localhost:3100 ADMIN_TOKEN=… WHOP_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live`
+  - `BASE_URL=http://localhost:3100 ADMIN_TOKEN=… STRIPE_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live`
 - Full local gate: `npm ci` → `prisma migrate deploy` (local DB) → `npm run lint` →
   `npm run typecheck` → `TEST_DATABASE_URL=… npm run test:ci` (must be 0 skipped) →
   `npm run audit:prod` → prod-env gate fail-without / pass-with secrets

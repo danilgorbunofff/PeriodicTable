@@ -143,10 +143,10 @@ on every viewport. Guarded by `lib/a11y.test.ts`.
 ## 12. Environment reference
 
 Required in production (`check-prod-env` fails closed): `DATABASE_URL`,
-`WHOP_API_KEY` + `WHOP_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL` (https),
+`STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_APP_URL` (https),
 `TURNSTILE_SECRET`, `CLICK_SALT` (private), `CRON_SECRET`, `RESEND_API_KEY`,
 `EMAIL_FROM`. Optional: `UPSTASH_REDIS_REST_URL/TOKEN` (shared limits —
 without it limits are instance-local memory and fail open with a prod warning),
 `ADMIN_TOKEN` (operator endpoints; 403 when unset, even in development), `PAYMENTS_LIVE` +
-`NEXT_PUBLIC_PAYMENTS_LIVE` (explicit `"true"` + Whop keys, else waitlist),
+`NEXT_PUBLIC_PAYMENTS_LIVE` (explicit `"true"` + both Stripe keys, else waitlist),
 `RESERVATION_TTL_MS` (rehearsal only), `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`.

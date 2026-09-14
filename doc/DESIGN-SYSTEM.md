@@ -183,7 +183,7 @@ Matches worldmap.lol’s “Country Leaderboard” / “World Order” modal tre
 - Icy URL field, icy stake field with `$` prefix
 - `👑 $X takes #1 in Carbon!`
 - Chunky `Continue to checkout →`
-- Lock + Whop line; `rules & terms` yellow
+- Lock + Stripe line; `rules & terms` yellow
 - `maybe later` centered muted
 
 ### The board (094610 / 095520 / 095541)

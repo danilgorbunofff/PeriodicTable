@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { faviconFor, shotUrlFor, previewFor, jsonShotUrlFor, probeShot } from "./screenshots";
 import { honeypotCaught, attestValid, turnstileEnabled } from "./abuse";
-import { createWhopCheckoutSession } from "./whop";
+import { createStripeCheckoutSession } from "./stripe";
 
 describe("previews", () => {
   it("prefers stored shot, then live shot, then favicon", () => {
@@ -161,7 +161,7 @@ describe("verifyTurnstile", () => {
  * `null`, so the buyer saw one generic 502 and the reason died with the
  * request. A refused checkout is a sale that did not happen — it has to say
  * why, without ever putting the API key in the log. */
-describe("createWhopCheckoutSession", () => {
+describe("createStripeCheckoutSession", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -178,12 +178,12 @@ describe("createWhopCheckoutSession", () => {
   };
 
   const stubProvider = (status: number, payload: unknown) => {
-    const calls: { url: string; auth: string }[] = [];
+    const calls: { url: string; auth: string; body: string }[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: unknown, init: unknown) => {
-        const headers = (init as { headers: Record<string, string> }).headers;
-        calls.push({ url: String(url), auth: headers.Authorization });
+        const { headers, body } = init as { headers: Record<string, string>; body: string };
+        calls.push({ url: String(url), auth: headers.Authorization, body });
         return new Response(typeof payload === "string" ? payload : JSON.stringify(payload), { status });
       })
     );
@@ -191,8 +191,8 @@ describe("createWhopCheckoutSession", () => {
   };
 
   const liveKeys = () => {
-    vi.stubEnv("WHOP_API_KEY", "apik_test");
-    vi.stubEnv("WHOP_WEBHOOK_SECRET", "whsec_test");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_abc123");
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test");
   };
 
   it("reports the provider's status and message when it refuses the session", async () => {
@@ -200,56 +200,56 @@ describe("createWhopCheckoutSession", () => {
     const calls = stubProvider(401, { error: { status: 401, message: "Your API Key is invalid." } });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(await createStripeCheckoutSession(params)).toBeNull();
     const logged = warn.mock.calls.flat().join(" ");
     expect(logged).toContain("HTTP 401");
     expect(logged).toContain("Your API Key is invalid");
-    expect(logged).toContain("key=apik");
-    expect(logged).not.toContain("apik_test");
-    expect(calls[0].auth).toContain("apik_test");
+    expect(logged).toContain("key=sk_test");
+    expect(logged).not.toContain("sk_test_abc123");
+    expect(calls[0].auth).toContain("sk_test_abc123");
   });
 
   it("names the field a shape-shifted response dropped", async () => {
     liveKeys();
-    stubProvider(200, { id: "chs_1", status: "open" });
+    stubProvider(200, { id: "cs_1", status: "open" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(await createStripeCheckoutSession(params)).toBeNull();
     const logged = warn.mock.calls.flat().join(" ");
-    expect(logged).toContain("missing checkout_url");
+    expect(logged).toContain("missing url");
     expect(logged).toContain("keys: id,status");
   });
 
   it("returns the session the provider handed back, quietly", async () => {
     liveKeys();
-    stubProvider(200, { id: "chs_1", checkout_url: "https://whop.com/checkout/chs_1" });
+    stubProvider(200, { id: "cs_1", url: "https://checkout.stripe.com/c/pay/cs_1" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(await createWhopCheckoutSession(params)).toEqual({
-      checkoutUrl: "https://whop.com/checkout/chs_1",
-      providerRef: "chs_1",
+    expect(await createStripeCheckoutSession(params)).toEqual({
+      checkoutUrl: "https://checkout.stripe.com/c/pay/cs_1",
+      providerRef: "cs_1",
     });
     expect(warn).not.toHaveBeenCalled();
   });
 
   it("flags a response that carries the url but no provider ref", async () => {
     liveKeys();
-    stubProvider(200, { checkout_url: "https://whop.com/checkout/chs_1" });
+    stubProvider(200, { url: "https://checkout.stripe.com/c/pay/cs_1" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(await createStripeCheckoutSession(params)).toBeNull();
     expect(warn.mock.calls.flat().join(" ")).toContain("missing id");
   });
 
   it("names the missing key instead of calling the provider without one", async () => {
-    vi.stubEnv("WHOP_API_KEY", "");
-    vi.stubEnv("WHOP_WEBHOOK_SECRET", "whsec_test");
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test");
     const calls = stubProvider(200, {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(await createStripeCheckoutSession(params)).toBeNull();
     expect(calls).toHaveLength(0);
-    expect(warn.mock.calls.flat().join(" ")).toContain("WHOP_API_KEY");
+    expect(warn.mock.calls.flat().join(" ")).toContain("STRIPE_SECRET_KEY");
   });
 
   it("survives a provider that never answers, and says what happened", async () => {
@@ -262,7 +262,32 @@ describe("createWhopCheckoutSession", () => {
     );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(await createWhopCheckoutSession(params)).toBeNull();
+    expect(await createStripeCheckoutSession(params)).toBeNull();
     expect(warn.mock.calls.flat().join(" ")).toContain("ECONNRESET");
+  });
+
+  // The two traps a Stripe port invites, both silent when they happen: Stripe's
+  // unit is integer cents, and a reversal event delivers a charge — which
+  // carries the payment intent's metadata and never the session's.
+  it("quotes our whole dollars as unit_amount cents", async () => {
+    liveKeys();
+    const calls = stubProvider(200, { id: "cs_1", url: "https://c.stripe.com/cs_1" });
+
+    await createStripeCheckoutSession({ ...params, amountUsd: 5 });
+    const body = new URLSearchParams(calls[0].body);
+    expect(body.get("line_items[0][price_data][unit_amount]")).toBe("500");
+    expect(body.get("line_items[0][price_data][currency]")).toBe("usd");
+    expect(body.get("mode")).toBe("payment");
+  });
+
+  it("writes the payment id to the session and to the intent", async () => {
+    liveKeys();
+    const calls = stubProvider(200, { id: "cs_1", url: "https://c.stripe.com/cs_1" });
+
+    await createStripeCheckoutSession(params);
+    const body = new URLSearchParams(calls[0].body);
+    expect(body.get("metadata[paymentId]")).toBe("pay_1");
+    expect(body.get("payment_intent_data[metadata][paymentId]")).toBe("pay_1");
+    expect(calls[0].url).toContain("/checkout/sessions");
   });
 });

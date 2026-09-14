@@ -405,7 +405,7 @@ export function CheckoutPreview({
         {submitting ? "Starting checkout…" : "Continue to checkout →"}
       </ChunkyButton>
       </form>
-      <div className="text-xs text-mutedink mt-2 text-center">🔒 Secure payment via Whop · it&apos;s an ad buy, not a bet · by continuing you agree to the <Link href="/legal/rules" className="text-moneyink font-bold hover:underline">rules &amp; terms</Link></div>
+      <div className="text-xs text-mutedink mt-2 text-center">🔒 Secure payment via Stripe · it&apos;s an ad buy, not a bet · by continuing you agree to the <Link href="/legal/rules" className="text-moneyink font-bold hover:underline">rules &amp; terms</Link></div>
       <button onClick={onClose} className="block mx-auto text-xs text-mutedink mt-2">maybe later</button>
     </Modal>
   );

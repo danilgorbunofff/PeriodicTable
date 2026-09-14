@@ -7,6 +7,12 @@
 > **Doc location:** `/doc/ROADMAP.md` — product & architecture authority.
 > **Visual authority:** `/doc/DESIGN-SYSTEM.md` (post-review). If this file and DESIGN-SYSTEM conflict on look, **DESIGN-SYSTEM wins**.
 > **Audit:** `/doc/REVIEW.md` — what was wrong vs the 15 worldmap.lol screenshots.
+>
+> **Amendment (2026-09-15):** the payment provider is **Stripe**, not Whop. The
+> Whop API key could never be granted `create_checkout_session` scope, so the
+> integration was replaced wholesale. Every mention of Whop below is the
+> original plan text and no longer describes the implementation; the current
+> provider contract lives in `lib/stripe.ts` + `doc/ARCHITECTURE.md`.
 
 ---
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobAuth } from "@/lib/jobs";
 import { prisma } from "@/lib/prisma";
-import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/whop";
+import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * Money reconciliation report (Phase 2 follow-up).
  *
  * `Payment.providerAmount` / `providerCurrency` were written and never read,
- * and `validateWhopMoney` answered "fine" both for a verified amount and for a
+ * and `validateProviderMoney` answered "fine" both for a verified amount and for a
  * provider that stated none — so an unverified charge was indistinguishable
  * from a cross-checked one. This is the surface that reads them back.
  *

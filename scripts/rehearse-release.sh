@@ -6,9 +6,10 @@
 #
 # Usage:
 #   BASE_URL=http://localhost:3100 scripts/rehearse-release.sh [live|paused]
-#   ADMIN_TOKEN=... WHOP_WEBHOOK_SECRET=... [WHOP_API_KEY=...] for full coverage.
-#   Signed webhooks use the Standard Webhooks envelope (api_version v1 — what
-#   Whop actually delivers); one case also re-delivers legacy to guard v2/v5.
+#   ADMIN_TOKEN=... STRIPE_WEBHOOK_SECRET=... [STRIPE_SECRET_KEY=...] for full coverage.
+#   Signed webhooks use Stripe's own envelope — `stripe-signature: t=<unix>,v1=<hex>`,
+#   HMAC-SHA256 over "<t>.<raw body>"; a delivery outside the 300s tolerance is
+#   refused, and one case asserts exactly that.
 #   Expiry coverage needs RESERVATION_TTL_MS=2000 on the server (else skipped).
 #
 # Requires: curl, python3. Server needs a migrated + seeded database.
@@ -23,7 +24,6 @@ RUN="${REHEARSE_RUN:-$(date +%s)}"
 PASS=0
 SKIP=0
 CALLN=0
-WH_COUNT=0
 TMPD=$(mktemp -d)
 trap 'rm -rf "$TMPD" /tmp/whbody.json' EXIT
 BODY="$TMPD/body.txt"
@@ -62,22 +62,12 @@ admin_call() { # admin_call METHOD PATH [DATA]
     call "$method" "$path" "" "Authorization: Bearer $ADMIN_TOKEN"
   fi
 }
-sign_post() { # sign_post PATH JSON_BODY — Standard Webhooks envelope (what Whop v1 delivers)
-  WH_COUNT=$((WH_COUNT + 1))
+sign_post() { # sign_post PATH JSON_BODY [TS_OFFSET] — Stripe envelope (t=...,v1=...)
   echo "$2" > /tmp/whbody.json
-  local id="msg_rehearse_$RUN-$WH_COUNT" ts sig
-  ts=$(date +%s)
-  sig=$(WHS_ID="$id" WHS_TS="$ts" python3 -c "import hmac,hashlib,os,base64; key=os.environ['WHOP_WEBHOOK_SECRET'].encode(); signed=('%s.%s.' % (os.environ['WHS_ID'], os.environ['WHS_TS'])).encode() + open('/tmp/whbody.json','rb').read(); print('v1,' + base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode().rstrip('='))")
-  curl -s --max-time 15 -w "\n%{http_code}" -X POST "$BASE$1" -H 'Content-Type: application/json' -H "webhook-id: $id" -H "webhook-timestamp: $ts" -H "webhook-signature: $sig" --data-binary @/tmp/whbody.json > "$TMPD/out.txt"
-  tail -n 1 "$TMPD/out.txt" > "$STATUS"
-  sed '$d' "$TMPD/out.txt" > "$BODY"
-}
-
-sign_post_legacy() { # sign_post_legacy PATH JSON_BODY — legacy envelope (v2/v5 resources)
-  echo "$2" > /tmp/whbody.json
-  local sig
-  sig=$(python3 -c "import hmac,hashlib,os; print(hmac.new(os.environ['WHOP_WEBHOOK_SECRET'].encode(), open('/tmp/whbody.json','rb').read(), hashlib.sha256).hexdigest())")
-  curl -s --max-time 15 -w "\n%{http_code}" -X POST "$BASE$1" -H 'Content-Type: application/json' -H "x-whop-signature: $sig" --data-binary @/tmp/whbody.json > "$TMPD/out.txt"
+  local ts sig
+  ts=$(( $(date +%s) + ${3:-0} ))
+  sig=$(WHS_TS="$ts" python3 -c "import hmac,hashlib,os; key=os.environ['STRIPE_WEBHOOK_SECRET'].encode(); signed=('%s.' % os.environ['WHS_TS']).encode() + open('/tmp/whbody.json','rb').read(); print(hmac.new(key, signed, hashlib.sha256).hexdigest())")
+  curl -s --max-time 15 -w "\n%{http_code}" -X POST "$BASE$1" -H 'Content-Type: application/json' -H "stripe-signature: t=$ts,v1=$sig" --data-binary @/tmp/whbody.json > "$TMPD/out.txt"
   tail -n 1 "$TMPD/out.txt" > "$STATUS"
   sed '$d' "$TMPD/out.txt" > "$BODY"
 }
@@ -183,49 +173,50 @@ call POST /api/dev/pay "{\"paymentId\":\"$PAYE\",\"outcome\":\"pay\"}"
 grep -q '"status":"paid"' "$BODY" || fail "expired payment paid" "$(cat "$BODY")"
 pass "expired reservation settles as an ordinary stake (no guaranteed crown)"
 
-if [ -n "${WHOP_WEBHOOK_SECRET:-}" ]; then
+if [ -n "${STRIPE_WEBHOOK_SECRET:-}" ]; then
   echo "== webhooks (signed) =="
   CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":6,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-wh-1\",\"startup\":{\"title\":\"Hook\",\"pitch\":\"Hook pitch here now\",\"url\":\"https://rehearse-hook.dev\",\"linkType\":\"product\"}}"
   PAYW=$(jget "['paymentId']")
-  B1="{\"id\":\"rehearse-$RUN-evt-1\",\"type\":\"payment.succeeded\",\"data\":{\"status\":\"succeeded\",\"amount\":6,\"currency\":\"usd\",\"id\":\"cs_rehearse-$RUN\",\"metadata\":{\"paymentId\":\"$PAYW\"}}}"
-  sign_post /api/webhooks/whop "$B1"
+  # Stripe quotes integer cents, so $6 is amount_total 600.
+  B1="{\"id\":\"evt_rehearse-$RUN-1\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-1\",\"payment_status\":\"paid\",\"amount_total\":600,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW\"}}}}"
+  sign_post /api/webhooks/stripe "$B1"
   [ "$(st)" = "200" ] || fail "webhook applied" "got $(st)"
   grep -q '"outcome":"applied"' "$BODY" || fail "applied outcome" "$(cat "$BODY")"
-  sign_post /api/webhooks/whop "$B1"
+  sign_post /api/webhooks/stripe "$B1"
   grep -Eq '"outcome":"(duplicate|already-settled)"' "$BODY" || fail "replay deduped" "$(cat "$BODY")"
   pass "signed paid webhook applies once; replay deduped"
-  sign_post_legacy /api/webhooks/whop "$B1"
-  [ "$(st)" = "200" ] || fail "legacy envelope accepted" "got $(st): $(cat "$BODY")"
-  pass "legacy envelope still verified (v2/v5 webhooks unregressed)"
-  B2="{\"id\":\"rehearse-$RUN-evt-2\",\"data\":{\"metadata\":{\"paymentId\":\"$PAYW\"}}}"
-  sign_post /api/webhooks/whop "$B2"
+  sign_post /api/webhooks/stripe "$B1" -400
+  [ "$(st)" = "401" ] || fail "stale delivery refused" "got $(st): $(cat "$BODY")"
+  pass "a delivery outside the 300s tolerance is refused"
+  B2="{\"id\":\"evt_rehearse-$RUN-2\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-1\",\"metadata\":{\"paymentId\":\"$PAYW\"}}}}"
+  sign_post /api/webhooks/stripe "$B2"
   grep -q '"outcome":"ignored"' "$BODY" || fail "statusless ignored" "$(cat "$BODY")"
   pass "statusless event ignored, settled payment untouched"
   CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":7,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-wh-2\",\"startup\":{\"title\":\"Hook2\",\"pitch\":\"Hook2 pitch here now\",\"url\":\"https://rehearse-hook2.dev\",\"linkType\":\"product\"}}"
   PAYW2=$(jget "['paymentId']")
-  B3="{\"id\":\"rehearse-$RUN-evt-3\",\"type\":\"payment.failed\",\"data\":{\"status\":\"failed\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}"
-  sign_post /api/webhooks/whop "$B3"
+  B3="{\"id\":\"evt_rehearse-$RUN-3\",\"type\":\"checkout.session.expired\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-2\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}}"
+  sign_post /api/webhooks/stripe "$B3"
   grep -q '"outcome":"failed"' "$BODY" || fail "failed event" "$(cat "$BODY")"
-  B4="{\"id\":\"rehearse-$RUN-evt-4\",\"type\":\"payment.succeeded\",\"data\":{\"status\":\"succeeded\",\"amount\":7,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}"
-  sign_post /api/webhooks/whop "$B4"
+  B4="{\"id\":\"evt_rehearse-$RUN-4\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-3\",\"payment_status\":\"paid\",\"amount_total\":700,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}}"
+  sign_post /api/webhooks/stripe "$B4"
   grep -Eq '"outcome":"already-settled"' "$BODY" || fail "paid-after-failed stays terminal" "$(cat "$BODY")"
   pass "failed→paid follows the terminal state machine"
-  B5="{\"id\":\"rehearse-$RUN-evt-5\",\"type\":\"payment.succeeded\",\"data\":{\"status\":\"succeeded\",\"amount\":999,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}"
-  sign_post /api/webhooks/whop "$B5"
+  B5="{\"id\":\"evt_rehearse-$RUN-5\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-4\",\"payment_status\":\"paid\",\"amount_total\":99900,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}}"
+  sign_post /api/webhooks/stripe "$B5"
   grep -q 'amount-mismatch' "$BODY" || fail "amount mismatch rejected" "$(cat "$BODY")"
   pass "amount mismatch rejected without applying"
 else
-  skip "signed webhooks (set WHOP_WEBHOOK_SECRET)"
+  skip "signed webhooks (set STRIPE_WEBHOOK_SECRET)"
 fi
 
-if [ -n "${WHOP_API_KEY:-}" ] && [ -n "${WHOP_WEBHOOK_SECRET:-}" ]; then
+if [ -n "${STRIPE_SECRET_KEY:-}" ] && [ -n "${STRIPE_WEBHOOK_SECRET:-}" ]; then
   echo "== provider outage =="
   CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":11,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-outage-1\",\"startup\":{\"title\":\"Out\",\"pitch\":\"Out pitch here now\",\"url\":\"https://rehearse-out.dev\",\"linkType\":\"product\"}}"
   [ "$(st)" = "502" ] || fail "outage is 502 retryable" "got $(st)"
   grep -q 'checkoutUrl' "$BODY" && fail "no dead URL on outage" "$(cat "$BODY")"
   pass "provider outage → 502, retryable, no dead URL"
 else
-  skip "provider outage (set WHOP_API_KEY + WHOP_WEBHOOK_SECRET)"
+  skip "provider outage (set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET)"
 fi
 
 if [ -n "${ADMIN_TOKEN:-}" ]; then

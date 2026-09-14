@@ -73,7 +73,7 @@ const PAGES: Record<string, { title: string; updated: string; sections: Section[
       {
         h: "Payments",
         ps: [
-          "Payments are processed securely by our payment partner (Whop). We never see or store your full card details. A stake is a one-time charge in USD; there are no subscriptions and no recurring billing.",
+          "Payments are processed securely by our payment partner (Stripe). We never see or store your full card details. A stake is a one-time charge in USD; there are no subscriptions and no recurring billing.",
           "During launch, checkout may be gated to a waitlist — if the payment step shows a waitlist, that is expected and not an error.",
         ],
       },

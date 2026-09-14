@@ -1,46 +1,46 @@
 /* Phase 3 idempotency + webhook safety — pure unit tests (no DB required).
    Covers: commit TODO "vitest idempotency test".
    - Double webhook delivery must apply exactly once (guarded by pending→paid updateMany).
-   - Whop payload helpers handle both metadata shapes + paid detection.
+   - Stripe payload helpers handle metadata + paid detection.
    - Checkout idempotency keys are unique per attempt (uuid shape).
    - Rate limiter enforces 1/IP/stake/10s + 30/IP/hr windows.
 */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { paymentIdFromWhopPayload, whopPayloadIsPaid, verifyWhopSignature } from "./whop";
+import { paymentIdFromStripePayload, stripePayloadIsPaid, verifyStripeSignature } from "./stripe";
 import { rateLimit } from "./rateLimit";
 import { validateCheckoutInput } from "./validate";
 
-describe("whop payload helpers", () => {
-  it("extracts paymentId from plan.metadata, data.metadata, and top-level metadata", () => {
-    expect(paymentIdFromWhopPayload({ data: { plan: { metadata: { paymentId: "p1" } } } })).toBe("p1");
-    expect(paymentIdFromWhopPayload({ data: { metadata: { paymentId: "p2" } } })).toBe("p2");
-    expect(paymentIdFromWhopPayload({ metadata: { paymentId: "p3" } })).toBe("p3");
+describe("stripe payload helpers", () => {
+  it("extracts paymentId from the delivered object's metadata", () => {
+    expect(paymentIdFromStripePayload({ data: { object: { metadata: { paymentId: "p1" } } } })).toBe("p1");
+    // The reversal path depends on this: a charge carries the intent's copy.
+    expect(paymentIdFromStripePayload({ data: { object: { object: "charge", metadata: { paymentId: "p2" } } } })).toBe("p2");
   });
   it("returns null when no paymentId present", () => {
-    expect(paymentIdFromWhopPayload({})).toBeNull();
-    expect(paymentIdFromWhopPayload(null)).toBeNull();
-    expect(paymentIdFromWhopPayload({ data: { metadata: {} } })).toBeNull();
+    expect(paymentIdFromStripePayload({})).toBeNull();
+    expect(paymentIdFromStripePayload(null)).toBeNull();
+    expect(paymentIdFromStripePayload({ data: { object: { metadata: {} } } })).toBeNull();
+    // Metadata outside the delivered object is not a substitute for its own.
+    expect(paymentIdFromStripePayload({ data: { metadata: { paymentId: "p3" } } })).toBeNull();
   });
-  it("treats succeeded/completed/paid as paid, others as not", () => {
-    expect(whopPayloadIsPaid({ data: { status: "succeeded" } })).toBe(true);
-    expect(whopPayloadIsPaid({ data: { status: "completed" } })).toBe(true);
-    expect(whopPayloadIsPaid({ data: { payment: { status: "paid" } } })).toBe(true);
-    expect(whopPayloadIsPaid({ data: { status: "failed" } })).toBe(false);
-    // Phase 2 (P0-03, fail-closed): allowlisted event types count without status fields…
-    expect(whopPayloadIsPaid({ event: "membership.paid" })).toBe(true);
-    // …but statusless, unlisted events must NOT apply a stake.
-    expect(whopPayloadIsPaid({ event: "something.else" })).toBe(false);
-    expect(whopPayloadIsPaid({})).toBe(false);
-    expect(whopPayloadIsPaid({ data: { status: "pending" } })).toBe(false);
-    expect(whopPayloadIsPaid({ data: { status: "refunded" } })).toBe(false);
+  it("treats a paid checkout session as paid, and nothing else", () => {
+    expect(stripePayloadIsPaid({ type: "checkout.session.completed", data: { object: { payment_status: "paid" } } })).toBe(true);
+    expect(stripePayloadIsPaid({ type: "checkout.session.async_payment_succeeded", data: { object: {} } })).toBe(true);
+    // Phase 2 (P0-03, fail-closed): fail-closed on anything unproven.
+    expect(stripePayloadIsPaid({ event: "membership.paid" })).toBe(false);
+    expect(stripePayloadIsPaid({ event: "something.else" })).toBe(false);
+    expect(stripePayloadIsPaid({})).toBe(false);
+    expect(stripePayloadIsPaid({ type: "checkout.session.completed", data: { object: { payment_status: "unpaid" } } })).toBe(false);
+    // Same money, but not the object we stored as providerRef.
+    expect(stripePayloadIsPaid({ type: "payment_intent.succeeded", data: { object: { status: "succeeded" } } })).toBe(false);
   });
   it("rejects bad signatures without secret", () => {
-    const prev = process.env.WHOP_WEBHOOK_SECRET;
-    delete process.env.WHOP_WEBHOOK_SECRET;
-    expect(verifyWhopSignature("{}", "abc")).toBe(false);
-    if (prev) process.env.WHOP_WEBHOOK_SECRET = prev;
+    const prev = process.env.STRIPE_WEBHOOK_SECRET;
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    expect(verifyStripeSignature("{}", "t=1700000000,v1=abc")).toBe(false);
+    if (prev) process.env.STRIPE_WEBHOOK_SECRET = prev;
   });
 });
 
@@ -105,8 +105,8 @@ describe("double-delivery guard (static contract)", () => {
     const src = readFileSync(join(__dirname, "..", "app", "api", "checkout", "route.ts"), "utf8");
     expect(src).toMatch(/findUnique\(\{[\s\S]*where:[\s\S]*idempotencyKey/);
   });
-  it("webhook returns 200 on dupes (Whop retries non-2xx forever)", () => {
-    const src = readFileSync(join(__dirname, "..", "app", "api", "webhooks", "whop", "route.ts"), "utf8");
+  it("webhook returns 200 on dupes (Stripe retries non-2xx forever)", () => {
+    const src = readFileSync(join(__dirname, "..", "app", "api", "webhooks", "stripe", "route.ts"), "utf8");
     expect(src).toMatch(/Always 200 on dupes|ok:\s*true/);
   });
 });

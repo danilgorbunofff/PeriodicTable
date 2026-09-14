@@ -60,7 +60,7 @@ jobs:
         run: |
           VERCEL_ENV=production NODE_ENV=production \
             DATABASE_URL="$DATABASE_URL" \
-            WHOP_API_KEY=ci WHOP_WEBHOOK_SECRET=ci \
+            STRIPE_SECRET_KEY=ci STRIPE_WEBHOOK_SECRET=ci \
             NEXT_PUBLIC_APP_URL=https://ci.example.com \
             TURNSTILE_SECRET=ci CLICK_SALT=ci-random-value CRON_SECRET=ci \
             RESEND_API_KEY=ci EMAIL_FROM=ci@example.com \
@@ -79,7 +79,7 @@ jobs:
           npx tsx prisma/launch-seed.ts
       - name: release rehearsal — live money flows
         # VERCEL_ENV=preview keeps the app out of its fail-closed production
-        # mode, which requires real Whop keys (PAYMENTS_LIVE=true + key +
+        # mode, which requires real Stripe keys (PAYMENTS_LIVE=true + key +
         # secret). The rehearsal deliberately drives the dev simulator
         # (/api/dev/pay) so the ledger, ranking, idempotency, reservation and
         # webhook paths run against the same settle service without live
@@ -87,7 +87,7 @@ jobs:
         # the paused rehearsal, which runs in production env shape.
         env:
           VERCEL_ENV: preview
-          WHOP_WEBHOOK_SECRET: ci-rehearse-secret
+          STRIPE_WEBHOOK_SECRET: ci-rehearse-secret
           ADMIN_TOKEN: ci-rehearse-admin
           CRON_SECRET: ci-rehearse-cron
           RESERVATION_TTL_MS: 2000
@@ -100,7 +100,7 @@ jobs:
           done
           BASE_URL=http://localhost:3100 \
             ADMIN_TOKEN=ci-rehearse-admin \
-            WHOP_WEBHOOK_SECRET=ci-rehearse-secret \
+            STRIPE_WEBHOOK_SECRET=ci-rehearse-secret \
             bash scripts/rehearse-release.sh live
           kill $(cat /tmp/rehearse.pid) || true
       - name: release rehearsal — paused payments + waitlist
