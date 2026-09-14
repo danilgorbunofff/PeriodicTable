@@ -17,7 +17,7 @@ import { PaymentPath, PaymentStatus, ProviderEventOutcome, ReservationStatus } f
 import { prisma } from "./prisma";
 import { applyStakeTx, reverseStakeTx } from "./recompute";
 import { consumeReservation } from "./reservations";
-import { enqueueOutbox, drainDue } from "./outbox";
+import { enqueueOutbox, drainDueWithin } from "./outbox";
 import { audit } from "./audit";
 import { withTxnRetry, MONEY_TX } from "./txn";
 
@@ -70,6 +70,10 @@ export type ReversalOutcome =
 function logSettle(msg: string, fields: Record<string, unknown>): void {
   console.log(JSON.stringify({ scope: "settle", msg, ...fields }));
 }
+
+/** Inline mail delivery must finish before the webhook response is flushed, but
+ *  must not hold it open for a stalled provider call (deliver() times out at 10s). */
+const SETTLE_MAIL_DRAIN_BUDGET_MS = 15_000;
 
 /** Record a provider delivery outcome (best-effort, never throws). */
 async function recordEvent(params: {
@@ -272,8 +276,15 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
       element: applied.elementSymbol,
       stakeId: applied.stakeId,
     });
-    // Best-effort inline delivery; rows persist for the Phase 6 worker on failure.
-    void drainDue().catch((e) => console.error("post-settle drain failed:", e));
+    // Awaited, bounded: see drainDueWithin. Mail is drained inline (it is the
+    // part the buyer sees); preview/analytics stay on the worker's tick.
+    try {
+      const drained = await drainDueWithin(SETTLE_MAIL_DRAIN_BUDGET_MS, 10, ["RECEIPT_EMAIL", "OUTBID_EMAIL"]);
+      logSettle("post-settle-drain", { paymentId, eventId: event.eventId, ...drained });
+    } catch (e) {
+      // Delivery must never turn an already-durable settle into a retryable 5xx.
+      console.error("post-settle mail drain failed (non-blocking):", e);
+    }
     return { outcome: "applied", paymentId, stakeId: applied.stakeId, elementSymbol: applied.elementSymbol };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
