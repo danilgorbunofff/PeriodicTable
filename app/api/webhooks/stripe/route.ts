@@ -16,6 +16,10 @@ import { settlePayment, reversePayment } from "@/lib/settle";
 
 export const dynamic = "force-dynamic";
 
+// Settlement writes the whole ledger in one Serializable transaction against
+// Neon; see MONEY_TX for why the default 5 s Prisma budget is not enough.
+export const maxDuration = 60;
+
 /**
  * Stripe webhook.
  *

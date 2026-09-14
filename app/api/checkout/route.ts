@@ -10,10 +10,15 @@ import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
 import { paymentsLiveServer } from "@/lib/flags";
 import { findOrCreateCheckoutStartup, fingerprintCheckout } from "@/lib/startups";
 import { getActiveReservation, releaseExpiredReservations, reservationConflict, RESERVATION_TTL_MS } from "@/lib/reservations";
-import { withTxnRetry } from "@/lib/txn";
+import { withTxnRetry, MONEY_TX } from "@/lib/txn";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
+
+// The quote transaction (advisory lock + reservation + payment row) runs against
+// Neon from Vercel; the default 5 s Prisma budget can expire mid-flight on a cold
+// compute resume. See MONEY_TX.
+export const maxDuration = 60;
 
 type Body = {
   elementSym: string;
@@ -308,7 +313,7 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
 
     return { ok: true as const, payment, startupTitle: startup.title, reservation };
         },
-        { isolationLevel: "Serializable" }
+        MONEY_TX
       )
     );
   } catch (e) {

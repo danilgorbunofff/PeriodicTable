@@ -255,4 +255,34 @@ describe.skipIf(!hasDb)("atomic settle (P0-02)", () => {
     expect(await prisma.outboxEvent.count({ where: { dedupeKey: "settle-t-dedupe" } })).toBe(1);
     await prisma.outboxEvent.deleteMany({ where: { dedupeKey: "settle-t-dedupe" } });
   });
+  it("a redelivery after a retryable failure still settles", async () => {
+    const s = await fixtureStartup("settle-t.dev");
+    const eventId = `dev-settle-t-retry-${Date.now()}`;
+    const payment = await prisma.payment.create({
+      data: { elementId: T4, startupId: s.id, amountUsd: 4, path: "RECLAIM", provider: "DEV", idempotencyKey: `settle-t-retry-${Date.now()}`, status: "PENDING" },
+    });
+    const before = await prisma.stake.findUniqueOrThrow({ where: { elementId_startupId: { elementId: T4, startupId: s.id } } });
+    // Reconstructed post-failure state: the transaction rolled back (no stake,
+    // payment still PENDING) and the catch recorded the reason before the
+    // webhook answered non-2xx, which is what invites the provider's redelivery.
+    await prisma.providerEvent.create({
+      data: {
+        provider: "DEV",
+        providerEventId: eventId,
+        eventType: "dev.test",
+        paymentId: payment.id,
+        outcome: "ERROR",
+        detail: "Transaction API error: Transaction not found. Transaction ID is invalid…",
+      },
+    });
+    const out = await settlePayment(payment.id, { provider: "dev", eventId, eventType: "dev.test", paid: true });
+    expect(out.outcome).toBe("applied");
+    const fresh = await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(fresh.status).toBe(PaymentStatus.PAID);
+    expect(fresh.stakeId).not.toBeNull();
+    // The failed attempt's record is promoted, not duplicated: one row per delivery.
+    expect((await prisma.providerEvent.findUniqueOrThrow({ where: { providerEventId: eventId } })).outcome).toBe("APPLIED");
+    const stake = await prisma.stake.findUniqueOrThrow({ where: { elementId_startupId: { elementId: T4, startupId: s.id } } });
+    expect(stake.amountUsd).toBe(before.amountUsd + 4);
+  });
 });
