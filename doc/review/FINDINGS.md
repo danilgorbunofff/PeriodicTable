@@ -48,6 +48,10 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | R01-8 | 01 | security | The OG card interpolates stored strings into SVG markup unescaped, on the product's own origin; the only control is upstream WHATWG validation | `app/og/[sym]/route.tsx:18-19`; `lib/validate.ts:1-30,45-70,75`; §5.10 | open | — |
 | R02-6 | 02 | ux | The activity card cannot report failure or staleness on its main path: handed-down rows suppress its own error, so a failed refresh leaves retained rows under a footer still claiming `live · updates every 30s` | §6 (row 3 and row 5); `components/ActivityCard.tsx:39,70,110,115` | open | — |
 | R02-7 | 02 | content | The legal pages ship the home page's `<title>` and description verbatim | §5.4; `app/legal/[slug]/page.tsx:5,124-125`; `app/layout.tsx:17-22` | open | — |
+| R03-1 | 03 | data | The dataset and the roadmap disagree about where the four exotics sit: columns 8/9/10/11 in `lib/elements.ts`, 7/8/9/10 in `lib/elements.json`, 7-10 in `doc/ROADMAP.md`; `03d8591` moved the pod and the tiles but not the JSON, and the API serves the `.ts` | `doc/review/03-the-board.md` §5.4-5.5; `lib/elements.ts` vs `lib/elements.json` `gridCol`; `doc/ROADMAP.md:142,148`; `prisma/seed.ts:36-60` | open | — |
+| R03-2 | 03 | correctness | The API ships money aggregates that count stakes the tiles refuse to show — the face filter keeps only `amountUsd > 0` `DIRECT_STATES` rows while `pool`/`count` and `claimedElements` count every stake; P3 only because both sides are empty today, it becomes real the day a stake is hidden | §5.1, §5.8; `app/api/elements/route.ts:15-18,35-40`; `app/api/stats/route.ts:21,27`; `doc/PROD-READINESS-CHECKLIST.md` §J6 | open | — |
+| R03-3 | 03 | perf | The declared cache window never reaches the wire: `s-maxage=10, stale-while-revalidate=30` in the route, `public, max-age=0, must-revalidate` plus `Age: 6` and `X-Vercel-Cache: HIT` on the wire, as for all five read APIs | §5.7; `app/api/elements/route.ts:48` | open | — |
+| R03-4 | 03 | a11y | The search field announces combobox state it does not have: `aria-expanded="true"` and `aria-controls="search-results"` are hardcoded while the listbox is conditional, and the `role="option"` items carry no `aria-selected` | §5.2; `components/SearchPill.tsx:93,94,130,146,186` | open | — |
 
 ## UNKNOWN — evidence not yet obtainable
 
@@ -58,6 +62,10 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | U02-2 | 02 | a11y | Keyboard-only traversal of the live shell: tab order, focus visibility, and Escape ownership with a sheet and a modal open | Tab through `/` with no mouse — the contracts are asserted in `lib/a11y.test.ts` but never traversed on the running site |
 | U02-3 | 02 | ux | What a client render throw actually shows, given no error boundary exists (R02-3) | Force a render error on a preview deploy with a temporary `throw` — it edits app code, so it needs a go-ahead |
 | U02-4 | 02 | ux | How long the pre-hydration `$5 · unclaimed` face stays on screen (R02-4) | DevTools → Slow 4G plus 6× CPU throttle on `/`, capturing at first paint and after hydration |
+| U03-1 | 03 | ux | All visual rendering — tile faces, the pod, the sheen, gestures — and the screen-reader half of R03-4 | `chrome --headless=new --screenshot=out.png --window-size=1440,2400 <url>` per §4 state |
+| U03-2 | 03 | perf | Cold mobile load and LCP against the budget; desktop is measured (§5.6) | DevTools phone viewport with 4× CPU throttling, or `npx lighthouse <url> --output=json` |
+| U03-3 | 03 | correctness | What a claimed tile, a missing logo or a hidden listing renders — the one production write this doc defers until a go-ahead | Two stakes on a throwaway DB, then read `/api/elements` and `/api/stats`; residue 2 `Stake` rows |
+| U03-4 | 03 | ux | Whether `?el=Hbar` deep-links and scrolls without JS | `curl.exe -sS <url>/?el=Hbar` for the face, a browser for the scroll |
 
 ## Summary
 
@@ -66,7 +74,7 @@ Every finding from every phase doc, in one place. The phase doc is the work; thi
 | 00 | Review plan | draft | — | — | — | — | 2026-09-14 |
 | 01 | Discovery and unfurl | draft | 0 | 0 | 3 | 5 | 2026-09-14 |
 | 02 | Shell and static surfaces | draft | 0 | 0 | 5 | 2 | 2026-09-14 |
-| 03 | The board | not started | — | — | — | — | — |
+| 03 | The board | draft | 0 | 0 | 4 | 4 | 2026-09-14 |
 | 04 | Element detail and pricing | not started | — | — | — | — | — |
 | 05 | Accessibility and content | not started | — | — | — | — | — |
 | 06 | Checkout before payment | not started | — | — | — | — | — |
