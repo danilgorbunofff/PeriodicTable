@@ -1,0 +1,62 @@
+/* R01-5: `lastModified` has to mean something. The acceptance check is that two
+   generations over unchanged data agree — the old `new Date()` per entry could
+   not pass it, which is exactly why crawlers discount `lastmod`. */
+import { describe, it, expect } from "vitest";
+import { ELEMENTS } from "./elements";
+import { buildSitemapEntries, type ElementStamp } from "./sitemapData";
+
+const at = (iso: string) => new Date(iso);
+const stamps: ElementStamp[] = [
+  { symbol: "H", updatedAt: at("2026-09-01T10:00:00.000Z") },
+  { symbol: "He", updatedAt: at("2026-09-03T10:00:00.000Z") },
+  { symbol: "Li", updatedAt: null },
+];
+
+describe("buildSitemapEntries", () => {
+  it("gives each element its own newest write, not the render time", () => {
+    const entries = buildSitemapEntries("https://www.periodictable.lol", stamps);
+    expect(entries[1]).toEqual({
+      url: "https://www.periodictable.lol/elements/H",
+      lastModified: at("2026-09-01T10:00:00.000Z"),
+    });
+    expect(entries[2].lastModified).toEqual(at("2026-09-03T10:00:00.000Z"));
+  });
+
+  it("stamps the board with the newest write overall", () => {
+    expect(buildSitemapEntries("https://www.periodictable.lol", stamps)[0]).toEqual({
+      url: "https://www.periodictable.lol/",
+      lastModified: at("2026-09-03T10:00:00.000Z"),
+    });
+  });
+
+  it("omits the key where there is nothing to report rather than inventing a time", () => {
+    const entries = buildSitemapEntries("https://www.periodictable.lol", stamps);
+    expect("lastModified" in entries[3]).toBe(false);
+
+    const cold = buildSitemapEntries("https://www.periodictable.lol", [
+      { symbol: "H", updatedAt: null },
+      { symbol: "He", updatedAt: null },
+    ]);
+    expect(cold.some((e) => "lastModified" in e)).toBe(false);
+  });
+
+  it("is byte-identical across two generations over unchanged data", () => {
+    const first = buildSitemapEntries("https://www.periodictable.lol", stamps);
+    const second = buildSitemapEntries("https://www.periodictable.lol", stamps);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("covers the board and every element under the origin it is handed", () => {
+    const entries = buildSitemapEntries(
+      "https://ptl-git-main.vercel.app",
+      ELEMENTS.map((e) => ({ symbol: e.symbol, updatedAt: null }))
+    );
+    expect(entries).toHaveLength(ELEMENTS.length + 1);
+    const urls = entries.map((e) => e.url);
+    expect(urls[0]).toBe("https://ptl-git-main.vercel.app/");
+    expect(new Set(urls).size).toBe(urls.length);
+    for (const e of ELEMENTS) {
+      expect(urls).toContain(`https://ptl-git-main.vercel.app/elements/${encodeURIComponent(e.symbol)}`);
+    }
+  });
+});

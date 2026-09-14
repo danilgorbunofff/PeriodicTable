@@ -9,7 +9,7 @@
 
 **Outputs:**
 - Next.js 14 + Tailwind + Plus Jakarta Sans shell, tokens locked
-- `elements.json` seed (122 rows with row/col/family/tier/mass)
+- `lib/elements.ts` seed (122 rows with row/col/family/tier/mass; the duplicate `elements.json` was deleted in review 03/R03-1)
 - `PeriodicGrid.tsx` + `Tile.tsx` rendering 18-col + exotic pod + f-block
 - 6 mocked claimed tiles (H, C, Au, Si, Fe, DM) to prove pastel + elite + exotic styles
 

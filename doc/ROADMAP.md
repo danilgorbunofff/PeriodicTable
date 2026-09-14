@@ -139,14 +139,15 @@ An uncapped, multi-tenant cumulative staking auction ("King of the Hill") for st
 ### 4.1 Grid (authentic 18-col + skyline exotics)
 ```
 Row1: H(1,1) …………………………… He(1,18)
-Row2: Li Be [ EXOTIC POD cols 7-10 ] B C N O F Ne
+Row2: Li Be [ EXOTIC POD cols 8-11 ] B C N O F Ne
 Row3: Na Mg [ (empty skyline) ]      Al Si P S Cl Ar
 Row4: K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr
 Row5-7: standard fill
 Row9:  La-Lu (57-71) offset cols 4-17, placeholder ★ in col 3
 Row10: Ac-Lr (89-103) offset cols 4-17, placeholder ★ in col 3
-Exotics (Row2): H̄(-1,c7) Ps(0,c8) Uue(119,c9) DM(999,c10)
-Pill tag above pod: 🌌 EXOTIC SECTOR · THEORETICAL NODES
+Exotics (Row2): H̄(-1,c8) Ps(0,c9) Uue(119,c10) DM(999,c11)
+Pill tag above pod: 🌌 EXOTIC SECTOR · THEORETICAL NODES (not shipped — the
+pod draws the decorative `EXOTIC` tab only, components/PeriodicGrid.tsx)
 ```
 
 ### 4.2 Element seed fields

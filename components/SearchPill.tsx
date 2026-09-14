@@ -90,8 +90,8 @@ export function SearchPill({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         role="combobox"
-        aria-expanded="true"
-        aria-controls="search-results"
+        aria-expanded={showList}
+        aria-controls={showList ? "search-results" : undefined}
         aria-activedescendant={results[active] ? `search-hit-${active}` : undefined}
         onKeyDown={(e) => {
           if (e.key === "Escape") {

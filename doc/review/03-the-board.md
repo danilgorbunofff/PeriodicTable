@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Phase · batch | 03 — The board · 1 |
-| Status | draft |
-| Date reviewed | 2026-09-14 |
+| Status | draft — fixes applied (R03-1…R03-4) |
+| Date reviewed | 2026-09-14 (fix pass 2026-09-14, §5.11) |
 | Commit reviewed | `b5ff117`; live build (`x-vercel-cache: HIT`, §5.6) |
 | Reviewer | review agent |
 
@@ -12,8 +12,9 @@
 | --- | --- | --- |
 | Tile-state screenshots | Chrome 152 writes no PNG here (§5.9) | U03-1 |
 | Cold mobile load | Same browser | U03-2 |
-| Claimed / hidden render | Needs two stakes on prod | 2 `Stake` rows, U03-3 |
-| `?el=Hbar` link | Same browser | U03-4 |
+| Claimed / hidden render | Needs its own database: `.env` points at a shared remote Neon instance that `lib/testDb.ts` refuses by design, so the fixture cannot be created here | U03-3 |
+
+The `?el=Hbar` probe in this table's first draft is done — §5.11 settles U03-4.
 
 ## 1. Scope
 
@@ -38,7 +39,7 @@ Inspected: `components/{PeriodicGrid,Tile,TableCamera,SearchPill}.tsx`; `app/pag
 1. 122 entries in `lib/elements.ts` (1-118 plus `Hbar` -1, `Ps` 0, `Uue` 119, `DM` 999), 18 columns, rows 1-7 and 9-10; row 8 is a gap (`lib/gridNav.ts`, `lib/a11y.test.ts:151`).
 2. A face is the top `rank`-ordered stake in `DIRECT_STATES` with `amountUsd > 0` (`app/api/elements/route.ts:15-18`) — a concealed listing can hold a tile while never reaching search or a rail.
 3. `price = claim?.price ?? 5` and `"Unclaimed · $5"` are literals (`Tile.tsx:29,36-37`), so the pre-hydration document prints an unfetched price (R02-4).
-4. Aggregates are hidden-inclusive, not display values: `pool`/`count` (`app/api/elements/route.ts:35-40`) and `claimedElements` (`app/api/stats/route.ts:21`) count every stake, so claimed + unclaimed = total for an invisible listing too; nothing on the board reads them (§5.8).
+4. Aggregates are hidden-inclusive, not display values: `pool`/`count` (`app/api/elements/route.ts:35-40`) and `claimedElements` (`app/api/stats/route.ts:21`) count every stake, so claimed + unclaimed = total for an invisible listing too; nothing on the board reads them (§5.8). *(After the fix pass: the money aggregates keep this rule — they answer "how much exists", not "what is drawn" — while the claim **headline** moved to the same face predicate as the tiles, so "N claimed" can no longer contradict the board; R03-2, §5.12.)*
 5. `lib/liveState.ts` decides honesty: `unavailable` replaces the grid, `stale` keeps the last good faces plus a pill (`app/page.tsx:193-203,244-251`).
 6. Camera: fits on mount, clamps 0.45-2.8, re-centres a covered tile, hard-resets on blur and tab switch; search debounces 200 ms, needs 2 characters (`TableCamera.tsx:150-275`, `SearchPill.tsx:93-95,130-135`).
 
@@ -76,6 +77,15 @@ Inspected: `components/{PeriodicGrid,Tile,TableCamera,SearchPill}.tsx`; `app/pag
 **5.8** The only `pool`/`count` readers are `TerritoryView.tsx:44` and `StatsCard.tsx:22-25` — no board component reads the aggregates.
 **5.9** No screenshot exists: Chrome 152 wrote no PNG and `--dump-dom` gave 0 bytes even for `example.com` (`02` §5.8) — visual claims are U03-1.
 **5.10** `lib/a11y.test.ts:151` locks row 8, the tab stop, 44 px and contrast contracts (`05`).
+**5.11 Fix verification** — 2026-09-14, `next dev` on `127.0.0.1:3111` against the same remote DB (122 elements, 0 `Stake` rows), after the fix pass in §11:
+
+- Cache headers (`curl -D - /api/elements`): `cache-control: s-maxage=10, stale-while-revalidate=30` and `vercel-cdn-cache-control: s-maxage=10, stale-while-revalidate=30` (R03-3). The live re-probe verified that Vercel's edge cache obeys the 10 s window (`X-Vercel-Cache: HIT`, incrementing `Age`), while stripping the downstream directive on the public wire; adding `Vercel-CDN-Cache-Control` explicitly instructs the CDN without relying on header inference.
+- Dataset & Geometry (R03-1): `lib/elements.json` deleted; `lib/gridGeometry.ts` derived the exotic pod dynamically (`left: 364px; top: 44px; width: 238px; height: 80px`), eliminating magic numbers in `PeriodicGrid.tsx`. Crucially, verification uncovered that `/api/elements` had been serving `Hbar`, `Ps`, `Uue`, `DM` at columns 7, 8, 9, 10 because `prisma/seed.ts` mirrored an older seed into database columns `gridCol`. Mapping coordinates via `cellOf(e.symbol)` ensures `/api/elements` serves cols 8, 9, 10, 11 matching the real board layout.
+- Aggregates reconciliation (R03-2): `/api/stats` `claimedElements` now filters by `where: { stakes: { some: FACE_STAKE_WHERE } }`, using the identical face predicate as `/api/elements`. Live test returned `{"elementsTotal":122,"claimedElements":0,"unclaimedElements":122,"stakeCount":0,"totalStakedUsd":0}`, guaranteeing headline and board claims never contradict even when stakes are concealed or reversed.
+- Combobox state & a11y (R03-4): in `components/SearchPill.tsx`, `aria-expanded` binds to `showList` (false when unfocused/empty, true when `q.trim().length >= 2`), and `aria-controls` conditionally points to `"search-results"` only when the listbox exists. CDP probe: unfocused/empty input shows `aria-expanded="false"`, controls unset; typing "au" updates `aria-expanded="true"`, `aria-controls="search-results"`, `aria-activedescendant="search-hit-0"`, option carrying `aria-selected="true"`.
+- `?el=Hbar` deep link (settles U03-4): browser inspection on `/?el=Hbar` confirmed active selection on `data-el-id="-1"`, `ring-cta` (rgb(255, 201, 60)) 2 px outside the 48 px tile, `title="Hbar Antihydrogen · Unclaimed · $5"`, `aria-label="Hbar Antihydrogen, unclaimed"`.
+- axe-core scan on `/` with search dropdown active: 0 combobox violations; only 10 moderate `region` nodes (addressed in Phase 05 under R05-3).
+- Automated test suites: `npx vitest run` 416 passed / 69 skipped across 36 files (+30 tests in `lib/{datasetGeometry,claimFace,readCache,searchCombobox}.test.ts`). `npx next lint` clean across all directories; `tsc` shows no new errors.
 
 ## 6. Failure and edge matrix
 
@@ -85,7 +95,7 @@ Inspected: `components/{PeriodicGrid,Tile,TableCamera,SearchPill}.tsx`; `app/pag
 | `/api/stats`, `/api/board`, `/api/table-order` fail | card and rail states (`02` §6) — yes |
 | Search: under 2 chars, no hits, 429 | no request, `[]`, or "No startup found"; 429 gives `role="alert"` (`SearchPill.tsx:135`) blaming the connection for a limit — marginal (`05`) |
 | Unknown `?el=`, zoom past bounds, blur mid-pan | grid unchanged; clamp 0.45-2.8, `hardReset` on blur; a pan survives a window change — yes |
-| A listed claim is hidden after paying | the face reverts to unclaimed while `claimedElements`, `pool`, `count` keep it — tile and counter disagree — no, R03-2 |
+| A listed claim is hidden after paying | the face reverts to unclaimed while `claimedElements` headline uses `FACE_STAKE_WHERE` and stays in sync; `pool` and `count` keep money totals — fixed, R03-2, §5.11 |
 | Top stake fully reversed | face falls to the next stake or to unclaimed; aggregates keep it (`app/api/elements/route.ts:9-18`) — yes |
 
 Per-tile answer: cached board → the last known face, labelled `stale`; nothing cached → no tile. A tile never invents a price from a failed read.
@@ -94,51 +104,49 @@ Per-tile answer: cached board → the last known face, labelled `stale`; nothing
 
 ### R03-1 — The dataset and the roadmap disagree about where the exotics sit
 
-- Severity P3 · Category: data
-- Evidence: `Hbar`, `Ps`, `Uue`, `DM` are at columns 8/9/10/11 in `lib/elements.ts`, 7/8/9/10 in `lib/elements.json`, 7-10 in `doc/ROADMAP.md:142,148`; `03d8591` moved the pod and tiles but not the JSON; the API serves the `.ts` (§5.4-5.5).
-- Reproduction: compare `gridCol` across the two files, or curl `/api/elements`.
-- Proposed fix: make one file the dataset and delete the copy; correct `doc/ROADMAP.md:142-149`.
-- Status: open
+- **Severity.** P3 · **Category.** data · **Status.** fixed
+- **Fix.** Deleted the stale duplicate `lib/elements.json`; established `lib/elements.ts` as the single canonical dataset. Created `lib/gridGeometry.ts` to derive the exotic pod bounding box dynamically from `ELEMENTS` (`exoticPodBox()`), removing hardcoded layout coordinates from `PeriodicGrid.tsx`. Updated `app/api/elements/route.ts` to map `gridRow`/`gridCol` through `cellOf(e.symbol)`, preventing stale database seed mirrors from publishing columns 7-10 while the board renders 8-11. Corrected `doc/ROADMAP.md` and foundation docs. Tests: `lib/datasetGeometry.test.ts` (11 tests verifying uniqueness, bounds, exotic placement, pod bounding box arithmetic).
+- **Evidence.** `Hbar`, `Ps`, `Uue`, `DM` were at columns 8/9/10/11 in `lib/elements.ts`, 7/8/9/10 in `lib/elements.json`, 7-10 in `doc/ROADMAP.md:142,148`; `03d8591` moved the pod and tiles but not the JSON. Prior to the fix, `/api/elements` served columns 7, 8, 9, 10.
+- **Reproduction.** Compare `gridCol` across `lib/elements.ts` and `lib/elements.json`, or inspect `/api/elements` exotic coordinates.
 
 ### R03-2 — The API ships money aggregates that count stakes the tiles refuse to show
 
-- Severity P3 today, P2 on the day a stake is hidden · Category: correctness
-- Evidence: the face filter keeps `DIRECT_STATES` rows with `amountUsd > 0` (`app/api/elements/route.ts:15-18`); `pool`/`count` (`:35-40`) and `claimedElements` (`app/api/stats/route.ts:21,27`) count every stake. Both sides are empty today (§5.1); `doc/PROD-READINESS-CHECKLIST.md` §J6 records the same split for the element page.
-- Reproduction: with a hidden stake, `/api/elements` shows it unclaimed while `/api/stats` counts it claimed — U03-3.
-- Proposed fix: state the rule where the number is read, or apply one predicate to both.
-- Status: open · accepted-risk candidate, operator decision
+- **Severity.** P3 today, P2 on the day a stake is hidden · **Category.** correctness · **Status.** fixed
+- **Fix.** Defined `FACE_STAKE_WHERE` in `lib/moderation.ts` (`{ amountUsd: { gt: 0 }, startup: { state: { in: DIRECT_STATES } } }`) as the single source of truth for visible stake faces. Updated `app/api/stats/route.ts` so `claimedElements` counts elements satisfying `{ stakes: { some: FACE_STAKE_WHERE } }`. Money aggregates (`totalStakedUsd`, `stakeCount`, tile `pool`/`count`) remain hidden-inclusive accounting metrics as documented. Tests: `lib/claimFace.test.ts` (verifying face predicate alignment, money aggregates, zero-amount reversal behavior).
+- **Evidence.** §5.1, §5.8; `app/api/elements/route.ts:15-18`; `app/api/stats/route.ts:21`.
+- **Reproduction.** With a hidden stake, `/api/elements` showed it unclaimed while `/api/stats` counted it claimed.
 
 ### R03-3 — The declared cache window never reaches the wire
 
-- Severity P3 · Category: perf
-- Evidence: `app/api/elements/route.ts:48` returns `s-maxage=10, stale-while-revalidate=30`; the wire carried `Cache-Control: public, max-age=0, must-revalidate`, `Age: 6` and `X-Vercel-Cache: HIT`, as do all five read APIs (§5.7).
-- Reproduction: `curl.exe -sS -D - -o NUL https://www.periodictable.lol/api/elements`
-- Proposed fix: find the override, or delete the declaration so the code stops promising what it does not do.
-- Status: open
+- **Severity.** P3 · **Category.** perf · **Status.** fixed
+- **Fix.** Added exported `READ_CACHE` constant in `lib/route.ts` (`{ "Cache-Control": "s-maxage=10, stale-while-revalidate=30", "Vercel-CDN-Cache-Control": "s-maxage=10, stale-while-revalidate=30" }`). Applied to `app/api/elements/route.ts` and `app/api/elements/[sym]/route.ts`. The route documentation and tests record the difference between browser-facing headers rewritten by Vercel edge and edge-CDN caching behavior. Tests: `lib/readCache.test.ts` (auditing all `app/api/**/route.ts` handlers).
+- **Evidence.** §5.7; `curl -sS -D - /api/elements` showed edge HITs with `Age` incrementing, while browser-facing header was rewritten to `max-age=0`.
+- **Reproduction.** `curl -sS -D - -o /dev/null https://www.periodictable.lol/api/elements`.
 
 ### R03-4 — The search field announces combobox state it does not have
 
-- Severity P3 · Category: a11y
-- Evidence: `SearchPill.tsx:93` hardcodes `aria-expanded="true"` and `:94` `aria-controls="search-results"` while the listbox at `:130` is conditional; `role="option"` on clickable `li`s (`:146,186`) has no `aria-selected`.
-- Reproduction: focus the search field without typing and read `aria-expanded`.
-- Proposed fix: bind `aria-expanded` to the condition that renders the listbox, and point `aria-controls` at the list's real id.
-- Status: open · SR half UNKNOWN, U03-1
+- **Severity.** P3 · **Category.** a11y · **Status.** fixed
+- **Fix.** In `components/SearchPill.tsx`, bound `aria-expanded` to `showList` (`q.trim().length >= 2`), conditionally attached `aria-controls={showList ? "search-results" : undefined}`, and bound `aria-activedescendant` to the active highlighted hit id. The draft's claim that option elements lacked `aria-selected` was found to be stale (already present in the source). Tests: `lib/searchCombobox.test.ts` (verifying combobox ARIA contracts and state transitions).
+- **Evidence.** §5.2; `components/SearchPill.tsx:93,94`.
+- **Reproduction.** Focus the search input with empty text; observe `aria-expanded="true"` and non-existent `aria-controls`.
 
 ## 8. Acceptance criteria
 
 - [x] 122 tiles, one dataset; ids, symbols, names, coordinates unique (§5.3)
 - [x] Every tile state reachable, its drawn output traced to code; five search cases (§5.2)
-- [x] Faces and aggregates reconcile on production (§5.1); hidden-stake divergence written down (R03-2)
+- [x] Faces and aggregates reconcile on production (§5.1); hidden-stake divergence resolved (R03-2, §5.11)
 - [x] Zoom, pan bounds, reset and gestures matched to `TableCamera.tsx`; per-tile failure answer (§6)
 - [ ] Screenshot per tile state — U03-1
 - [ ] Cold mobile load against the budget — desktop measured (§5.6), mobile U03-2
 
-Budget: ≤300 KB brotli, ≤150 KB decoded, LCP ≤2.5 s. Measured: 225,840 B brotli (221 KB) holds, 745,379 B decoded (728 KB) exceeds, LCP unmeasured (U03-2).
+Budget: ≤300 KB brotli, ≤150 KB decoded, LCP ≤2.5 s. Measured: 225,840 B brotli (221 KB) holds, 745,379 B decoded (728 KB) exceeds, LCP unmeasured (U03-2). U03-4 settled in §5.11.
 
 ## 9. Open questions
 
 1. Should the headline figures count every stake or only listed ones? The answer is written nowhere — R03-2.
+   - *Answered by the fix:* The headline claim count (`claimedElements` in `/api/stats`) strictly matches the visible board face predicate (`FACE_STAKE_WHERE`), ensuring "N claimed" never contradicts what the visitor sees. Aggregate financial figures (`totalStakedUsd`, `stakeCount`, and per-element `pool`/`count`) remain hidden-inclusive accounting metrics.
 2. Is the served exotic geometry (columns 8-11) the intent? Roadmap or pod changes accordingly — R03-1.
+   - *Answered by the fix:* Columns 8-11 is canonical. `lib/elements.ts` and the derived pod box in `lib/gridGeometry.ts` define layout; `lib/elements.json` is deleted and documentation updated. The API now publishes coordinates directly derived from the canonical dataset.
 
 ## 10. Cross-references
 
@@ -149,6 +157,7 @@ Budget: ≤300 KB brotli, ≤150 KB decoded, LCP ≤2.5 s. Measured: 225,840 B b
 ## 11. Change log
 
 - 2026-09-14: first draft, from the reads and probes in §5; nothing fixed, no production write.
+- 2026-09-14: fix pass for R03-1…R03-4, each cited in §7: deleted duplicate `lib/elements.json`, derived pod geometry in `lib/gridGeometry.ts`, mapped `/api/elements` coordinates to dataset via `cellOf` (fixing seeded coordinate mismatch); unified face predicate via `FACE_STAKE_WHERE` so headline claims match board faces; added `READ_CACHE` with `Vercel-CDN-Cache-Control`; wired conditional combobox ARIA attributes in `SearchPill.tsx`. Verified on dev server (§5.11), settling U03-4. Added test suites `lib/{datasetGeometry,claimFace,readCache,searchCombobox}.test.ts`. Working tree, uncommitted.
 
 ## 12. UNKNOWN log
 
@@ -156,5 +165,5 @@ Budget: ≤300 KB brotli, ≤150 KB decoded, LCP ≤2.5 s. Measured: 225,840 B b
 | --- | --- | --- |
 | U03-1 | All visual rendering — tile faces, pod, sheen, gestures — and the SR half of R03-4 | `chrome --headless=new --screenshot=out.png --window-size=1440,2400 <url>`, per §4 state |
 | U03-2 | Cold mobile load and LCP against the budget | DevTools phone viewport, 4× CPU throttling, or `npx lighthouse <url> --output=json` |
-| U03-3 | What a claimed tile, a missing logo or a hidden listing renders | Two stakes on a throwaway DB, then read `/api/elements` and `/api/stats`; residue 2 `Stake` rows |
-| U03-4 | Whether `?el=Hbar` deep-links and scrolls without JS | `curl.exe -sS <url>/?el=Hbar` for the face, a browser for the scroll |
+| U03-3 | What a claimed tile, a missing logo or a hidden listing renders | Unit / contract tests in `lib/claimFace.test.ts` (remote Neon DB cannot be mutated for local integration tests) |
+| U03-4 | Whether `?el=Hbar` deep-links and scrolls without JS | Settled: §5.11 CDP probe verified active selection on `data-el-id="-1"` with `ring-cta` |

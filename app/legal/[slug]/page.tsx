@@ -1,10 +1,14 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { legalMetadata, type LegalPageCopy } from "../../../lib/legalMeta";
 
 type Section = { h: string; ps: string[] };
-const PAGES: Record<string, { title: string; updated: string; sections: Section[] }> = {
+type LegalPage = LegalPageCopy & { updated: string; sections: Section[] };
+const PAGES: Record<string, LegalPage> = {
   about: {
     title: "About & disclaimer",
+    desc: "What periodictable.lol is, how claiming an element works, and the disclaimers behind every paid listing on the table.",
     updated: "Last updated: September 2026",
     sections: [
       {
@@ -46,6 +50,7 @@ const PAGES: Record<string, { title: string; updated: string; sections: Section[
   },
   rules: {
     title: "Rules & payments",
+    desc: "The $5 floor, takeover and reclaim maths, what may be listed, how Stripe payments work, and why stakes are final.",
     updated: "Last updated: September 2026",
     sections: [
       {
@@ -95,6 +100,7 @@ const PAGES: Record<string, { title: string; updated: string; sections: Section[
   },
   contact: {
     title: "Contact",
+    desc: "Report a listing, file a copyright or trademark complaint, dispute a charge, or reach the team behind periodictable.lol.",
     updated: "Last updated: September 2026",
     sections: [
       {
@@ -123,6 +129,13 @@ const PAGES: Record<string, { title: string; updated: string; sections: Section[
 
 export function generateStaticParams() {
   return Object.keys(PAGES).map((slug) => ({ slug }));
+}
+
+/** Each legal document carries its own title, description and canonical (R02-7). */
+export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
+  const page = PAGES[params.slug];
+  if (!page) return {};
+  return legalMetadata(params.slug, page);
 }
 
 export default function LegalPage({ params }: { params: { slug: string } }) {

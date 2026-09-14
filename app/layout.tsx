@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fredoka, Nunito } from "next/font/google";
+import { homeMetadata } from "@/lib/shareMeta";
 import "./globals.css";
 
 const display = Fredoka({
@@ -14,10 +15,7 @@ const body = Nunito({
   variable: "--font-body",
 });
 
-export const metadata: Metadata = {
-  title: "periodictable.lol — Put your startup on the table. Literally.",
-  description: "Every element is an open leaderboard, ranked by total stake.",
-};
+export const metadata: Metadata = homeMetadata();
 
 export default function RootLayout({
   children,

@@ -25,6 +25,9 @@ export async function generateMetadata({ params }: { params: { domain: string } 
   return {
     title: `${domain} is on the table | periodictable.lol`,
     description: startup.pitch || `${startup.title} is on the periodic table.`,
+    // Set explicitly: the root layout canonicalises `/`, and a profile that
+    // inherited it would tell crawlers it is a copy of the board.
+    alternates: { canonical: `/s/${encodeURIComponent(domain)}` },
     openGraph: {
       title: `${domain} is on the table`,
       description: startup.pitch || undefined,

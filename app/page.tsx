@@ -11,6 +11,7 @@ import { SearchPill, SearchPick } from "../components/SearchPill";
 import { StatsCard } from "../components/StatsCard";
 import { LiveDataNotice } from "../components/LiveDataNotice";
 import { liveState } from "../lib/liveState";
+import { activityFace } from "../lib/activityFace";
 import { ActivityCard } from "../components/ActivityCard";
 import { WorldOrder, RailShell } from "../components/WorldOrder";
 import { TerritoryView } from "../components/TerritoryView";
@@ -31,6 +32,19 @@ type Tile = {
   count: number;
   leader: { domain: string; logoUrl: string; amount: number } | null;
 };
+
+/** The FAB pulse makes the same claim as the activity footer, so it may beat
+ *  only while the feed is proven live (R02-6). */
+function ActivityDot({ dot }: { dot: { className: string; ping: boolean } }) {
+  return (
+    <span className="relative flex h-2.5 w-2.5">
+      {dot.ping ? (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
+      ) : null}
+      <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${dot.className}`} />
+    </span>
+  );
+}
 
 function HomeInner() {
   const toast = useToast();
@@ -72,7 +86,7 @@ function HomeInner() {
   } = useSWR<StatsResponse>("/api/stats", (url: string) => fetchJson(url, isStatsResponse), {
     refreshInterval: 30000,
   });
-  const { data: activity, mutate: mutateActivity } = useSWR<ActivityRow[]>("/api/activity?limit=6", (url: string) => fetchJson(url, isActivityRows), {
+  const { data: activity, error: activityError, mutate: mutateActivity } = useSWR<ActivityRow[]>("/api/activity?limit=6", (url: string) => fetchJson(url, isActivityRows), {
     refreshInterval: 30000,
   });
 
@@ -136,11 +150,21 @@ function HomeInner() {
   // separately: the table can be trustworthy while the totals are not.
   const tileState = liveState(!!tiles, tilesError);
   const statsState = liveState(!!statsData, statsError);
+  // The activity card is a second document surface with its own footer claim,
+  // so it gets its own state (R02-6). SWR keeps the last good rows when a
+  // refresh fails, which is why the card cannot work this out from `rows`
+  // alone: retained rows look exactly like fresh ones.
+  const activityState = liveState(!!activity, activityError);
+
+  // One derivation feeds both the FAB pulse and the panel footer, so they can
+  // never disagree about whether the feed is live.
+  const activityDot = activityFace(activityState, activity).dot;
 
   const retryLiveData = useCallback(() => {
     void mutateTiles();
     void mutateStats();
-  }, [mutateTiles, mutateStats]);
+    void mutateActivity();
+  }, [mutateTiles, mutateStats, mutateActivity]);
 
   const openStake = useCallback((el: ElementNode, amount: number) => {
     setCheckoutEl(el);
@@ -206,6 +230,10 @@ function HomeInner() {
               claims={claims}
               selectedId={selected?.id ?? null}
               onSelect={onSelectTile}
+              // Only a table that has answered may price itself: before the
+              // first /api/elements response the tiles draw symbol and name and
+              // no price at all (R02-4).
+              pricesKnown={tileState === "ok" || tileState === "stale"}
             />
           )}
         </div>
@@ -257,13 +285,10 @@ function HomeInner() {
             onClick={() => setActMin(false)}
             className="h-11 w-11 rounded-full bg-white shadow-float grid place-items-center animate-panel-in"
           >
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
-            </span>
+            <ActivityDot dot={activityDot} />
           </button>
         ) : (
-          <ActivityCard rows={activity} onMinimize={() => setActMin(true)} />
+          <ActivityCard rows={activity} state={activityState} onRetry={retryLiveData} onMinimize={() => setActMin(true)} />
         )}
       </div>
 
@@ -281,14 +306,11 @@ function HomeInner() {
           }}
           className="absolute bottom-[18px] left-[18px] z-[var(--z-cards)] h-11 w-11 rounded-full bg-white shadow-float grid place-items-center"
         >
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
-          </span>
+          <ActivityDot dot={activityDot} />
         </button>
         {mobileActivityOpen && (
           <div className="absolute inset-x-3 bottom-3 z-[var(--z-rail)] max-h-[70vh] overflow-auto">
-            <ActivityCard rows={activity} fluid onClose={() => setMobileActivityOpen(false)} />
+            <ActivityCard rows={activity} state={activityState} onRetry={retryLiveData} fluid onClose={() => setMobileActivityOpen(false)} />
           </div>
         )}
       </div>

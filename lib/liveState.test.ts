@@ -51,9 +51,12 @@ describe("liveState (homepage data honesty)", () => {
   });
 
   it("never promises real prices while unavailable", () => {
-    // The board under this notice still draws its default $5 faces, so the copy
-    // has to say so plainly instead of implying the outage is cosmetic.
-    expect(liveMessage("unavailable")).toMatch(/not real/i);
+    // Since R02-4 the board is not drawn in this state at all — the grid is
+    // replaced by this notice and priced tiles only render once the table has
+    // answered — so the copy must say the table is missing, not describe
+    // prices that are not on screen.
+    expect(liveMessage("unavailable")).toMatch(/hidden/i);
+    expect(liveMessage("unavailable")).not.toMatch(/shown here/i);
   });
 });
 

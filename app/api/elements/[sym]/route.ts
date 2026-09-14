@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { takeLeadPrice, joinMin, reclaimFor } from "@/lib/pricing";
-import { apiJson, apiError } from "@/lib/route";
+import { apiJson, apiError, READ_CACHE } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +67,6 @@ export async function GET(req: NextRequest, { params }: { params: { sym: string 
         ...(reclaim !== undefined ? { reclaim } : {}),
       },
     },
-    { headers: { "Cache-Control": "s-maxage=10, stale-while-revalidate=30" } }
+    { headers: READ_CACHE }
   );
 }

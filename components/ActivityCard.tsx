@@ -4,13 +4,8 @@ import { Card } from "./Card";
 import { Avatar } from "./Avatar";
 import { fetchJson, isActivityRows, type ActivityRow } from "../lib/api";
 import { relTime } from "../lib/relTime";
-
-function kindLabel(kind: string): string {
-  if (kind === "join") return "bid on";
-  if (kind === "reclaim") return "reclaimed";
-  if (kind === "refund") return "refunded";
-  return "topped up";
-}
+import { liveState, type LiveState } from "../lib/liveState";
+import { activityFace, kindLabel } from "../lib/activityFace";
 
 /** First negative delta in the system: a reversal must read as a debit, not a gain. */
 function deltaText(delta: number): string {
@@ -19,16 +14,23 @@ function deltaText(delta: number): string {
 
 export function ActivityCard({
   rows,
+  state: pageState,
   onMinimize,
   onClose,
+  onRetry,
   fluid,
 }: {
   /** Pre-fetched rows (from page-level SWR); if omitted the card fetches itself. */
   rows?: ActivityRow[];
+  /** The page's feed state when it pre-fetches. Retained rows look identical to
+   *  fresh ones, so only the page knows whether the last request succeeded. */
+  state?: LiveState;
   /** Desktop placement: collapse the card into its round FAB. */
   onMinimize?: () => void;
   /** Bottom-sheet placement: explicit close button in the header. */
   onClose?: () => void;
+  /** Called by the retry button when the page owns the feed. */
+  onRetry?: () => void;
   /** Bottom-sheet placement: fill the sheet width instead of the 340px card. */
   fluid?: boolean;
 }) {
@@ -36,13 +38,18 @@ export function ActivityCard({
     refreshInterval: 30000,
   });
   const data = rows ?? own.data;
-  const error = rows ? null : own.error;
-  const s0 = data?.[0];
+  const state = pageState ?? liveState(!!own.data, own.error);
+  const face = activityFace(state, data);
 
   return (
     <Card className={`${fluid ? "w-full max-w-none" : "w-[340px] max-w-[calc(100vw-36px)]"} rounded-2xl px-3.5 py-3 shadow-float animate-panel-in`}>
       <div className="font-display text-sm font-bold text-mutedink flex items-center gap-2">
-        <span className="block h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
+        <span className="relative flex h-2 w-2">
+          {face.dot.ping ? (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
+          ) : null}
+          <span className={`relative inline-flex h-2 w-2 rounded-full ${face.dot.className}`} />
+        </span>
         Live activity
         {onMinimize && (
           <button
@@ -66,20 +73,17 @@ export function ActivityCard({
         )}
       </div>
       <div className="mt-1.5 border-b border-hairline pb-2 text-[13px] font-extrabold text-mutedink">
-        {error ? (
-          <span>Couldn&apos;t load activity — retrying…</span>
-        ) : !s0 ? (
-          <span className="animate-pulse">loading…</span>
-        ) : (
+        {face.header.kind === "lead" ? (
           <>
-            <span className="text-ink">{s0.elementSymbol.toUpperCase()}</span>{" "}
-            {s0.kind === "join" ? "New bid" : s0.kind === "reclaim" ? "Crown reclaimed" : s0.kind === "refund" ? "Stake refunded" : "Stake bumped"} ·{" "}
-            <span className="text-ink">{s0.city ?? "somewhere"}</span>
+            <span className="text-ink">{face.header.symbol}</span> {face.header.verb} ·{" "}
+            <span className="text-ink">{face.header.city}</span>
           </>
+        ) : (
+          <span className={face.header.kind === "loading" ? "animate-pulse" : undefined}>{face.header.text}</span>
         )}
       </div>
       <div className="mt-1 flex flex-col">
-        {!data && !error
+        {face.header.kind === "loading"
           ? [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-[42px] rounded-lg bg-icy animate-pulse my-[2px]" />)
           : (data ?? []).slice(0, 5).map((s) => (
               <a
@@ -105,14 +109,17 @@ export function ActivityCard({
                 </div>
               </a>
             ))}
-        {error && !data && (
-          <button onClick={() => own.mutate()} className="mt-1 rounded-xl bg-icy px-3 py-2 text-xs font-extrabold text-ink">
+        {state === "unavailable" && (
+          <button
+            onClick={() => (onRetry ? onRetry() : void own.mutate())}
+            className="mt-1 rounded-xl bg-icy px-3 py-2 text-xs font-extrabold text-ink"
+          >
             Retry
           </button>
         )}
       </div>
       <div className="mt-1 flex justify-between border-t border-hairline pt-2 text-xs font-bold text-mutedink">
-        <span><b className="text-ink">live</b> · updates every 30s</span>
+        <span><b className="text-ink">{face.status}</b> · {face.detail}</span>
         <span><b className="text-ink">{data?.length ?? 0}</b> recent</span>
       </div>
     </Card>

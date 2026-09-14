@@ -116,7 +116,14 @@ export type ElementDetail = {
   prices: { takeLead: number; joinMin: number; reclaim?: number };
 };
 
-/** Homepage stats from /api/stats — exact quantities and units (P1-09). */
+/**
+ * Homepage stats from /api/stats — exact quantities and units (P1-09).
+ *
+ * `claimedElements`/`unclaimedElements` count the tiles the board draws as
+ * claimed, under the shared face predicate (`lib/moderation.ts`). `stakeCount`
+ * and `totalStakedUsd` are money: every stake row, concealed and reversed
+ * included (R03-2).
+ */
 export type StatsResponse = {
   elementsTotal: number;
   claimedElements: number;

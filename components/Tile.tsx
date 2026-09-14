@@ -3,6 +3,7 @@ import { FAMILY_FILL } from "../lib/familyFill";
 import type { ElementNode } from "../lib/elements";
 import { cameraInteract } from "../lib/cameraInteract";
 import { getExoticTheme } from "../lib/exoticThemes";
+import { tileFace } from "../lib/tileFace";
 
 export type TileClaim = {
   price: number;
@@ -18,27 +19,47 @@ function TileInner({
   claim,
   onSelect,
   tabIndex,
+  pricesKnown = false,
 }: {
   el: ElementNode;
   claim?: TileClaim;
   onSelect?: (el: ElementNode) => void;
   /** Roving tabindex from PeriodicGrid (one tab stop for the whole table). */
   tabIndex?: number;
+  /** False until the live table has answered, which is what a crawler and a
+   *  JS-less visitor see. The face then states no price and no holder: the
+   *  title, the tooltip and the visible value all come from lib/tileFace.ts,
+   *  which is where the "unclaimed $5 ×122" document used to come from (R02-4). */
+  pricesKnown?: boolean;
 }) {
-  const claimed = !!claim;
+  const face = tileFace(el, claim, pricesKnown);
+  const claimed = face.claimed;
   const exoticTheme = getExoticTheme(el.symbol);
   const bg = exoticTheme ? undefined : claimed ? FAMILY_FILL[el.family] ?? "#fff" : "#fff";
-  const price = claim?.price ?? 5;
 
   return (
-    <button
-      onClick={() => {
+    <a
+      href={`/elements/${el.symbol}`}
+      draggable={false}
+      onClick={(event) => {
+        // A real link first (R01-3): crawlers, cmd-click, middle-click and "open
+        // in new tab" all reach the element page. A plain left click keeps the
+        // modal the rest of the board assumes.
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
         if (cameraInteract.dragging) return;
         onSelect?.(el);
       }}
+      onKeyDown={(event) => {
+        // Space does not activate a link; the tile was a button before, so keep
+        // the key working (Enter is native).
+        if (event.key !== " ") return;
+        event.preventDefault();
+        onSelect?.(el);
+      }}
       tabIndex={tabIndex}
-      title={`${el.symbol} ${el.name} · ${claimed ? `#1 $${price}` : "Unclaimed · $5"}`}
-      aria-label={`${el.symbol} ${el.name}, ${claimed ? `claimed, leader pays $${price}` : "unclaimed"}`}
+      title={face.title}
+      aria-label={`${el.symbol} ${el.name}${face.ariaLabelSuffix}`}
       className={`tile-lift group relative rounded-lg border cursor-pointer flex flex-col items-center justify-center leading-none ${
         exoticTheme
           ? `exotic-tile ${exoticTheme.className}`
@@ -47,12 +68,12 @@ function TileInner({
       style={{ background: bg, width: 48, height: 52 }}
     >
       <span className={`pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:block whitespace-nowrap bg-ink text-white text-[10px] font-bold rounded-full px-2 py-0.5 z-[var(--z-tooltip)]`}>
-        {el.symbol} {el.name} · {claimed ? `#1 $${price}` : "Unclaimed · $5"}
+        {face.title}
       </span>
       <>
         <span className={exoticTheme ? "text-[8px] font-bold text-[#d5e7f7] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "text-[8px] font-bold text-ink"}>{el.id > 0 ? el.id : "✦"}</span>
         <span className={exoticTheme ? "font-display text-[14px] font-bold text-[#f7fbff] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "font-display text-[14px] font-bold text-ink"}>{el.symbol}</span>
-        {claimed && claim?.logoUrl ? (
+        {face.priced && claim?.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={claim.logoUrl}
@@ -63,11 +84,15 @@ function TileInner({
               event.currentTarget.style.display = "none";
             }}
           />
+        ) : face.priceText ? (
+          <span className={`mt-0.5 h-[18px] flex items-center justify-center text-[11px] font-extrabold ${exoticTheme ? "text-[#f7fbff] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "text-ink"}`}>{face.priceText}</span>
         ) : (
-          <span className={`mt-0.5 h-[18px] flex items-center justify-center text-[11px] font-extrabold ${exoticTheme ? "text-[#f7fbff] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "text-ink"}`}>${price}</span>
+          // Neutral face: the price's box, holding nothing. The tile keeps its
+          // height, so a tile does not resize when the live prices arrive.
+          <span aria-hidden="true" className="mt-0.5 h-[18px] w-[18px]" />
         )}
       </>
-    </button>
+    </a>
   );
 }
 

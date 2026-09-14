@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ELEMENTS } from "@/lib/elements";
+import { OG_CARD } from "@/lib/ogCard";
+import { siteOrigin } from "@/lib/siteUrl";
 
 export const dynamicParams = true;
 export const revalidate = 60;
@@ -15,10 +17,27 @@ export async function generateMetadata({ params }: { params: { sym: string } }):
   const symbol = decodeURIComponent(params.sym);
   const el = ELEMENTS.find((e) => e.symbol === symbol);
   if (!el) return { title: "Element not found — periodictable.lol" };
+  const title = `${el.name} (${el.symbol})`;
+  const description = `Who leads ${el.name}? Live ranked stakes, prices, and claim CTA.`;
+  // Absolute, not relative: metadataBase is inherited from the root layout, and
+  // an image URL that resolves to the request host in one environment and to
+  // the canonical host in another is a card nobody can predict (R01-1).
+  const card = `${siteOrigin()}/og/${encodeURIComponent(el.symbol)}`;
   return {
     title: `${el.name} (${el.symbol}) — startups on the table | periodictable.lol`,
-    description: `Who leads ${el.name}? Live ranked stakes, prices, and claim CTA.`,
-    openGraph: { title: `${el.name} (${el.symbol})`, images: [`/og/${encodeURIComponent(el.symbol)}`] },
+    description,
+    // One canonical per entity: the table's CTA visits `/?el=<sym>` instead of
+    // this page, but the page itself is the indexable one (R01-4).
+    alternates: { canonical: `/elements/${encodeURIComponent(el.symbol)}` },
+    openGraph: {
+      title,
+      description,
+      url: `/elements/${encodeURIComponent(el.symbol)}`,
+      images: [{ url: card, width: OG_CARD.width, height: OG_CARD.height, alt: `${title} on periodictable.lol` }],
+    },
+    // Declared rather than inherited: without these, X falls back to the root
+    // layout's card and every element page shares as the home card.
+    twitter: { card: "summary_large_image", title, description, images: [card] },
   };
 }
 

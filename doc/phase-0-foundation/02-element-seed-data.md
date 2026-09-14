@@ -3,7 +3,7 @@
 **Parent:** Phase 0 README · **Covers:** ROADMAP §4
 
 ## Objective
-Single source of truth `lib/elements.ts` (or `elements.json`) with all 122 nodes: coords, symbols, masses, families, tiers.
+Single source of truth `lib/elements.ts` with all 122 nodes: coords, symbols, masses, families, tiers.
 
 ## Schema per row
 `{ id, symbol, name, atomicMass, gridRow, gridCol, family, tier }`

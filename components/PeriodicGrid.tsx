@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ELEMENTS, ElementNode } from "../lib/elements";
 import { cellMap, stepCell, rowEnd } from "../lib/gridNav";
+import { exoticPodBox } from "../lib/gridGeometry";
 import { Tile, TileClaim } from "./Tile";
 
-const TILE_WIDTH = 48;
-const TILE_HEIGHT = 52;
-const GRID_GAP = 6;
-const EXOTIC_POD = {
-  left: 7 * (TILE_WIDTH + GRID_GAP) - 14,
-  top: TILE_HEIGHT + GRID_GAP - 14,
-  width: 4 * TILE_WIDTH + 3 * GRID_GAP + 28,
-  height: TILE_HEIGHT + 28,
-} as const;
+// Derived from the EXOTIC tiles, never hand-numbered: the pod and the dataset
+// cannot drift apart (R03-1).
+const EXOTIC_POD = exoticPodBox();
 
 type PodStar = {
   x: number;
@@ -47,6 +42,7 @@ const POD_STARS = [
 ] satisfies readonly PodStar[];
 
 function ExoticPod() {
+  if (!EXOTIC_POD) return null;
   return (
     <div
       aria-hidden="true"
@@ -188,10 +184,14 @@ export function PeriodicGrid({
   claims = {},
   selectedId,
   onSelect,
+  pricesKnown = false,
 }: {
   claims?: Record<string, TileClaim>;
   selectedId?: number | null;
   onSelect?: (el: ElementNode) => void;
+  /** Passed through to every tile: false until the live table has answered, so
+   *  the pre-hydration document advertises no price (R02-4). */
+  pricesKnown?: boolean;
 }) {
   // Rows 1–10 (7 table + exotic pod in row 2 + f-block rows 9–10)
   const cells = cellMap(ELEMENTS);
@@ -209,7 +209,7 @@ export function PeriodicGrid({
     // preventScroll: native focus scrolling would pan the overflow:hidden
     // camera viewport and desync it from the transform-based camera.
     gridRef.current
-      ?.querySelector<HTMLElement>(`[data-el-id="${id}"] button`)
+      ?.querySelector<HTMLElement>(`[data-el-id="${id}"] a`)
       ?.focus({ preventScroll: true });
   }, []);
 
@@ -258,7 +258,7 @@ export function PeriodicGrid({
             selectedId === el.id ? "ring-2 ring-cta rounded-lg" : ""
           }
         >
-          <Tile el={el} claim={claims[el.symbol]} onSelect={onSelect} tabIndex={el.id === activeId ? 0 : -1} />
+          <Tile el={el} claim={claims[el.symbol]} onSelect={onSelect} tabIndex={el.id === activeId ? 0 : -1} pricesKnown={pricesKnown} />
         </div>
       );
     }

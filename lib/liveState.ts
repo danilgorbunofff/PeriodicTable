@@ -38,7 +38,10 @@ export function liveMessage(state: LiveState): string | null {
     case "stale":
       return "Last known data — live updates are paused.";
     case "unavailable":
-      return "Couldn't load the live table. Prices shown here are not real.";
+      // The board is not drawn in this state at all (R02-4), so the notice
+      // cannot speak about prices "shown here" — it has to admit the table is
+      // missing rather than describe it.
+      return "Couldn't load the live table — the board is hidden rather than guessed.";
     case "ok":
     case "loading":
       return null;
