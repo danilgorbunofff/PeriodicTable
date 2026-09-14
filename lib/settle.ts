@@ -19,7 +19,7 @@ import { applyStakeTx, reverseStakeTx } from "./recompute";
 import { consumeReservation } from "./reservations";
 import { enqueueOutbox, drainDue } from "./outbox";
 import { audit } from "./audit";
-import { withTxnRetry } from "./txn";
+import { withTxnRetry, MONEY_TX } from "./txn";
 
 export type SettleEvent = {
   provider: "stripe" | "dev";
@@ -101,9 +101,16 @@ async function recordEvent(params: {
 }
 
 export async function settlePayment(paymentId: string, event: SettleEvent): Promise<SettleOutcome> {
-  // Duplicate delivery guard: same event id twice = one application.
+  // Duplicate delivery guard: same event id twice = one application — but only
+  // for deliveries that reached a DECISION. The catch block below records an
+  // ERROR row *before* rethrowing a retryable failure, so a redelivered event
+  // finds its own failed attempt on file; treating that as "seen" would answer
+  // 200 duplicate while the payment is still PENDING — money captured, nothing
+  // applied, unrecoverable except by hand. Nothing was written by that attempt
+  // (the transaction rolled back), and the real double-apply guard is the
+  // status re-check under the per-element advisory lock below.
   const seen = await prisma.providerEvent.findUnique({ where: { providerEventId: event.eventId } });
-  if (seen) {
+  if (seen && seen.outcome !== ProviderEventOutcome.ERROR) {
     return { outcome: "duplicate", paymentId };
   }
 
@@ -244,7 +251,7 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
 
       return { stakeId: result.stake.id, elementSymbol: element.symbol };
         },
-        { isolationLevel: "Serializable" }
+        MONEY_TX
       )
     );
 
@@ -297,9 +304,11 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
  * refunds is published policy, but a chargeback is not a policy you can decline.
  */
 export async function reversePayment(paymentId: string, event: ReversalEvent): Promise<ReversalOutcome> {
-  // Duplicate delivery guard: the same event id twice is one reversal.
+  // Duplicate delivery guard: the same event id twice is one reversal — except
+  // for a delivery that recorded a retryable ERROR (see settlePayment): that
+  // attempt rolled back, so it must be allowed to run again.
   const seen = await prisma.providerEvent.findUnique({ where: { providerEventId: event.eventId } });
-  if (seen) return { outcome: "duplicate", paymentId };
+  if (seen && seen.outcome !== ProviderEventOutcome.ERROR) return { outcome: "duplicate", paymentId };
 
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   if (!payment) {
@@ -370,7 +379,7 @@ export async function reversePayment(paymentId: string, event: ReversalEvent): P
           // row; the public feed gets the ActivityLog row from the unwind.
           return reversed;
         },
-        { isolationLevel: "Serializable" }
+        MONEY_TX
       )
     );
 

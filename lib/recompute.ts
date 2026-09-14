@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { rankStakes, assertLedgerInvariants, type DethroneInfo } from "./pricing";
-import { withTxnRetry } from "./txn";
+import { withTxnRetry, MONEY_TX } from "./txn";
 
 export type RecomputeResult = {
   element: { symbol: string; totalPoolUsd: number; stakeCount: number };
@@ -39,7 +39,7 @@ export async function applyStakeTx(
   // Standalone callers (seeds, tests) get the same Serializable + bounded-retry
   // guarantees as settle/checkout — never default isolation without retry.
   return withTxnRetry(() =>
-    prisma.$transaction((t) => applyStakeInTx(t, params), { isolationLevel: "Serializable" })
+    prisma.$transaction((t) => applyStakeInTx(t, params), MONEY_TX)
   );
 }
 

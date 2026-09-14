@@ -9,6 +9,25 @@
  */
 export const TXN_MAX_ATTEMPTS = 10;
 
+/**
+ * Interactive-transaction budget for the money paths (checkout take, settle,
+ * reverse). Prisma's defaults (2 s `maxWait`, 5 s `timeout`) are sized for a
+ * warm local database; production runs the ledger against Neon (eu-west-2)
+ * from Vercel (iad1), where the first query after an idle period pays a
+ * compute-resume, and a cold settle can exceed 5 s mid-transaction. That
+ * surfaces as P2028 ("Transaction already closed") on the provider's request —
+ * the whole ledger write rolls back and the payment stays PENDING. The budget
+ * below is generous enough to absorb that resume while still fitting inside
+ * the 60 s function limit these routes declare.
+ *
+ * Not retried in-process: a timeout that fires after the server committed
+ * would rematerialize as a duplicate apply, and stacking attempts would blow
+ * the function budget. Redelivery is the retry mechanism instead (see
+ * settlePayment's duplicate guard, which deliberately lets an ERROR record be
+ * re-run).
+ */
+export const MONEY_TX = { isolationLevel: "Serializable", maxWait: 15_000, timeout: 25_000 } as const;
+
 function isRetryableTxnError(e: unknown): boolean {
   const code = (e as { code?: string }).code;
   if (code === "P2034") return true; // Prisma: write conflict / deadlock
