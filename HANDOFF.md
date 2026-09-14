@@ -661,15 +661,22 @@ newest production deployment, not GitHub's commit status (see the traps below).
   serverless is not currently required here — but the datasource still has no
   `directUrl`, so if a *future* migration ever fails on advisory locks, that is
   the first thing to add (`DIRECT_URL` + `directUrl = env("DIRECT_URL")`).
-- **`package.json`'s `build` is `prisma generate && next build`** — it does *not*
-  run migrations. `prisma migrate deploy` exists as `db:deploy`. **Answered
-  2026-09-11:** the Vercel project's `buildCommand` is **`null`**, i.e. there is
-  **no dashboard override**, so that script *is* the deploy build. Prod's schema is
-  current anyway only because it was migrated by hand.
-  ⚠️ **Do not add `migrate deploy` to the build while `DATABASE_URL` is scoped
-  `Production, Preview`** (same Neon DB — confirmed by `vercel env ls`): the build
-  runs for previews too, so an unmerged branch could migrate prod. Keep it manual
-  (`npm run db:deploy` against prod) or split the environments first.
+- **`package.json`'s `build` is `prisma generate && node scripts/migrate-if-production.mjs && next build`**.
+  `prisma migrate deploy` also exists as `db:deploy`. **Answered 2026-09-11:** the
+  Vercel project's `buildCommand` is **`null`**, i.e. there is **no dashboard
+  override**, so that script *is* the deploy build. Prod's schema was current before
+  this only because it had been migrated by hand — which is exactly the gap the
+  migration step in the build closes.
+  ✅ **Resolved 2026-09-14.** The note that used to sit here said *do not* put
+  `migrate deploy` in the build while `DATABASE_URL` is scoped `Production, Preview`
+  (the same Neon DB — confirmed by `vercel env ls`), because the build also runs for
+  previews and an unmerged branch could migrate prod. The distinction that note
+  asked for is **`VERCEL_ENV`**: `"production"` only for main's deployment,
+  `"preview"` for every branch deployment. `scripts/migrate-if-production.mjs` runs
+  `prisma migrate deploy` when — and only when — `VERCEL_ENV === "production"`, and
+  logs a skip everywhere else: local builds, CI, and previews. So a production build
+  can no longer ship code whose migration was never applied, and previews still
+  cannot touch prod. `npm run db:deploy` remains the path for local and CI databases.
 - **The Vercel project object is readable and answers several "check the dashboard"
   questions directly.** `GET /v9/projects/{id}` (token at
   `~/Library/Application Support/com.vercel.cli/auth.json`) exposes `buildCommand`

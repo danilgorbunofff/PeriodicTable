@@ -32,7 +32,12 @@
 
 ## Deploy order (prod)
 0. `node scripts/check-prod-env.mjs` with production env (must pass) + `npm run audit:prod`
-1. `prisma migrate deploy` + `tsx prisma/seed.ts` + `tsx prisma/launch-seed.ts`
+1. Migrations apply themselves in the production build: `npm run build` is
+   `prisma generate && node scripts/migrate-if-production.mjs && next build`, and
+   that script runs `prisma migrate deploy` **only when `VERCEL_ENV=production`** —
+   previews, local builds, and CI all skip it. A migration that fails fails the
+   build, and the previous deployment keeps serving. Seeds are still manual:
+   `tsx prisma/seed.ts` + `tsx prisma/launch-seed.ts`
 2. Env: Stripe live keys + webhook endpoint, Resend domain, Turnstile, `CRON_SECRET`, `PAYMENTS_LIVE=true`
 3. Deploy Vercel prod 4. Smoke $1 claim → refund/keep 5. Announce
 
