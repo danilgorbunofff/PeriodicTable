@@ -1222,3 +1222,20 @@ export const ELEMENTS: ElementNode[] = [
   "tier": "EXOTIC"
  }
 ];
+
+/**
+ * The element a URL or query parameter means, compared case-insensitively
+ * (R04-4). Symbols are authored mixed-case — `Au`, but also `Hbar`, `Ps`,
+ * `Uue` — so a lowercased, trimmed argument still names exactly one element and
+ * `/elements/au`, `/api/elements/AU` and `?el=AU` resolve to `Au` rather than
+ * 404ing or creating a second, case-split copy of the same page.
+ *
+ * Returns null for something that is not a symbol at all; callers that must
+ * tell "no element named that" from "that is not a name" check the raw value
+ * themselves.
+ */
+export function findElementBySymbol(raw: string | null | undefined): ElementNode | null {
+  const key = (raw ?? "").trim().toLowerCase();
+  if (!key) return null;
+  return ELEMENTS.find((e) => e.symbol.toLowerCase() === key) ?? null;
+}

@@ -18,8 +18,13 @@ import { isStatsResponse, isTableOrderRows, isBoardRows, isActivityRows, isSearc
 const prisma = testPrisma();
 const hasDb = hasTestDb;
 const T6 = 9994;
-const DOMAINS = ["ct-a.dev", "ct-b.dev"];
+// A symbol the inventory actually authors (`Hbar`, not `HBAR`) is the only way
+// to test canonical casing end to end (R04-4).
+const HBAR = 9992;
+const HIDDEN = "helemprobe.dev";
+const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN];
 let keyN = 0;
+let madeHbar = false;
 const key = () => `p4-route-${Date.now()}-${keyN++}`;
 
 const req = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
@@ -33,6 +38,14 @@ beforeAll(async () => {
     create: { id: T6, symbol: "TST6", name: "Test Six", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
     update: {},
   });
+  if (!(await prisma.element.findUnique({ where: { symbol: "Hbar" } }))) {
+    // Created only when the test DB has no `Hbar`; a seeded one is used as-is
+    // and left untouched by the cleanup below.
+    madeHbar = true;
+    await prisma.element.create({
+      data: { id: HBAR, symbol: "Hbar", name: "Hbar Test", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
+    });
+  }
   for (const [domain, amount] of [["ct-a.dev", 5000], ["ct-b.dev", 12]] as const) {
     const s = await prisma.startup.upsert({
       where: { domain },
@@ -61,6 +74,12 @@ afterAll(async () => {
   await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
   await prisma.firstClaim.deleteMany({ where: { elementId: T6 } });
   await prisma.stake.deleteMany({ where: { elementId: T6 } });
+  if (madeHbar) {
+    await prisma.firstClaim.deleteMany({ where: { elementId: HBAR } });
+    await prisma.stake.deleteMany({ where: { elementId: HBAR } });
+    await prisma.payment.deleteMany({ where: { element: { id: HBAR } } });
+    await prisma.element.deleteMany({ where: { id: HBAR } });
+  }
   await prisma.payment.deleteMany({ where: { startup: { domain: { startsWith: "rl-probe-" } } } });
   await prisma.element.deleteMany({ where: { id: T6 } });
   await prisma.startup.deleteMany({ where: { OR: [{ domain: { in: DOMAINS } }, { domain: { startsWith: "rl-probe-" } }] } });
@@ -173,6 +192,50 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     }
     expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
     expect(statuses[5]).toBe(429);
+  });
+  it("prices any spelling of a symbol as the one canonical element (R04-4)", async () => {
+    // `Hbar` is authored mixed-case in the inventory, so upper-casing it would
+    // ask the DB for an element that never exists.
+    const canonicalRes = await elementGET(req("/api/elements/Hbar"), { params: { sym: "Hbar" } } as never);
+    expect(canonicalRes.status).toBe(200);
+    const canonical = (await canonicalRes.json()) as { symbol?: string; stakes?: unknown[] };
+    expect(canonical.symbol).toBe("Hbar");
+    for (const spelling of ["hbar", "HBAR", "hBaR"]) {
+      const res = await elementGET(req(`/api/elements/${spelling}`), { params: { sym: spelling } } as never);
+      expect([spelling, res.status]).toEqual([spelling, 200]);
+      // Identical payload: a client can build the one URL that exists instead
+      // of echoing the visitor's spelling back.
+      expect([spelling, await res.json()]).toEqual([spelling, canonical]);
+    }
+  });
+  it("marks a board it cannot show whole, and keeps concealed rows off it (R04-2)", async () => {
+    const clean = await elementGET(req("/api/elements/TST6"), { params: { sym: "TST6" } } as never);
+    const cleanJson = (await clean.json()) as { prices: { boardComplete?: boolean } };
+    expect(cleanJson.prices.boardComplete).toBe(true);
+
+    // Conceal a listing on the same element: settle it visible (the banked
+    // path only ever credits live listings), then hide it the way moderator
+    // action does.
+    const startup = await prisma.startup.upsert({
+      where: { domain: HIDDEN },
+      create: { domain: HIDDEN, title: HIDDEN, pitch: "concealed fixture pitch", url: `https://${HIDDEN}`, logoUrl: "x" },
+      update: { moderationState: "VISIBLE" },
+    });
+    const payment = await prisma.payment.create({
+      data: { elementId: T6, startupId: startup.id, amountUsd: 7, path: "JOIN", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
+    });
+    const out = await settlePayment(payment.id, { provider: "dev", eventId: `dev-${key()}`, eventType: "dev.test", paid: true });
+    expect(out.outcome).toBe("applied");
+    await prisma.startup.update({ where: { id: startup.id }, data: { moderationState: "HIDDEN" } });
+
+    const res = await elementGET(req("/api/elements/TST6"), { params: { sym: "TST6" } } as never);
+    const json = (await res.json()) as { stakes: { domain: string }[]; prices: { boardComplete?: boolean; takeLead: number } };
+    // The client may not promise a take-quote hold on a board it cannot see
+    // whole, because the missing bidder could be the person asking.
+    expect(json.prices.boardComplete).toBe(false);
+    expect(json.stakes.some((s) => s.domain === HIDDEN)).toBe(false);
+    // …and the concealed amount still must not move the visible floor.
+    expect(json.prices.takeLead).toBe(5001);
   });
 });
 

@@ -5,7 +5,7 @@ import { fetchJson, isStatsResponse, isActivityRows, type Claim, type ActivityRo
 import { PeriodicGrid } from "../components/PeriodicGrid";
 import { TableCamera } from "../components/TableCamera";
 import { BackgroundSymbols } from "../components/BackgroundSymbols";
-import { ELEMENTS, ElementNode } from "../lib/elements";
+import { ElementNode, findElementBySymbol } from "../lib/elements";
 import { HeroCard } from "../components/HeroCard";
 import { SearchPill, SearchPick } from "../components/SearchPill";
 import { StatsCard } from "../components/StatsCard";
@@ -54,6 +54,11 @@ function HomeInner() {
   const [boardOpen, setBoardOpen] = useState(false);
   const [checkoutEl, setCheckoutEl] = useState<ElementNode | null>(null);
   const [checkoutAmt, setCheckoutAmt] = useState(5);
+  // R04-1: true while the amount in the form is a figure the app minted from a
+  // link (?stake=) rather than one the buyer typed or picked. It stays true
+  // only until the buyer touches the field, so an app figure can track the live
+  // quote while the buyer's own never gets rewritten.
+  const [checkoutAmtMinted, setCheckoutAmtMinted] = useState(false);
   // Reclaim deep link (?r=DOMAIN): the domain whose listing the modal prefills.
   const [checkoutDomain, setCheckoutDomain] = useState<string | null>(null);
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
@@ -119,7 +124,9 @@ function HomeInner() {
       mutateActivity();
     }
     if (elParam) {
-      const found = ELEMENTS.find((e) => e.symbol === elParam);
+      // Casing is not identity (R04-4): mail clients and pasted links are
+      // lowercase, and `Hbar`/`Ps`/`Uue` make blind uppercasing wrong.
+      const found = findElementBySymbol(elParam);
       if (found) {
         setSelected(found);
         // `r` is the reclaiming holder's own domain (verified by construction:
@@ -131,11 +138,19 @@ function HomeInner() {
         const knownAmt = Number.isInteger(reclaimAmt) && reclaimAmt >= 1;
         if (knownAmt || reclaimParam) {
           setCheckoutEl(found);
-          if (knownAmt) setCheckoutAmt(reclaimAmt);
+          // `?stake=` is an app figure: priced when the link was written, still
+          // ours until the buyer edits it (lib/stakeQuote.ts).
+          if (knownAmt) {
+            setCheckoutAmt(reclaimAmt);
+            setCheckoutAmtMinted(true);
+          }
         }
-        if (knownAmt) {
-          toast(`Reclaim ${elParam} for $${reclaimAmt} — past stake still counts.`);
-          track("reclaim_click", { element: elParam, amount: reclaimAmt });
+        if (knownAmt && reclaimParam) {
+          // No dollar figure here: the mail's amount was true when it was sent
+          // and the board has been moving since (R04-1). The modal shows the
+          // live quote and holds it until the buyer types.
+          toast(`Reclaim ${found.symbol} below — your quote follows the live board.`);
+          track("reclaim_click", { element: found.symbol, amount: reclaimAmt });
         }
       }
     }
@@ -169,12 +184,22 @@ function HomeInner() {
   const openStake = useCallback((el: ElementNode, amount: number) => {
     setCheckoutEl(el);
     setCheckoutAmt(amount);
+    // The board's own figure is minted too: the tile quoted it a moment ago,
+    // and the modal is what has the live payload, so let it price the take.
+    setCheckoutAmtMinted(true);
     // A manual stake is a fresh purchase: never carry a reclaim prefill over.
     setCheckoutDomain(null);
   }, []);
 
+  // The buyer's hands on the amount field (typing, chips, "Use $N"): the figure
+  // becomes theirs, so nothing may rewrite it again.
+  const onCheckoutAmount = useCallback((v: number) => {
+    setCheckoutAmtMinted(false);
+    setCheckoutAmt(v);
+  }, []);
+
   const openSymbol = useCallback((symbol: string) => {
-    const el = ELEMENTS.find((e) => e.symbol === symbol);
+    const el = findElementBySymbol(symbol);
     if (el) {
       setSelected(el);
       setRailMin(false);
@@ -400,8 +425,10 @@ function HomeInner() {
         el={checkoutEl}
         open={!!checkoutEl}
         amount={checkoutAmt}
+        amountMinted={checkoutAmtMinted}
         prefillDomain={checkoutDomain}
-        onAmount={setCheckoutAmt}
+        onAmount={onCheckoutAmount}
+        onReconcile={setCheckoutAmt}
         onClose={() => setCheckoutEl(null)}
         onDone={(m) => toast(m)}
       />

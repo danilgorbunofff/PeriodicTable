@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaymentPath, PaymentProvider, PaymentStatus, ReservationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { classifyAndValidate, joinMin } from "@/lib/pricing";
+import { classifyAndValidate, joinMin, validateTake } from "@/lib/pricing";
 import { validateCheckoutInput } from "@/lib/validate";
+import { findElementBySymbol } from "@/lib/elements";
 import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured } from "@/lib/stripe";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
@@ -156,7 +157,11 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
   // Identity (Phase 1): canonical domain comes ONLY from the validated
   // URL/handle. A caller-provided startup.domain is ignored.
   const domain = input.domain.toLowerCase();
-  const fingerprint = fingerprintCheckout({ elementSym, domain, amountUsd, email });
+  // Canonical casing (R04-4): the client echoes back the symbol the UI showed
+  // it, and both casings must price the same element. The canonical form comes
+  // from the element inventory — never from uppercasing, which mangles `Hbar`.
+  const elementSymbol = findElementBySymbol(elementSym)?.symbol ?? elementSym;
+  const fingerprint = fingerprintCheckout({ elementSym: elementSymbol, domain, amountUsd, email });
 
   // Idempotency FIRST (P1-03): resolve the key before any mutable operation.
   // Matching retries return the stored payment (+ resumable URL); key reuse
@@ -166,7 +171,7 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
     return await idempotentReplay(byKey, fingerprint, req.nextUrl.origin);
   }
 
-  const element = await prisma.element.findUnique({ where: { symbol: elementSym } });
+  const element = await prisma.element.findUnique({ where: { symbol: elementSymbol } });
   if (!element) return NextResponse.json({ error: "Element not found." }, { status: 404 });
 
   const existing = await prisma.startup.findUnique({ where: { domain } });
@@ -295,6 +300,16 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
     let reservation: { reservedTotal: number; expiresAt: string } | null = null;
     if (path === PaymentPath.TAKE && leaderTotal != null) {
       const reservedTotal = leaderTotal + 1;
+      // The hold is the one promise the app makes with real money behind it:
+      // settlement refuses a short payment for a reservation
+      // (lib/settle.ts, `take-below-reserve`), so the amount must cover the
+      // reserved winning total before the row that backs the quote exists.
+      // Classification already returns TAKE only at `reservedTotal` or above,
+      // which is what keeps this check from changing any outcome (R04-3).
+      const takeErr = validateTake(amountUsd, reservedTotal);
+      if (takeErr) {
+        return { ok: false as const, status: 409, body: { error: takeErr, code: "BELOW_FLOOR", takeLead: reservedTotal } };
+      }
       const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS);
       await tx.claimReservation.create({
         data: {

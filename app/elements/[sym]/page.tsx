@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { ELEMENTS } from "@/lib/elements";
+import { ELEMENTS, findElementBySymbol } from "@/lib/elements";
 import { OG_CARD } from "@/lib/ogCard";
 import { siteOrigin } from "@/lib/siteUrl";
 
@@ -14,8 +14,7 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: { params: { sym: string } }): Promise<Metadata> {
-  const symbol = decodeURIComponent(params.sym);
-  const el = ELEMENTS.find((e) => e.symbol === symbol);
+  const el = findElementBySymbol(decodeURIComponent(params.sym));
   if (!el) return { title: "Element not found — periodictable.lol" };
   const title = `${el.name} (${el.symbol})`;
   const description = `Who leads ${el.name}? Live ranked stakes, prices, and claim CTA.`;
@@ -43,12 +42,16 @@ export async function generateMetadata({ params }: { params: { sym: string } }):
 
 export default async function ElementPage({ params }: { params: { sym: string } }) {
   const symbol = decodeURIComponent(params.sym);
-  const el = ELEMENTS.find((e) => e.symbol === symbol);
+  const el = findElementBySymbol(symbol);
+  // Canonical casing (R04-4): every casing of a known symbol is the same page,
+  // so send `/elements/au` to `/elements/Au` instead of rendering a duplicate
+  // that claims its own canonical URL and ranks against it.
+  if (el && el.symbol !== symbol) redirect(`/elements/${encodeURIComponent(el.symbol)}`);
   let element = null;
   let hiddenStakes = 0;
   try {
     element = await prisma.element.findUnique({
-      where: { symbol },
+      where: { symbol: el?.symbol ?? symbol },
       include: {
         // Same visibility contract as /api/elements/[sym]: hidden listings
         // never reach the ranked list, so the CTA price and JSON-LD derived

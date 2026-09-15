@@ -71,6 +71,12 @@ describe("shape guards", () => {
     expect(isElementDetail({ symbol: "C", stakes: [], prices: {} })).toBe(true);
     expect(isElementDetail({ symbol: "C" })).toBe(false);
   });
+  it("accepts an element detail with or without the board-complete flag", () => {
+    // Optional by design (R04-2): a payload cached before the flag shipped must
+    // still parse, and the client reads anything but `true` as a partial board.
+    expect(isElementDetail({ symbol: "C", stakes: [], prices: { takeLead: 21, joinMin: 5, boardComplete: true } })).toBe(true);
+    expect(isElementDetail({ symbol: "C", stakes: [], prices: { takeLead: 21, joinMin: 5 } })).toBe(true);
+  });
 });
 
 describe("aggregateTableOrder (P1-10: ALL stakes summed)", () => {

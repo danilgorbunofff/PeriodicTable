@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ELEMENTS } from "@/lib/elements";
+import { ELEMENTS, findElementBySymbol } from "@/lib/elements";
 import { prisma } from "@/lib/prisma";
 import { ogCard, renderOgCardSvg, type OgCardLeader } from "@/lib/ogCard";
 import { renderCardPng } from "@/lib/ogCardImage";
@@ -15,7 +15,10 @@ const CACHE = { "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400" }
  * database read says so instead of asserting an unread leader (R02-4's rule).
  */
 export async function GET(_req: NextRequest, { params }: { params: { sym: string } }) {
-  const symbol = decodeURIComponent(params.sym);
+  // Canonical casing (R04-4): the card is shared by URL, so `/og/au` must draw
+  // the same element as `/og/Au`.
+  const raw = decodeURIComponent(params.sym);
+  const symbol = findElementBySymbol(raw)?.symbol ?? raw;
   const face = await loadFace(symbol);
   if (!face) return NextResponse.json({ error: "Not found." }, { status: 404 });
   const card = ogCard({ symbol, name: face.name, leader: face.leader, unavailable: face.unavailable });

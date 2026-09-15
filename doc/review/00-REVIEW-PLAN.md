@@ -214,7 +214,7 @@ Updated whenever a doc is written, revised, or its findings change state. `—` 
 | 00 | Review plan (this file) | — | draft | — | — | — | 2026-09-14 || 01 | Discovery and unfurl | 1 | draft — fixes applied | 0 | 0 | R01-1…R01-8 (3 P2, 5 P3), all fixed | 2026-09-14 |
 | 02 | Shell and static surfaces | 1 | draft — fixes applied | 0 | 0 | R02-1…R02-7 (5 P2, 2 P3), all fixed | 2026-09-14 |
 | 03 | The board | 1 | draft — fixes applied | 0 | 0 | R03-1…R03-4 (4 P3), all fixed | 2026-09-14 |
-| 04 | Element detail and pricing | 1 | draft | 0 | 0 | R04-1…R04-4 (1 P2, 3 P3) | 2026-09-14 |
+| 04 | Element detail and pricing | 1 | draft — fixes applied | 0 | 0 | R04-1…R04-4 (1 P2, 3 P3), all fixed | 2026-09-14 |
 | 05 | Accessibility and content | 1 | draft | 0 | 0 | R05-1…R05-8 (2 P2, 6 P3) | 2026-09-14 |
 | 06 | Checkout before payment | 2 | — | — | — | — | — |
 | 07 | Payment provider integration | 2 | — | — | — | — | — |
@@ -235,6 +235,10 @@ Updated whenever a doc is written, revised, or its findings change state. `—` 
 On 2026-09-14 the operator asked for doc 01's fix pack, which is the go-ahead §4 asks for: R01-1…R01-8 are fixed in the working tree, cited per finding in `01` §7 with the verification in `01` §5.12 and the register's `Fixed in` cells. Row 01 still reads `draft` because the fix commit is outstanding — a fix is closed when it is committed, per §6.
 
 The same day, `go next 02` was the go-ahead for doc 02's pack: R02-1…R02-7 are fixed in the working tree, cited per finding in `02` §7 with the verification in `02` §5.10, which also runs the two probes doc 02 had deferred (U02-2, U02-3) and answers both of its §9 questions. Row 02 likewise stays `draft` until the fix is committed.
+
+`71a851f` then committed all three of those packs at once, so rows 01-03 read `fixes applied` above while the two paragraphs before this one still describe a commit that was outstanding when they were written — the prose records the pass as it stood, the row records the tree. Doc 03 rode in that same commit and never got a paragraph of its own.
+
+Doc 04's pack was asked for next — "look at the last commit and start doing … 04" — which is the same go-ahead §4 asks for: R04-1…R04-4 are fixed in the working tree (R04-4's dev-server probes in `04` §5.8 also retire the 404s §5.5 recorded), the register's `Fixed in` cells name the files, and row 04 stays `draft` until the fix is committed. Two notes on ordering, because the tracker is read top-down: this pack lands *out of order* — batch 1 still has doc 05 open, so row 04 moving ahead of row 05 is sequencing, not a re-prioritisation — and the fix pass answered two of doc 04's four §9 questions (Q3, Q4) while leaving the two product decisions (Q1, Q2) to the operator. One proposed fix was deliberately not taken as written: R04-2's `myPriorTotal` was rejected in favour of a `prices.boardComplete` flag, since answering "what does this domain already hold" from an edge-cached public route would have published concealed listings; `04` §7 R04-2 records the reasoning, as does R04-1 for its informational-not-refused banner.
 
 ---
 
