@@ -9,12 +9,18 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
-import { sendOutbidEmail, sendReceiptEmail } from "./email";
+import { sendOutbidEmail, sendReceiptEmail, sendReportEmail, sendWaitlistEmail } from "./email";
 import { persistPreview } from "./screenshots";
 
 export const OUTBOX_MAX_ATTEMPTS = 5;
 
-export type OutboxType = "RECEIPT_EMAIL" | "OUTBID_EMAIL" | "PREVIEW_GENERATE" | "STAKE_ANALYTICS";
+export type OutboxType =
+  | "RECEIPT_EMAIL"
+  | "OUTBID_EMAIL"
+  | "REPORT_EMAIL"
+  | "WAITLIST_EMAIL"
+  | "PREVIEW_GENERATE"
+  | "STAKE_ANALYTICS";
 
 export type ReceiptPayload = {
   to: string;
@@ -38,6 +44,16 @@ export type OutbidPayload = {
 
 export type PreviewPayload = { startupId: string; url: string };
 export type AnalyticsPayload = { paymentId: string; elementSymbol: string; amountUsd: number; kind: string };
+/** R05-7 intake mail: the operator report notice and the waitlist confirmation. */
+export type ReportEmailPayload = {
+  to: string;
+  id: string;
+  domain: string | null;
+  stakeId: string | null;
+  reason: string;
+  createdAt: string;
+};
+export type WaitlistEmailPayload = { to: string; domain: string | null; source: string };
 
 /** Idempotent enqueue (atomicity note): implemented as upsert, NOT
  * create-catch-P2002 — a unique violation inside an interactive transaction
@@ -78,6 +94,14 @@ async function handleOne(type: string, payload: Record<string, unknown>): Promis
       return;
     case "OUTBID_EMAIL":
       await sendOutbidEmail(payload as unknown as OutbidPayload);
+      return;
+    case "REPORT_EMAIL": {
+      const p = payload as unknown as ReportEmailPayload;
+      await sendReportEmail({ ...p, createdAt: new Date(p.createdAt) });
+      return;
+    }
+    case "WAITLIST_EMAIL":
+      await sendWaitlistEmail(payload as unknown as WaitlistEmailPayload);
       return;
     case "PREVIEW_GENERATE": {
       const p = payload as unknown as PreviewPayload;

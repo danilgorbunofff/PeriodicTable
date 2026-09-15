@@ -18,7 +18,7 @@ export function IconBtn({
       {...props}
       className={`w-8 h-8 rounded-full bg-icy text-mutedink grid place-items-center
         shadow-[inset_0_0_0_2px_#E4EBF3] hover:text-ink shrink-0
-        font-display font-bold transition-colors
+        font-display font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink
         [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:min-h-[44px]
         ${active ? "ring-2 ring-cta text-ink" : ""} ${className}`}
     />

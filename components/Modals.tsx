@@ -8,7 +8,8 @@ import { ChunkyButton } from "./ChunkyButton";
 import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
-import { classifyAndValidate, reclaimFor } from "../lib/pricing";
+import { classifyAndValidate } from "../lib/pricing";
+import { stakeQuote } from "../lib/stakeQuote";
 import { domainFromUrl, domainFromSocial } from "../lib/validate";
 import { paymentsLiveClient } from "../lib/flags";
 import { track } from "../lib/analytics";
@@ -46,16 +47,22 @@ export function CheckoutPreview({
   el,
   open,
   amount,
+  amountMinted,
   prefillDomain,
   onAmount,
+  onReconcile,
   onClose,
   onDone,
 }: {
   el: ElementNode | null;
   open: boolean;
   amount: number;
+  /** The field still holds a figure the app minted (?stake=), not a buyer's. */
+  amountMinted?: boolean;
   prefillDomain?: string | null;
   onAmount: (n: number) => void;
+  /** App-driven field update; never routed through `onAmount`'s latch. */
+  onReconcile: (n: number) => void;
   onClose: () => void;
   onDone: (msg: string) => void;
 }) {
@@ -122,8 +129,7 @@ export function CheckoutPreview({
   }, [open, prefillDomain, mine]);
 
   const elSafe = el;
-  if (!elSafe) return null;
-  const elSymbol = elSafe.symbol;
+  const elSymbol = elSafe?.symbol ?? "";
   // The API flags the top LIVE bid. Row 0 alone is not enough: a reversed $0
   // stake sorts last but is still row 0 on an element with nothing else, and
   // quoting it would advertise a $1 takeover the server refuses.
@@ -140,8 +146,6 @@ export function CheckoutPreview({
       : url.startsWith("@")
         ? domainFromSocial(url)
         : null;
-  const effectiveTitle = title.trim() || domain || "";
-  const effectivePitch = pitch.trim() || `Staked on ${elSafe.name}`;
   const isNewHere = !domain || !data?.stakes.some((s) => s.domain === domain && s.amount > 0);
   // Client-side preview of the server rule (Phase 3 classifyAndValidate);
   // the server re-validates authoritatively under lock.
@@ -150,15 +154,20 @@ export function CheckoutPreview({
   // (mirrors app/api/checkout/route.ts — otherwise the preview would quote a
   // sub-$5 re-entry the server refuses).
   const myPriorTotal = !domain ? 0 : (data?.stakes.find((s) => s.domain === domain)?.amount ?? 0);
-  // Returning holder? Quote the reclaim delta (leader+1 minus prior, min $1),
-  // not the full take price. `need` stays null until prices load so the crown
-  // never flashes a guess based on the typed amount.
-  const priorHere = !isNewHere && myPriorTotal > 0;
-  const alreadyLead = priorHere && leaderTotal != null && myPriorTotal >= leaderTotal;
-  const need = !data ? null : priorHere ? reclaimFor(leaderTotal, myPriorTotal) : (data.prices.takeLead ?? amount);
-  // A hold (reservation) only exists for a real TAKE quote: newcomer whose
-  // entered amount reaches leader+1. Anything else is a JOIN with no hold.
-  const takeQuoted = !priorHere && isNewHere && leaderTotal != null && need != null && Math.round(amount) >= need;
+  // What this amount is worth on the board it can see — but only the board it
+  // can see: whether the rows are every live listing and whether the figure in
+  // the field is the buyer's own decide what may be claimed and rewritten
+  // (R04-1, R04-2). One rule set, in lib/stakeQuote.ts.
+  const quote = stakeQuote({
+    boardLoaded: !!data,
+    boardComplete: data?.prices.boardComplete === true,
+    takeLead: data?.prices.takeLead,
+    leaderTotal,
+    domainKnown: !!domain,
+    priorTotal: myPriorTotal,
+    amount: Math.round(amount) || 0,
+  });
+  const { priorHere, alreadyLead, need, belowNeed, takeQuoted } = quote;
   const classified = classifyAndValidate({
     amount: Math.round(amount) || 0,
     leaderTotal,
@@ -168,6 +177,23 @@ export function CheckoutPreview({
   });
   const clientErr = classified.ok ? null : classified.error;
   const paused = !paymentsLiveClient();
+
+  // R04-1: the app minted that amount (outbid mail `?stake=`, element-page CTA)
+  // off the board as it stood when the link was written. The board moves, so
+  // until the buyer's own hand edits the field the figure is ours and keeps
+  // tracking the live quote; the first keystroke or chip hands it over for
+  // good. Reconciled against a board the client cannot see in full? No —
+  // lib/stakeQuote returns null rather than price a listing it was not shown.
+  const liveAmount = quote.reconciledAmount;
+  useEffect(() => {
+    if (!open || !amountMinted || liveAmount == null) return;
+    if (Math.round(amount) === liveAmount) return;
+    onReconcile(liveAmount);
+  }, [open, amountMinted, liveAmount, amount, onReconcile]);
+
+  if (!elSafe) return null;
+  const effectiveTitle = title.trim() || domain || "";
+  const effectivePitch = pitch.trim() || `Staked on ${elSafe.name}`;
 
   async function joinWaitlist() {
     if (waitBusy) return;
@@ -281,7 +307,7 @@ export function CheckoutPreview({
           >
             <label htmlFor="wl-email" className="mb-1 block text-[11px] font-extrabold text-mutedink">Email</label>
             <IcyInput id="wl-email" name="wl-email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@startup.com" aria-invalid={!!waitErr} aria-describedby={waitErr ? "wl-email-error" : undefined} />
-            {waitErr && <div id="wl-email-error" className="mt-2 text-xs text-red-500 font-bold">{waitErr}</div>}
+            {waitErr && <div id="wl-email-error" className="mt-2 text-xs text-red-700 font-bold">{waitErr}</div>}
             <ChunkyButton type="submit" className="w-full mt-3 text-sm px-5 h-12" disabled={waitBusy}>
               {waitBusy ? "Joining…" : "Join waitlist"}
             </ChunkyButton>
@@ -328,9 +354,11 @@ export function CheckoutPreview({
             aria-invalid={badUrl || serverField?.field === "url"}
             aria-describedby={badUrl || serverField?.field === "url" ? "co-url-error" : undefined}
           />
-          {badUrl && <div id="co-url-error" className="text-xs text-red-500">Enter a full URL starting with https://</div>}
-          {serverField?.field === "url" && <div id="co-url-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
-        </div>
+          {(badUrl || serverField?.field === "url") && (
+            <div id="co-url-error" className="text-xs text-red-700">
+              {serverField?.field === "url" ? <span className="font-bold">{serverField.message}</span> : "Enter a full URL starting with https://"}
+            </div>
+          )}        </div>
         <div>
           <label htmlFor="co-title" className="mb-1 block text-[11px] font-extrabold text-mutedink">Startup name</label>
           <IcyInput
@@ -342,9 +370,11 @@ export function CheckoutPreview({
             aria-invalid={badTitle || serverField?.field === "title"}
             aria-describedby={badTitle || serverField?.field === "title" ? "co-title-error" : undefined}
           />
-          {badTitle && <div id="co-title-error" className="text-xs text-red-500">Name must be 2–32 characters.</div>}
-          {serverField?.field === "title" && <div id="co-title-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
-        </div>
+          {(badTitle || serverField?.field === "title") && (
+            <div id="co-title-error" className="text-xs text-red-700">
+              {serverField?.field === "title" ? <span className="font-bold">{serverField.message}</span> : "Name must be 2–32 characters."}
+            </div>
+          )}        </div>
         <div>
           <label htmlFor="co-pitch" className="mb-1 block text-[11px] font-extrabold text-mutedink">One-line pitch</label>
           <IcyInput
@@ -356,9 +386,11 @@ export function CheckoutPreview({
             aria-invalid={badPitch || serverField?.field === "pitch"}
             aria-describedby={badPitch || serverField?.field === "pitch" ? "co-pitch-error" : undefined}
           />
-          {badPitch && <div id="co-pitch-error" className="text-xs text-red-500">Pitch must be 2–140 characters.</div>}
-          {serverField?.field === "pitch" && <div id="co-pitch-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
-        </div>
+          {(badPitch || serverField?.field === "pitch") && (
+            <div id="co-pitch-error" className="text-xs text-red-700">
+              {serverField?.field === "pitch" ? <span className="font-bold">{serverField.message}</span> : "Pitch must be 2–140 characters."}
+            </div>
+          )}        </div>
         <div>
           <label htmlFor="co-email" className="mb-1 block text-[11px] font-extrabold text-mutedink">Email for receipt + outbid alerts (optional)</label>
           <IcyInput
@@ -369,7 +401,7 @@ export function CheckoutPreview({
             aria-invalid={badEmail}
             aria-describedby={badEmail ? "co-email-error" : undefined}
           />
-          {badEmail && <div id="co-email-error" className="text-xs text-red-500">That email doesn&apos;t look right.</div>}
+          {badEmail && <div id="co-email-error" className="text-xs text-red-700">That email doesn&apos;t look right.</div>}
         </div>
         <div>
           <label htmlFor="co-amount" className="mb-1 block text-[11px] font-extrabold text-mutedink">Stake amount (whole dollars)</label>
@@ -394,6 +426,11 @@ export function CheckoutPreview({
               : `Any $5+ amount joins the ladder — $${need} grabs #1 right now. Exact ties are rejected, so stand $1 clear.`}
             {takeQuoted ? " Your take quote is held for 15 min once you continue." : ""}
           </div>
+          {belowNeed && !clientErr && (
+            <div className="mt-2 rounded-2xl bg-goldwash p-3 text-xs font-bold">
+              💡 ${Math.round(amount)} tops up your stake — add ${need - Math.round(amount)} more to take #1.
+            </div>
+          )}
         </>
       )}
       {priceMoved != null && (
@@ -418,8 +455,8 @@ export function CheckoutPreview({
           );
         })}
       </div>
-      {clientErr && <div className="mt-2 text-xs text-red-500 font-bold">{clientErr}</div>}
-      {serverErr && <div className="mt-2 text-xs text-red-500 font-bold">{serverErr}</div>}
+      {clientErr && <div className="mt-2 text-xs text-red-700 font-bold">{clientErr}</div>}
+      {serverErr && <div className="mt-2 text-xs text-red-700 font-bold">{serverErr}</div>}
       <input
         type="text"
         value={honeypot}

@@ -113,7 +113,18 @@ export type ElementDetail = {
     rank: number;
     isLeader: boolean;
   }[];
-  prices: { takeLead: number; joinMin: number; reclaim?: number };
+  prices: {
+    takeLead: number;
+    joinMin: number;
+    reclaim?: number;
+    /**
+     * False when concealed listings keep this board from being the whole
+     * board, so the client cannot tell a newcomer from a returning holder
+     * (R04-2). Absent on payloads cached before that field shipped; treat
+     * anything but `true` as incomplete.
+     */
+    boardComplete?: boolean;
+  };
 };
 
 /**

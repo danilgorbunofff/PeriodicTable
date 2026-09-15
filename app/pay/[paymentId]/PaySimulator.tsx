@@ -1,0 +1,108 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+/** The dev-only simulator UI. Kept as a client component because it drives
+ *  /api/dev/pay and routes on the result; the page that renders it is the
+ *  server gate that 404s whenever Stripe is configured (R05-8). */
+export function PaySimulator({ paymentId }: { paymentId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function run(outcome: "pay" | "fail") {
+    setBusy(true);
+    setStatus(null);
+    const res = await fetch("/api/dev/pay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentId, outcome }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { elementSymbol?: string; status?: string; error?: string };
+    // Only a confirmed paid payment leaves this page (P2-03). Failures and
+    // terminal states report their actual status instead.
+    if (res.ok && json.status === "paid") {
+      router.push(json.elementSymbol ? `/?paid=${json.elementSymbol}` : "/?paid=1");
+      return;
+    }
+    setStatus(json.error ?? (json.status ? `Payment is ${json.status}.` : "Payment failed — you can retry."));
+    setBusy(false);
+  }
+
+  return (
+    <main
+      id="main"
+      style={{
+        minHeight: "100vh",
+        background: "#F4F4F0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 24,
+          padding: "36px 32px",
+          width: 420,
+          border: "1px solid #ECECE6",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.08)",
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: "#666" }}>DEV SIMULATOR</div>
+        <h1 style={{ fontSize: 24, fontWeight: 800, margin: "10px 0 6px" }}>Complete your stake</h1>
+        <p style={{ color: "#666", fontSize: 14, lineHeight: 1.5 }}>
+          No Stripe keys configured — this simulator stands in for the real checkout. On Pay, the stake applies
+          instantly.
+        </p>
+        <div style={{ background: "#F4F4F0", borderRadius: 16, padding: 16, margin: "18px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+            <span style={{ color: "#666" }}>Payment</span>
+            <span style={{ fontWeight: 700, fontFamily: "monospace", fontSize: 12 }}>{paymentId}</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={() => run("pay")}
+            disabled={busy}
+            style={{
+              flex: 1,
+              background: "#FFCE4B",
+              border: "none",
+              borderRadius: 999,
+              padding: "14px 0",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Pay now
+          </button>
+          <button
+            onClick={() => run("fail")}
+            disabled={busy}
+            style={{
+              flex: 1,
+              background: "#fff",
+              border: "1px solid #ECECE6",
+              borderRadius: 999,
+              padding: "14px 0",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Simulate failure
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: "#666", marginTop: 14, textAlign: "center" }}>
+          A failed simulation marks the payment failed — retry from the table with a new checkout.
+        </p>
+        {status && (
+          <p style={{ fontSize: 13, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{status}</p>
+        )}
+      </div>
+    </main>
+  );
+}

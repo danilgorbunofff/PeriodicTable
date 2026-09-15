@@ -29,6 +29,12 @@ export default function RootLayout({
         {plausibleDomain ? (
           <script defer data-domain={plausibleDomain} src="https://plausible.io/js/script.js" />
         ) : null}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[var(--z-skip)] focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-ink focus:shadow-float"
+        >
+          Skip to main content
+        </a>
         {children}
       </body>
     </html>
