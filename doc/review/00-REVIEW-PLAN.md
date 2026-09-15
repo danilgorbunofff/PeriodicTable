@@ -229,8 +229,8 @@ Updated whenever a doc is written, revised, or its findings change state. `—` 
 | 16 | Legal, privacy, tax | 4 | — | — | — | — | — |
 | 17 | Operator tooling and runbooks | 4 | — | — | — | — | — |
 | 18 | Observability, analytics, alerts | 4 | — | — | — | — | — |
-| 19 | Launch and marketing readiness | 5 | — | — | — | — | — |
-| 20 | Post-launch and debt | 5 | — | — | — | — | — |
+| 19 | Launch and marketing readiness | 5 | draft — first pass | 0 | 2 | R19-1…R19-9 (2 P1, 7 P2) | 2026-09-15 |
+| 20 | Post-launch and debt | 5 | draft — first pass | 0 | 1 | R20-1…R20-15 (1 P1, 10 P2, 4 P3), R20-1/R20-3/R20-8 accepted risk, R20-2 wontfix | 2026-09-15 |
 
 On 2026-09-14 the operator asked for doc 01's fix pack, which is the go-ahead §4 asks for: R01-1…R01-8 are fixed in the working tree, cited per finding in `01` §7 with the verification in `01` §5.12 and the register's `Fixed in` cells. Row 01 still reads `draft` because the fix commit is outstanding — a fix is closed when it is committed, per §6.
 
