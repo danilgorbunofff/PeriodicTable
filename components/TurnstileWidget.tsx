@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CHECKOUT_MSG } from "@/lib/checkoutFace";
 
 /** Minimal shape of the Turnstile global exposed by api.js?render=explicit. */
 declare global {
@@ -58,15 +59,22 @@ function loadTurnstile(): Promise<void> {
 export function TurnstileWidget({
   sitekey,
   onToken,
+  onLoadFail,
 }: {
   sitekey: string;
   onToken?: (token: string | null) => void;
+  /** api.js never arrived (blocked, offline, CSP): there is no checkbox coming,
+   *  and the visitor is the only one who can do something about it (R06-6). */
+  onLoadFail?: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
-  // Kept in a ref so the effect below never has to re-render the widget when
+  const [failed, setFailed] = useState(false);
+  // Kept in refs so the effect below never has to re-render the widget when
   // the caller passes a fresh closure.
   const notify = useRef(onToken);
   notify.current = onToken;
+  const fail = useRef(onLoadFail);
+  fail.current = onLoadFail;
 
   useEffect(() => {
     let widgetId: string | null = null;
@@ -82,10 +90,16 @@ export function TurnstileWidget({
           "expired-callback": () => notify.current?.(null),
           "error-callback": () => notify.current?.(null),
         });
+        setFailed(false);
       })
       .catch(() => {
+        if (cancelled) return;
         // Blocked or offline. The server still gates on TURNSTILE_SECRET, so a
-        // missing token surfaces as the standard "Bot check failed." message.
+        // missing token surfaces as the standard "Bot check failed." message —
+        // but silently waiting for a checkbox that will never appear is how a
+        // visitor concludes the page is broken (R06-6).
+        setFailed(true);
+        fail.current?.();
         notify.current?.(null);
       });
     return () => {
@@ -95,5 +109,12 @@ export function TurnstileWidget({
     };
   }, [sitekey]);
 
-  return <div className="mt-2" ref={container} />;
+  return (
+    <>
+      {/* Kept childless: Turnstile injects its iframe here and React would
+          fight it for ownership of the node's children. */}
+      <div className="mt-2" ref={container} />
+      {failed && <p className="mt-1 text-xs font-bold text-red-700">{CHECKOUT_MSG.humanCheck}</p>}
+    </>
+  );
 }

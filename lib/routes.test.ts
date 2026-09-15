@@ -172,10 +172,10 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     expect(missing.status).toBe(404);
     expect(((await missing.json()) as { error?: string }).error).toBeTruthy();
   });
-  it("checkout enforces 5 attempts per IP per hour", async () => {
-    const statuses: number[] = [];
-    for (let i = 0; i < 6; i++) {
-      const res = await checkoutPOST(
+  it("checkout enforces 5 attempts per IP per hour, and replays a key for free (R06-2)", async () => {
+    const stamp = Date.now();
+    const probe = (i: number | string, idempotencyKey: string, extra: Record<string, unknown> = {}) =>
+      checkoutPOST(
         req("/api/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -183,15 +183,41 @@ describe.skipIf(!hasDb)("read API contracts", () => {
             elementSym: "TST6",
             amountUsd: 5,
             attest: true,
-            idempotencyKey: `p4-ratelimit-${Date.now()}-${i}`,
-            startup: { title: `RL${i}`, pitch: "rate limit probe pitch", url: `https://rl-probe-${Date.now()}-${i}.dev`, linkType: "product" },
+            idempotencyKey,
+            startup: {
+              title: `RL${i}`,
+              pitch: "rate limit probe pitch",
+              url: `https://rl-probe-${stamp}-${i}.dev`,
+              linkType: "product",
+            },
+            ...extra,
           }),
         })
       );
-      statuses.push(res.status);
-    }
-    expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
-    expect(statuses[5]).toBe(429);
+
+    // A mistyped receipt address is refused by the shape checks *before* the
+    // throttle, so it costs the buyer none of their hourly attempts (R06-2).
+    const mistyped = await probe("bad", key(), { email: "a@b" });
+    expect(mistyped.status).toBe(400);
+    expect(((await mistyped.json()) as { field?: string }).field).toBe("email");
+
+    const firstKey = key();
+    const first = await probe(0, firstKey);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as Record<string, unknown>;
+    const statuses = [first.status];
+    for (let i = 1; i < 6; i++) statuses.push((await probe(i, key())).status);
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+
+    // The throttle must not swallow a retry of a payment the buyer already
+    // owns: the key resolves before the limiter, a replay writes nothing, and
+    // the answer is the envelope the first call returned (R06-2, R06-9).
+    const replay = await probe(0, firstKey);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(firstBody);
+
+    // …while a genuinely new attempt is still refused.
+    expect((await probe("after", key())).status).toBe(429);
   });
   it("prices any spelling of a symbol as the one canonical element (R04-4)", async () => {
     // `Hbar` is authored mixed-case in the inventory, so upper-casing it would

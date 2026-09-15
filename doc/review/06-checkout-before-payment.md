@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Phase · batch | 06 · 2 |
-| Status | draft |
-| Date reviewed | 2026-09-15 |
+| Status | draft — fixes applied (R06-1…R06-10) |
+| Date reviewed | 2026-09-15 (fix pass 2026-09-15, §5.13) |
 | Commit reviewed | `9681bdcbff2435ef258224c52000e0f8d6089f5c` |
 | Reviewer | review agent |
 
@@ -61,6 +61,12 @@ Abuse controls: 5 attempts per IP per hour (`route.ts:116-119`), a honeypot that
 7. **Answer.** `200 { paymentId, checkoutUrl, provider, reservation? }` (`route.ts:368-374`); `CHECKOUT_STARTED` is audited (`route.ts:355-361`).
 8. **Irreversible point.** Nothing irreversible happens here — no money moves at intake. But one thing becomes *sticky*: the `Payment` row and, on a TAKE, the 15-minute `ClaimReservation` (`route.ts:304-327`). From this point the element can refuse the next buyer (409 `RESERVATION_CONFLICT`) while the row that caused it is invisible to them.
 9. **Provider hop.** The client does `window.location.href = json.checkoutUrl` (`Modals.tsx:284`) — a full page load, so no modal state survives it.
+
+**4.1 After the fix pass.** The deltas from the walk above; §7 carries the per-finding fix and §5.13 the verification.
+
+- **Steps 3-4 (submit).** The gates are no longer a silent boolean chain: `submitBlocked()` (new `lib/checkoutFace.ts`) returns the first failing gate *with* its field and sentence and the modal renders it, so no press of Continue ends without text. The idempotency key is minted once per attempt signature and kept for the modal session, so step 9's full page load is no longer the only thing that can preserve one. A widget whose script never loaded now says so.
+- **Step 5 (server gates).** The order is now: paused 403 → partial-provider warning → `clientIp` → JSON parse → honeypot → attest → Turnstile → `elementSym`/`idempotencyKey`/`amountUsd` → email shape (`400 field:"email"`) → `validateCheckoutInput` → symbol canonicalisation → fingerprint → idempotency lookup and replay → rate limit → element lookup. The throttle therefore counts new attempts only (R06-2), and an address receipts cannot use never reaches a write (R06-10).
+- **Steps 7-8 (answer).** A duplicate submit answers with the create path's envelope — `200 { paymentId, checkoutUrl, provider, reservation? }` with `guaranteedTake: true` on a live hold — or, for a row that is no longer `PENDING`, `{ paymentId, status, error }`. A provider failure is a 502 that now carries `paymentId`, so the retry reaches the row the first attempt wrote. And `cancelUrl` (`?canceled=<sym>`) has the reader step 1 lacked, so the element, not just the board, is where the buyer lands.
 
 ## 5. Live evidence
 
@@ -180,6 +186,15 @@ With `TURNSTILE_SECRET` set on the isolated server, a no-token and a bogus-token
 
 No browser automation exists in this repo (`package.json` has no Playwright, Puppeteer, jsdom or Testing Library) and this host's Chrome writes no PNG (`02` §5.8). §5.3's "what the buyer sees" is therefore derived from the render code with the response bodies of §5.1 — except for the verbatim sentences, which are copy-pasted from the probe log, and the modal's own static copy, which is read from source. The one visual question that matters (does the keyboard cover the button on a phone) is U06-1.
 
+### 5.13 Fix verification
+
+2026-09-15, this worktree, after the §11 fix pass. The DB-gated suites need a Postgres the default `npm test` run does not have, so the run below was pointed at a scratch container of its own (`periodic-test-pg`, `postgres:16-alpine`, host port 55433, migrated `0000`–`0006`) through `DATABASE_URL`. No shared database and no other container's database was touched, and nothing was written outside the fixture rows the suites clean up themselves.
+
+- `npm run typecheck` — clean. `npm run lint` — `No ESLint warnings or errors`.
+- `npm test` against that database — **577 passed, 6 failed, 0 skipped** (583 cases). The 6 failures are pre-existing and unrelated to this pass: `lib/claimFace.test.ts` (1 case) and `lib/legalMeta.test.ts` (5) anchor multi-line source assertions on `\n`, which cannot match the CRLF this Windows checkout writes (`core.autocrlf=true`); they fail identically on the untouched tree.
+- `lib/checkoutFace.test.ts` 20/20 and `lib/checkoutIntake.test.ts` 16/16 — the new cases. `lib/routes.test.ts` 12/12, including the rewritten throttle case, which is the only *executed* proof of the R06-2 order: five new keys answer `200×5` then `429`, a malformed receipt address costs no attempt, and a replay of the first key after the quota is spent returns that first call's body unchanged.
+- Still not measured: a DOM-level run of the modal (U06-1) and a real card payment (`04` U04-3). The client half is pinned by pure-function cases over `lib/checkoutFace.ts` plus source assertions at the call sites, not by rendering.
+
 ## 6. Failure and edge matrix
 
 | Trigger | Current behaviour | What the user sees | What the operator sees | Acceptable? |
@@ -204,6 +219,24 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 | Payments paused | 403 + waitlist panel | waitlist form | nothing | yes (server-side), §5.9 for the HTML |
 | Email `"@"` | accepted as an address (`route.ts:147`) | no client error (direct API only) | a receipt to a nonsense address | no — R06-10 |
 
+**After the fix pass** (§5.13), the rows above that cited a finding read:
+
+| Trigger | Behaviour now | What the buyer sees |
+| --- | --- | --- |
+| Empty form, press Continue | the client gate answers before any request | the sentence for the first missing field, under that field (R06-1) |
+| Social handle typed without `@` | same gate, reported against the url field | `Enter a valid @handle (letters, numbers, dots, underscores).` under the `Social handle` label (R06-1, R06-5) |
+| Malformed URL or handle | client gate, then the server's own sentence if it still gets through | the label's sentence, tab-aware (R06-5) |
+| Amount below the floor, or tying a rival | 409 as before | the server's sentence alone — no "Price moved" and no `Use $N` (R06-3) |
+| Amount genuinely re-quoted | 409 `PRICE_MOVED` | "Price moved to $N — continue?" with `Use $N` (R06-3) |
+| `field:"attest"` rejected | 400 as before | the shared error line under the form instead of a slot nothing renders (R06-4) |
+| Turnstile widget never loads | the client gate holds the submit and says so; a request that skips it still meets the server's Turnstile gate, opaque to a bot | the widget's own sentence in the form: reload or use another network (R06-6) |
+| Rate limit | the limiter runs after the key lookup and counts new attempts only | a replay of a stored key still returns its session; a sixth **new** attempt → 429 (R06-2) |
+| Provider down | 502 carries `paymentId`, and the modal keeps the key that reached the row | `Payment provider unavailable. Try again. Your reference: <id>.` — retrying resumes that row (R06-7) |
+| Buyer cancels at Stripe | `?canceled=SYM` re-opens the checkout for that element | "Not paid — nothing was charged. Your claim is still here." plus that element's modal (R06-8) |
+| Two simultaneous submits | one row, one session, same envelope kind | one checkout (R06-9; the concurrent loser cannot see a reservation the winner has not committed — §11) |
+| Email `"@"` | 400 `field:"email"` before any write | `That email doesn't look right.` under the receipt field (R06-10) |
+| Honeypot tripped (incl. autofill) | unchanged, and deliberately opaque | `Something went wrong. Try again.` (R06-6, §9 Q4) |
+
 ## 7. Findings
 
 ### R06-1 — An untouched or handle-only form submits nothing, silently
@@ -213,7 +246,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `components/Modals.tsx:228` — `if (badUrl || badEmail || badTitle || badPitch || !domain || !attest || clientErr || submitting) return;` — the early return has no message and the submit button's only gate is `disabled={submitting || !attest}` (`:485`). The form is `noValidate` (`:330`), so the browser's own `required` messages never fire either. `badUrl` is false for an empty field (`:146`, `url.length > 0 && …`), and `domain` is null until a `://` URL or an `@`-prefixed handle is present (`:150-157`), so **the two most common first clicks** — empty form, or a social handle typed without `@` — produce no request and no text at all.
 - **Reproduction.** Open the stake modal on any element, type `yourhandle`, tick the checkbox, press Continue. Nothing happens: no request in the network tab, no message, no focus move. Same with an untouched form.
 - **Proposed fix.** Give the early return a reason: compute the failing gate and `setServerField`/`setClientErr` with the same sentence the server would send (`Enter a full URL starting with https://`, `Enter a valid @handle …`), or drop `!domain` from the guard and let the server answer 400 `field:"url"` (it already does, case 06/07). Test: a DOM-level test that a click with `url === ""` renders a message; `lib/checkoutFace.test.ts` would be the natural home, and no such suite exists today (U06-1).
-- **Status.** open
+- **Fix.** `submit()` in `components/Modals.tsx` now opens with `if (submitting) return;` and then one gate — `submitBlocked()` in the new `lib/checkoutFace.ts` — whose verdict is *always* rendered: a field-scoped sentence under `url`/`title`/`pitch`/`email`, or the shared error line when the failing gate has no field of its own. `!domain` (a handle typed without `@`) is reported against `url` with the Social tab's sentence instead of returning. Test: `lib/checkoutFace.test.ts` (a rejected submit always yields text; an untouched form names its first field; the gate's order), `lib/checkoutIntake.test.ts` (the gate is the last statement before the request, `return;` appears twice). The DOM half of U06-1 is unchanged.
+- **Status.** fixed
 
 ### R06-2 — The retry of a payment the buyer already owns is quota-gated
 
@@ -222,7 +256,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `app/api/checkout/route.ts:116-119` (limiter) precedes `:175-176` (key lookup); probe §5.5 — 5 attempts from one IP exhaust the hour, after which a replay of a **paid** key is answered 429 with `Too many checkout attempts. Try again later.`.
 - **Reproduction.** Submit three valid checkouts and two rejected ones from one IP, pay one of them, then replay the paid key: 429. The buyer is told to try later and shown no link to the session they already paid for.
 - **Proposed fix.** Evaluate the idempotency lookup before the limiter (a replay writes nothing, so it needs no quota), or exempt a request whose key already resolves to a row. Test: a case in the checkout suite asserting that a replay of a stored key succeeds after the quota is spent.
-- **Status.** open
+- **Fix.** `app/api/checkout/route.ts` now resolves `prisma.payment.findUnique({ where: { idempotencyKey } })` and calls `idempotentReplay()` **before** the limiter, so `checkout:${ip}` counts new attempts only; a replay writes nothing and answers from the stored row. Test: `lib/routes.test.ts` — five new keys answer `200` then a sixth is `429`, a malformed receipt address costs no attempt, and a replay of the first key after the quota is spent returns that first call's body unchanged (§5.13, executed against a scratch Postgres).
+- **Status.** fixed
 
 ### R06-3 — Two different 409s are both announced as "Price moved"
 
@@ -231,7 +266,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `components/Modals.tsx:267-269` branches on `res.status === 409 && typeof json.takeLead === "number"` alone. The server sends exactly that shape for a floor violation (`route.ts` classify → `BELOW_FLOOR` + `takeLead`, probe case 03) and for a tie (`TIE` + `takeLead`, probe case 16). So a newcomer who typed $4 is told **"Price moved to $5 — continue?"** — nothing moved, $5 was always the floor — and a rival who typed exactly $12 is told the price moved when they simply hit a tie.
 - **Reproduction.** On a free element send `amountUsd: 4`; on a $12 leader send `amountUsd: 12`. Identical banner, different causes.
 - **Proposed fix.** Branch on `json.code`: keep "Price moved" for `PRICE_MOVED`, use the server's sentence alone for `BELOW_FLOOR` and `TIE`, and only offer `Use $N` when the new figure is genuinely the quote. Test: two client cases pinning the banner text per code.
-- **Status.** open
+- **Fix.** `checkoutRefusal()` in the new `lib/checkoutFace.ts` keeps the "Price moved" banner and the `Use $N` button for `json.code === "PRICE_MOVED"` with a numeric `takeLead` and nothing else: `BELOW_FLOOR` and `TIE` print the server's own sentence (`First stake is $5…`, `Someone holds the lead — bid $N or more.`) with no new price to accept. `Modals.tsx` renders the banner from that mapping and `onAmount(priceMoved)` only ever receives the re-quoted figure. Test: `lib/checkoutFace.test.ts` (per-code cases, plus the two codes that must *not* quote a price), `lib/checkoutIntake.test.ts` (the banner and `onAmount` wiring). §9 Q1 is answered by this: the rule is stated, not implied.
+- **Status.** fixed
 
 ### R06-4 — The server's attestation rejection is stored where nothing renders it
 
@@ -240,7 +276,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `app/api/checkout/route.ts:130-132` returns `field:"attest"`; `components/Modals.tsx:273-276` stores it as `serverField` with `serverErr` null; the four renderers test only `field === "url" | "title" | "pitch"` and the email input tests `badEmail` (`:356,371,390,410`). No branch tests `"attest"`, so the message is **set and never displayed** — the buyer sees only the toast, which disappears.
 - **Reproduction.** Direct API call with `attest:false` shows the response; the modal path is unreachable from the shipped UI because the button is disabled, so this is a latent-contract bug rather than a live dead end: enabling the button, or a future caller sending `attest` as a string (`attestValid` accepts both), produces a message nobody shows.
 - **Proposed fix.** Render any unmatched `serverField` as a generic `serverErr`, which is the one branch that cannot fall through. Test: a case that a `field:"attest"` response produces visible text.
-- **Status.** open
+- **Fix.** `checkoutRefusal()` renders a field-scoped sentence only when `FIELD_RENDERERS` knows a node for that field (`url`, `title`, `pitch`, `email`); any other `field` — `attest` included — falls through to the shared error line, as does a body with no `error` at all. `serverField` is only set for a rendered field, so nothing can be stored where nothing draws. Test: `lib/checkoutFace.test.ts` (`attest` and `message`-shaped bodies both produce text; each renderer field keeps its own), `lib/checkoutIntake.test.ts` (one `co-<field>-error` node per renderer, `fieldHasRenderer` branch).
+- **Status.** fixed
 
 ### R06-5 — A social-handle rejection is printed under the Product URL label
 
@@ -249,7 +286,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `lib/validate.ts:87-123` returns `field:"url"` for both the product-URL branch and the handle branch (`:101-110`); the modal's error node for `field:"url"` is the one under `Product URL` (`Modals.tsx:340-362`), whose label is chosen by `tab` (`:341`) but whose message is fixed client-side to `Enter a full URL starting with https://` when `badUrl` is true (`:358`) — so a visitor on the **@ Social** tab who types `@a` is told to enter a full URL.
 - **Reproduction.** Switch to @ Social, type `@a`, press Continue → `Enter a valid @handle (letters, numbers, dots, underscores).` renders under the label "Social handle" (correct) — but the *client* gate fires first for other handle shapes and prints the URL sentence under the same label.
 - **Proposed fix.** Make the client's fallback sentence depend on `tab`, and keep the server's sentence authoritative. Test: one case per tab.
-- **Status.** open
+- **Fix.** The client's url/handle sentence is now a function of the tab (`urlMessage(tab)` in the new `lib/checkoutFace.ts`): `Enter a full URL starting with https://` on `Product`, `Enter a valid @handle (letters, numbers, dots, underscores).` on `@ Social` — the same sentence the server sends for that branch (`lib/validate.ts:101-110`), so a client-side bail and a server 400 read alike under the same label. The server's sentence still wins whenever it answers. Test: `lib/checkoutFace.test.ts` (one case per tab, plus the empty-field case that stays quiet), `lib/checkoutIntake.test.ts` (the url node reads the message from that function).
+- **Status.** fixed
 
 ### R06-6 — A blocked challenge script or an autofilled honeypot gives one opaque sentence
 
@@ -258,7 +296,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `components/TurnstileWidget.tsx:76-83` — if `api.js` fails to load the widget calls `onToken(null)` and **renders nothing**; the server then rejects with `Bot check failed. Try again.` (probe cases 19-20). The honeypot field is `name="website"` (`Modals.tsx:461-469`) — the classic password-manager autofill target — and its rejection is the deliberately opaque `Something went wrong. Try again.` (`route.ts:127-129`, probe case 13).
 - **Reproduction.** Block `challenges.cloudflare.com` in the browser and submit; or let a manager fill the hidden `website` input.
 - **Proposed fix.** Surface the two states differently *to the buyer* while keeping them opaque to bots: when the widget never loaded (a flag the widget can raise), show "The human check could not load — reload or use another network." Keep the opaque 400. Test: a client case for the widget-failure branch; the honeypot stays deliberately indistinguishable and is worth a counter instead of a message.
-- **Status.** open
+- **Fix.** `components/TurnstileWidget.tsx` takes an `onLoadFail` callback, raises it (and keeps the widget's own `failed` state) when `api.js` never loads, and renders its own sentence in the form — `The human check could not load — reload or use another network.` — while still handing the server a null token, so the 400 stays `Bot check failed. Try again.` for a bot. `submitBlocked()` reports the state against no field when the widget itself failed, and the shared error line when the server rejected. The honeypot is untouched and still deliberately opaque; the counter it asks for stays open (§9 Q4). Test: `lib/checkoutIntake.test.ts` (widget + modal wiring, the childless ref div), `lib/checkoutFace.test.ts` (`humanCheckFailed` produces text with no field).
+- **Status.** fixed
 
 ### R06-7 — A provider failure leaves a `Payment` row the buyer cannot reach
 
@@ -267,7 +306,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** Probe §5.6 — 502 `Payment provider unavailable. Try again.` with the `Payment` row already written (`route.ts:287-300` precedes `resumeCheckoutUrl` at `:363-366`); the key is minted per submit and lives only in that request (`Modals.tsx:250-253`), and the success path leaves the modal by full page load (`:284`). §5.7 — an abandoned attempt is indistinguishable from a rejected one from the outside.
 - **Reproduction.** Stripe mode, unreachable provider: POST once, then POST again with a fresh key. Two `pending` rows, one element, no URL the buyer can use, no mail.
 - **Proposed fix.** Answer the 502 with the `paymentId` (and a resume endpoint or a `?resume=<id>` link) so an interrupted buyer can re-enter the same row; and give abandoned `pending` rows a sweep (`08` §6 owns the row-shape story, `13` owns the cron). Test: a case asserting the 502 body carries the id and that a second POST with it resumes rather than inserts.
-- **Status.** open
+- **Fix.** Both 502s (`route.ts`, the create path and the replay path) now carry `{ error, code: "PROVIDER_UNAVAILABLE", paymentId }`, and `Modals.tsx` prints `Your reference: <id>.` under the message. The modal mints one key per attempt signature and clears it **only** once a checkout has actually started, so the submit that hit the provider failure keeps its key: pressing Continue again resolves to the same `PENDING` row, and a provider that is back answers from that row instead of forking a second one. The durable per-browser key is still a product decision (§9 Q2) and the sweeper is still `13`'s. Test: `lib/checkoutIntake.test.ts` (both ids in the route, `crypto.randomUUID()` once, key retained on refusal and cleared on success).
+- **Status.** fixed
 
 ### R06-8 — The Stripe cancel URL is written and read by nothing
 
@@ -276,7 +316,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `app/api/checkout/route.ts:66` sets `cancelUrl: ${origin}/?canceled=${element.symbol}`; §5.8 — no reader exists anywhere in `app/`, `components/` or `lib/`; `app/page.tsx:100-161` handles every other deep link and then replaces the URL state.
 - **Reproduction.** Pay nothing and cancel at the provider: the buyer lands on the board with no acknowledgement of the element, the amount or the reserved hold; their `Payment` row stays `pending` and, on a TAKE, the element keeps refusing rivals for up to 15 minutes on their behalf.
 - **Proposed fix.** Handle `?canceled`: re-open the checkout modal for that symbol with a short "Not paid — your quote is still held for N minutes" line (the reservation's `expiresAt` is in the DB, not the URL, so the copy must be conservative), or at minimum clear the parameter and explain that nothing was charged. Test: a page-level case that `?canceled=Li` opens the modal or shows the notice.
-- **Status.** open
+- **Fix.** `app/page.tsx` now handles `?canceled=<sym>`: it resolves the symbol with the reader already on the page, re-opens that element's checkout (`setCheckoutEl` + `setCheckoutCanceled(true)`) and shows the conservative line `Not paid — nothing was charged. Your claim is still here.`; the parameter is folded away by the same `replaceState` branch. `CheckoutPreview` takes `canceled` and renders `CHECKOUT_MSG.canceled`, which can afford the extra sentence about the reservation because the modal re-reads the pending row's own hold (15 minutes, `lib/reservations.ts:14-18`) — the page-level toast deliberately promises nothing about a hold it has not read. Test: `lib/checkoutIntake.test.ts` (route `cancelUrl` → page branch → modal prop, and the page block quotes no hold duration).
+- **Status.** fixed
 
 ### R06-9 — Concurrent submits answer one payment with two different bodies
 
@@ -285,7 +326,8 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** Probe §5.4 — two identical concurrent POSTs: both 200, same `paymentId`, but the winner's body carries `provider` and `reservation.guaranteedTake` while the loser's is the `idempotentReplay` shape (`route.ts:88-104`) without either. The contract (and `11`) cannot say what a duplicate submit returns.
 - **Reproduction.** Fire two identical requests in parallel; diff the two bodies.
 - **Proposed fix.** Have the replay path return the same envelope as the create path (it can read the reservation it just lost the race for), or document the duplicate shape as the contract. Test: a concurrency case asserting the two bodies are byte-identical.
-- **Status.** open
+- **Fix.** `idempotentReplay()` now answers the duplicate submit with the create path's envelope kind — `{ paymentId, checkoutUrl, provider, reservation? }`, with `guaranteedTake: true` on a reservation it can still read from the row — instead of a bare `{ paymentId, checkoutUrl, reused: true }`; a row that is no longer `PENDING` answers `{ paymentId, status, error: "This checkout is already <state> — nothing was charged again." }`, and a fingerprint mismatch is a `409 IDEMPOTENCY_CONFLICT` rather than someone else's checkout. Residual, recorded in §11: the loser of a genuine race still cannot see a reservation the winner has not committed, so byte-equality holds for a replay of a *committed* row (the executed case in `lib/routes.test.ts`) and not across two truly simultaneous first submits. Test: `lib/checkoutIntake.test.ts` (the replay envelope), `lib/routes.test.ts` (replay equals the first body).
+- **Status.** fixed
 
 ### R06-10 — Any string containing `@` is accepted as the receipt address
 
@@ -294,15 +336,16 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 - **Evidence.** `app/api/checkout/route.ts:147` — `typeof body.email === "string" && body.email.includes("@") ? body.email.trim() : null`. The client's regex (`Modals.tsx:147,205`) is the only real check, and direct callers bypass it; the address is stored on `Startup.email`/`Payment.email` and is what `lib/email.ts` sends receipts and outbid notices to (`10` §5.3).
 - **Reproduction.** `POST /api/checkout` with `email: "@"` → 200 and a row whose `email` is `"@"`.
 - **Proposed fix.** Reuse one address validator server-side (the regex already in the modal, or a shared `isEmail`) and reject with `field:"email"`. Test: a case per malformed address.
-- **Status.** open
+- **Fix.** `lib/validate.ts` exports one address validator (`isEmail`, `/^[^@\s]+@[^@\s]+\.[^@\s]+$/`) which `validateProfileInput` reuses; `app/api/checkout/route.ts` refuses anything else with `400 { error: "That email doesn't look right.", field: "email" }` before the fingerprint and before any write, and `Modals.tsx` renders that sentence under the receipt field (`co-email-error`) while the waitlist form uses the same helper. Test: `lib/checkoutFace.test.ts` (`emailShapeBad` agrees with `isEmail` on every case), `lib/checkoutIntake.test.ts` (one sentence, both files), `lib/routes.test.ts` (the 400, and that it costs no rate-limit attempt).
+- **Status.** fixed
 
 ## 8. Acceptance criteria
 
-- [ ] Every rejection a buyer can cause is visible: no submit path returns without text (§7 R06-1; needs a DOM-level suite — none exists, U06-1)
-- [ ] A 409 is announced as what it is — a floor, a tie or a moved price (§7 R06-3)
-- [ ] A retry after an interruption reaches the payment the buyer already has, and the 502 body carries its id (§7 R06-2, R06-7)
-- [ ] Cancelling at the provider produces an acknowledgement on the board (§7 R06-8)
-- [ ] Field-scoped server messages always have a renderer; `field:"attest"` cannot vanish (§7 R06-4)
+- [x] Every rejection a buyer can cause is visible: no submit path returns without text (§7 R06-1; pinned by `lib/checkoutFace.test.ts` and the source assertions in `lib/checkoutIntake.test.ts` — a DOM-level suite is still missing, U06-1)
+- [x] A 409 is announced as what it is — a floor, a tie or a moved price (§7 R06-3; `checkoutRefusal()` keys on `json.code`, not on `takeLead`)
+- [x] A retry after an interruption reaches the payment the buyer already has, and the 502 body carries its id (§7 R06-2, R06-7; the limiter runs after the key lookup and both 502s carry `paymentId`)
+- [x] Cancelling at the provider produces an acknowledgement on the board (§7 R06-8; `?canceled` re-opens that element's checkout with a notice that promises nothing the page has not read)
+- [x] Field-scoped server messages always have a renderer; `field:"attest"` cannot vanish (§7 R06-4; a field with no node becomes the shared error line)
 - [x] The domain, not the client's `startup.domain`, is the identity (`route.ts:157-163`; probe case 05/06/07 show the server rejecting what the client would have sent)
 - [x] One key, one `Payment` row, one provider session under concurrent submits (§5.4; Stripe `Idempotency-Key` at `lib/stripe.ts:59+`)
 - [x] Turnstile fails closed when enabled and is skipped only when unset (`lib/abuse.ts`; §5.11)
@@ -311,27 +354,28 @@ No browser automation exists in this repo (`package.json` has no Playwright, Pup
 
 ## 9. Open questions
 
-1. Should a first claim below $5 quote the floor as a *price* (today's "Price moved to $5") or state the rule ("First stake is $5+")? *Recommendation: state the rule; the current copy implies the board moved when it did not (§7 R06-3).*
-2. Should the checkout form keep a durable key per (browser, element, domain) so an interrupted attempt resumes instead of forking a row? That is a product decision about how much state a browser may hold, not a bug; today the answer is "none" (§7 R06-7).
-3. Is the paused surface allowed to be client-only (§5.9)? A crawler or a JS-less visitor is shown a purchasable board that no submit can complete. *Recommendation: render the paused copy server-side when the flag is off — it is one `paymentsLiveServer()` call in the page.*
-4. Should a honeypot trip be counted (an audit row or a metric) even though the buyer must not be told? Today nothing records it, so an autofill false positive is invisible to the operator (§7 R06-6).
+1. Should a first claim below $5 quote the floor as a *price* (today's "Price moved to $5") or state the rule ("First stake is $5+")? *Recommendation: state the rule; the current copy implies the board moved when it did not (§7 R06-3).* **Answered 2026-09-15: adopted** — only `PRICE_MOVED` quotes a price and offers `Use $N`; `BELOW_FLOOR` and `TIE` print the server's own sentence, so a first claim below the floor now reads as the rule it is (§7 R06-3).
+2. Should the checkout form keep a durable key per (browser, element, domain) so an interrupted attempt resumes instead of forking a row? That is a product decision about how much state a browser may hold, not a bug; today the answer is "none" (§7 R06-7). *Still open. The pass shortens the gap without taking the decision: one key lives for the whole modal session and is cleared only once a checkout has actually started, and the 502 carries the `paymentId`, so the interruption the probe hit resumes inside the same visit. A key that survives a reload is the operator's call.*
+3. Is the paused surface allowed to be client-only (§5.9)? A crawler or a JS-less visitor is shown a purchasable board that no submit can complete. *Recommendation: render the paused copy server-side when the flag is off — it is one `paymentsLiveServer()` call in the page.* *Not taken in this pass: it is a page-render change on the surface `05`/`17` own, and no finding in §7 asks for it.*
+4. Should a honeypot trip be counted (an audit row or a metric) even though the buyer must not be told? Today nothing records it, so an autofill false positive is invisible to the operator (§7 R06-6). *Still open, and unchanged: the pass gives the *challenge-script* failure a visible sentence, and deliberately leaves the honeypot silent and uncounted.*
 
 ## 10. Cross-references
 
 - **Settled and cited, not re-reported.** `05` §7 R05-1/R05-4 (one error node per id, red-700) — the modal's error nodes are the fixed shape; `05` §7 R05-8 (`/pay/[paymentId]` is a provider-mode gate with the simulator in `PaySimulator.tsx`) — the modal footer's "🔒 Secure payment via Stripe" sentence (`Modals.tsx:501`) is the same copy class and is **not** re-opened here; `04` §7 R04-1/R04-2 (`lib/stakeQuote.ts`, `prices.boardComplete`, `validateTake` on TAKE) — this doc prices nothing of its own; `05` §7 R05-7 (report and waitlist intake send mail) — `10` verifies that chain.
 - **Neighbours.** `07` owns everything after `checkoutUrl` is handed out (the mode table, the simulator reach, the 502's provider half). `08` owns what happens to the `pending` rows this doc leaves behind. `10` owns the address `R06-10` lets through. `11` owns the response shape `R06-9` shows diverging. `13` owns the sweeper `R06-7` asks for. `14` owns the abuse posture of the intake.
-- **Tests that already pin this surface.** `lib/routes.test.ts` (DB-gated checkout cases), `lib/pricing.test.ts`, `lib/stakeQuote.test.ts`, `lib/abuse` cases; the modal itself has no suite (U06-1).
+- **Tests that already pin this surface.** `lib/routes.test.ts` (DB-gated checkout cases, including the rewritten throttle case), `lib/pricing.test.ts`, `lib/stakeQuote.test.ts`, `lib/abuse` cases; the modal itself still has no DOM suite (U06-1), so the fix pass's client half is pinned by `lib/checkoutFace.test.ts` (the decisions) and `lib/checkoutIntake.test.ts` (the call sites and the route's gate order) instead.
 - **Plan.** §1 S5/S6, §2 batch 2 spec 06, §4 severity and evidence rules.
 
 ## 11. Change log
 
 - 2026-09-15: first draft, authored 2026-09-15 against `9681bdcbff2435ef258224c52000e0f8d6089f5c` from the §5 probes (scratch Postgres, isolated dev server on 3206, 23 rejection cases + 6 idempotency probes); nothing fixed, no code, config, test or migration touched, no real payment attempted.
+- 2026-09-15 (working tree): fix pass for R06-1…R06-10. New `lib/checkoutFace.ts` holds every client decision the four gates take — the tab-aware url sentence, the field shapes, the submit gate and the refusal mapper (including which 409s may quote a price) — with `lib/checkoutFace.test.ts` (20 cases) and `lib/checkoutIntake.test.ts` (16 cases, `readFileSync` assertions on the call sites and the route's gate order) over it, because the repo has no DOM suite (U06-1). `app/api/checkout/route.ts`: the idempotency lookup and `idempotentReplay()` moved ahead of the throttle, the replay answers with the create path's envelope kind, both 502s carry `paymentId`, and a malformed receipt address is a `400 field:"email"` through the new `isEmail` in `lib/validate.ts`. `components/Modals.tsx`: one attempt key per signature, cleared only once a checkout starts; the submit gate always renders; the refusal mapper, the tab-aware url line, the `co-email-error` node, the price-moved banner and the Turnstile failure wiring all read from `lib/checkoutFace.ts`. `components/TurnstileWidget.tsx`: `onLoadFail` plus its own visible sentence. `app/page.tsx`: the `?canceled=<sym>` reader. `lib/routes.test.ts`: the throttle case rewritten to spend the quota with new keys and then prove a replay still answers. Verification in §5.13 (typecheck, lint, 583 cases against a scratch Postgres; no DOM run, no real payment). No dependency, no migration, no schema change; the paused surface (§9 Q3) and the honeypot counter (§9 Q4) are deliberately untouched.
 
 ## 12. UNKNOWN log
 
 | Id | Unknown | What settles it |
 | --- | --- | --- |
-| U06-1 | What the modal actually looks like and does on a phone — whether the on-screen keyboard covers `Continue to checkout`, and whether the four client-gate silent bails are noticeable in practice | A browser run at 360×640 and 390×844 with the keyboard raised, opening the stake modal, typing only a handle, and pressing Continue; then a DOM-level suite (`@testing-library/react` + jsdom) for the unit half — neither tool is in `package.json` today |
-| U06-2 | Whether a real visitor's Turnstile challenge ever fails in normal use on the production host (rate of `Bot check failed.`) | The production 400 rate for `/api/checkout` — provider console (Vercel logs) filtered on that response; client-side, a `turnstile` error-callback counter |
-| U06-3 | Whether `?canceled=Li` is reached by real buyers often enough to matter (its finding is a code fact either way) | Vercel request logs for `GET /?canceled=*` over a week of live payments, or a Stripe session list filtered on `cancel_url` |
-| U06-4 | Whether any password manager in the wild fills the `name="website"` honeypot for this form | A production counter on the honeypot branch (none exists) — the settling change is the counter, which is code, so this stays an operator call |
+| U06-1 | What the modal actually looks like and does on a phone — whether the on-screen keyboard covers `Continue to checkout`, and whether the four client-gate silent bails are noticeable in practice | A browser run at 360×640 and 390×844 with the keyboard raised, opening the stake modal, typing only a handle, and pressing Continue; then a DOM-level suite (`@testing-library/react` + jsdom) for the unit half — neither tool is in `package.json` today. **Half settled 2026-09-15:** the silent-bail half is no longer an unknown — the four gates are pure functions with 36 cases over them (§5.13), so an untouched form, a handle without `@` and a bad address all produce text by construction. The keyboard half still needs the browser |
+| U06-2 | Whether a real visitor's Turnstile challenge ever fails in normal use on the production host (rate of `Bot check failed.`) | The production 400 rate for `/api/checkout` — provider console (Vercel logs) filtered on that response; client-side, a `turnstile` error-callback counter. **Still open**, and now two distinct states to count: the challenge that fails after loading, and the script that never loads (the widget's own sentence, §7 R06-6) |
+| U06-3 | Whether `?canceled=Li` is reached by real buyers often enough to matter (its finding is a code fact either way) | Vercel request logs for `GET /?canceled=*` over a week of live payments, or a Stripe session list filtered on `cancel_url`. **Code half closed 2026-09-15:** the reader exists (§7 R06-8), so the log question now measures how often the notice is seen rather than whether the parameter is dead |
+| U06-4 | Whether any password manager in the wild fills the `name="website"` honeypot for this form | A production counter on the honeypot branch (none exists) — the settling change is the counter, which is code, so this stays an operator call. Unchanged by the fix pass, which left the honeypot deliberately opaque (§9 Q4) |

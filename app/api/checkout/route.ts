@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaymentPath, PaymentProvider, PaymentStatus, ReservationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { classifyAndValidate, joinMin, validateTake } from "@/lib/pricing";
-import { validateCheckoutInput } from "@/lib/validate";
+import { isEmail, validateCheckoutInput } from "@/lib/validate";
 import { findElementBySymbol } from "@/lib/elements";
 import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured } from "@/lib/stripe";
 import { rateLimitAsync } from "@/lib/rateStore";
@@ -10,7 +10,13 @@ import { clientIp } from "@/lib/ip";
 import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
 import { paymentsLiveServer } from "@/lib/flags";
 import { findOrCreateCheckoutStartup, fingerprintCheckout } from "@/lib/startups";
-import { getActiveReservation, releaseExpiredReservations, reservationConflict, RESERVATION_TTL_MS } from "@/lib/reservations";
+import {
+  getActiveReservation,
+  isReservationLive,
+  releaseExpiredReservations,
+  reservationConflict,
+  RESERVATION_TTL_MS,
+} from "@/lib/reservations";
 import { withTxnRetry, MONEY_TX } from "@/lib/txn";
 import { audit } from "@/lib/audit";
 
@@ -96,27 +102,53 @@ async function idempotentReplay(
       { status: 409 }
     );
   }
-  if (byKey.status === PaymentStatus.PENDING) {
-    const checkoutUrl = await resumeCheckoutUrl(byKey, origin);
-    if (!checkoutUrl) {
-      return NextResponse.json({ error: "Payment provider unavailable. Try again." }, { status: 502 });
-    }
-    return NextResponse.json({ paymentId: byKey.id, status: "pending", checkoutUrl });
+  if (byKey.status !== PaymentStatus.PENDING) {
+    // Settled, refunded or abandoned: there is no session left to open, and
+    // saying so is the only useful answer — the modal renders `error`.
+    const state = byKey.status.toLowerCase();
+    return NextResponse.json({
+      paymentId: byKey.id,
+      status: state,
+      error: `This checkout is already ${state} — nothing was charged again.`,
+    });
   }
-  return NextResponse.json({ paymentId: byKey.id, status: byKey.status.toLowerCase() });
+  // Same envelope as the create path (R06-9): one payment must not answer with
+  // two different bodies depending on who won the insert race, so the loser
+  // reads back the reservation it was racing for.
+  const checkoutUrl = await resumeCheckoutUrl(byKey, origin);
+  if (!checkoutUrl) {
+    // The row survives a provider failure, so a retry has something to reach
+    // (R06-7): the same key replays this branch instead of forking a new row.
+    return NextResponse.json(
+      { error: "Payment provider unavailable. Try again.", code: "PROVIDER_UNAVAILABLE", paymentId: byKey.id },
+      { status: 502 }
+    );
+  }
+  const held = await prisma.claimReservation.findUnique({ where: { paymentId: byKey.id } });
+  return NextResponse.json({
+    paymentId: byKey.id,
+    checkoutUrl,
+    provider: getProviderMode(),
+    ...(held && held.status === ReservationStatus.ACTIVE && isReservationLive(held)
+      ? {
+          reservation: {
+            reservedTotal: held.reservedTotal,
+            expiresAt: held.expiresAt.toISOString(),
+            guaranteedTake: true,
+          },
+        }
+      : {}),
+  });
 }
 
-export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
+export async function POST(req: NextRequest) {
+  if (!paymentsLiveServer()) {
     return NextResponse.json({ error: "Payments are paused — join the waitlist.", waitlist: true }, { status: 403 });
   }
   if (stripePartiallyConfigured()) {
     console.warn("checkout: partial Stripe configuration (key without secret or vice versa) — running in dev provider mode");
   }
   const ip = clientIp(req.headers);
-  // Abuse: 5 checkout attempts / IP / hour (spec 03). 429, never 500.
-  if (!(await rateLimitAsync(`checkout:${ip}`, 5, 3_600_000))) {
-    return NextResponse.json({ error: "Too many checkout attempts. Try again later." }, { status: 429 });
-  }
   let body: Body;
   try {
     body = await req.json();
@@ -144,7 +176,14 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
   if (!Number.isInteger(amountUsd) || amountUsd < 1) {
     return NextResponse.json({ error: "Whole dollars only." }, { status: 400 });
   }
-  const email = typeof body.email === "string" && body.email.includes("@") ? body.email.trim() : null;
+  // A receipt address is only useful if mail can reach it: the old gate
+  // accepted anything holding an `@` (R06-10), so `a@b` was stored and only
+  // bounced when the buyer tried to pay. Empty still means "no receipt".
+  const rawEmail = typeof body.email === "string" ? body.email.trim() : "";
+  if (rawEmail && !isEmail(rawEmail)) {
+    return NextResponse.json({ error: "That email doesn't look right.", field: "email" }, { status: 400 });
+  }
+  const email = rawEmail || null;
 
   const input = validateCheckoutInput({
     url: body.startup?.url,
@@ -165,10 +204,20 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
 
   // Idempotency FIRST (P1-03): resolve the key before any mutable operation.
   // Matching retries return the stored payment (+ resumable URL); key reuse
-  // with a different payload is rejected.
+  // with a different payload is rejected. The lookup also precedes the rate
+  // limiter (R06-2): a replay writes nothing, so it must not spend the buyer's
+  // hourly attempt budget — otherwise an interrupted buyer who retries the key
+  // of a payment they already own is answered 429 and never reaches their row.
   const byKey = await prisma.payment.findUnique({ where: { idempotencyKey } });
   if (byKey) {
     return await idempotentReplay(byKey, fingerprint, req.nextUrl.origin);
+  }
+
+  // Abuse: 5 NEW checkout attempts / IP / hour (spec 03). 429, never 500. The
+  // bot gates and the pure shape checks run first, so the throttle sits in
+  // front of every row-creating path and behind none that only reads.
+  if (!(await rateLimitAsync(`checkout:${ip}`, 5, 3_600_000))) {
+    return NextResponse.json({ error: "Too many checkout attempts. Try again later." }, { status: 429 });
   }
 
   const element = await prisma.element.findUnique({ where: { symbol: elementSymbol } });
@@ -363,8 +412,13 @@ export async function POST(req: NextRequest) {  if (!paymentsLiveServer()) {
   const checkoutUrl = await resumeCheckoutUrl(quoted.payment, req.nextUrl.origin);
   if (!checkoutUrl) {
     // Provider session creation failed — the pending payment stays retryable
-    // via the same idempotency key; no dead URL is handed out (P1-04).
-    return NextResponse.json({ error: "Payment provider unavailable. Try again." }, { status: 502 });
+    // via the same idempotency key; no dead URL is handed out (P1-04). The id
+    // travels with the error so the buyer's retry reaches its own row instead
+    // of forking a second one (R06-7).
+    return NextResponse.json(
+      { error: "Payment provider unavailable. Try again.", code: "PROVIDER_UNAVAILABLE", paymentId: quoted.payment.id },
+      { status: 502 }
+    );
   }
   return NextResponse.json({
     paymentId: quoted.payment.id,

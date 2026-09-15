@@ -10,7 +10,18 @@ import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
 import { classifyAndValidate } from "../lib/pricing";
 import { stakeQuote } from "../lib/stakeQuote";
-import { domainFromUrl, domainFromSocial } from "../lib/validate";
+import { domainFromUrl, domainFromSocial, isEmail } from "../lib/validate";
+import {
+  CHECKOUT_MSG,
+  checkoutRefusal,
+  emailShapeBad,
+  fieldHasRenderer,
+  pitchShapeBad,
+  submitBlocked,
+  titleShapeBad,
+  urlMessage,
+  urlShapeBad,
+} from "../lib/checkoutFace";
 import { paymentsLiveClient } from "../lib/flags";
 import { track } from "../lib/analytics";
 import type { ElementNode } from "../lib/elements";
@@ -49,6 +60,7 @@ export function CheckoutPreview({
   amount,
   amountMinted,
   prefillDomain,
+  canceled,
   onAmount,
   onReconcile,
   onClose,
@@ -60,6 +72,8 @@ export function CheckoutPreview({
   /** The field still holds a figure the app minted (?stake=), not a buyer's. */
   amountMinted?: boolean;
   prefillDomain?: string | null;
+  /** True when the buyer came back from the provider having cancelled (R06-8). */
+  canceled?: boolean;
   onAmount: (n: number) => void;
   /** App-driven field update; never routed through `onAmount`'s latch. */
   onReconcile: (n: number) => void;
@@ -74,6 +88,10 @@ export function CheckoutPreview({
   const [attest, setAttest] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // R06-6: the Turnstile script never arrived, so no checkbox is coming and no
+  // token exists. A submit has to say which check is missing rather than hand
+  // back the server's deliberately opaque "Bot check failed." (still opaque).
+  const [humanCheckFailed, setHumanCheckFailed] = useState(false);
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [serverField, setServerField] = useState<{ field: string; message: string } | null>(null);
   const [priceMoved, setPriceMoved] = useState<number | null>(null);
@@ -82,6 +100,10 @@ export function CheckoutPreview({
   // Token handed to us by the widget's callback. Preferred over scraping the
   // hidden field: the DOM can hold a stale or empty input from a previous render.
   const turnstileRef = useRef<string | null>(null);
+  // The key naming this attempt, kept while the claim it was minted for is
+  // unchanged: a retry after a provider failure has to replay the row the first
+  // attempt wrote instead of forking a second PENDING payment (R06-7).
+  const attempt = useRef<{ sig: string; key: string } | null>(null);
   const { data } = useSWR<ElementDetail>(open && el ? `/api/elements/${el.symbol}` : null, (url: string) =>
     fetchJson(url, isElementDetail)
   );
@@ -134,10 +156,10 @@ export function CheckoutPreview({
   // stake sorts last but is still row 0 on an element with nothing else, and
   // quoting it would advertise a $1 takeover the server refuses.
   const leaderTotal = data?.stakes.find((s) => s.isLeader)?.amount;
-  const badUrl = url.length > 0 && !/^https?:\/\/.+\..+/.test(tab === "url" ? url : `https://x.com/${url.replace(/^@/, "")}`);
-  const badEmail = email.length > 0 && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-  const badTitle = title.length > 0 && (title.trim().length < 2 || title.trim().length > 32);
-  const badPitch = pitch.length > 0 && (pitch.trim().length < 2 || pitch.trim().length > 140);
+  const badUrl = urlShapeBad(tab, url);
+  const badEmail = emailShapeBad(email);
+  const badTitle = titleShapeBad(title);
+  const badPitch = pitchShapeBad(pitch);
   const domain =
     tab === "url"
       ? url.includes("://")
@@ -197,7 +219,7 @@ export function CheckoutPreview({
 
   async function joinWaitlist() {
     if (waitBusy) return;
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    if (!isEmail(email)) {
       setWaitErr("Enter a valid email so we can reach you.");
       return;
     }
@@ -225,7 +247,36 @@ export function CheckoutPreview({
   }
 
   async function submit() {
-    if (badUrl || badEmail || badTitle || badPitch || !domain || !attest || clientErr || submitting) return;
+    // In flight: the button already says so. Every other gate owes the buyer a
+    // sentence, because the old guard returned with nothing on screen — an
+    // untouched form, or a handle typed without its `@` (which resolves no
+    // domain), did nothing at all when clicked (R06-1). The sentences live in
+    // lib/checkoutFace.ts so the client and server word the same rule the same
+    // way, and the tab picks the right one (R06-5).
+    if (submitting) return;
+    const blocked = submitBlocked({
+      tab,
+      url,
+      title,
+      pitch,
+      email,
+      attest,
+      domain,
+      clientErr,
+      humanCheckFailed,
+    });
+    if (blocked) {
+      if (blocked.field && fieldHasRenderer(blocked.field)) {
+        setServerField({ field: blocked.field, message: blocked.message });
+        setServerErr(null);
+      } else {
+        setServerField(null);
+        // `shown`: the failed widget already prints this exact sentence, so
+        // printing it again under the button would say it twice (R06-6).
+        setServerErr(blocked.shown ? null : blocked.message);
+      }
+      return;
+    }
     track("checkout_start", { element: elSymbol, amount: Math.round(amount) });
     setSubmitting(true);
     setServerErr(null);
@@ -237,6 +288,21 @@ export function CheckoutPreview({
           ? document.querySelector<HTMLInputElement>('[name="cf-turnstile-response"]')?.value || undefined
           : undefined;
       const turnstileToken = turnstileRef.current ?? domToken;
+      // One attempt, one key: it is only replaced when the claim itself changes,
+      // so a retry after a provider failure (502, network) asks the server for
+      // the row it already wrote instead of writing a second pending payment
+      // that the buyer's money would never reach (R06-7).
+      const sig = `${elSymbol}|${domain}|${Math.round(amount)}|${email.trim()}`;
+      if (attempt.current?.sig !== sig) {
+        attempt.current = {
+          sig,
+          key:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `ck-${elSymbol}-${domain}-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+        };
+      }
+      const idempotencyKey = attempt.current.key;
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -248,10 +314,7 @@ export function CheckoutPreview({
           honeypot: honeypot || undefined,
           attest,
           turnstileToken,
-          idempotencyKey:
-            typeof crypto !== "undefined" && "randomUUID" in crypto
-              ? crypto.randomUUID()
-              : `ck-${elSymbol}-${domain}-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+          idempotencyKey,
           startup: {
             url: tab === "url" ? url : `https://${domain}`,
             linkType: tab === "url" ? "product" : "social",
@@ -263,26 +326,22 @@ export function CheckoutPreview({
       });
       const json = await res.json();
       if (!res.ok || !json.checkoutUrl) {
-        // Stale quote: server returns live takeLead so we can offer "continue?" at the new price.
-        if (res.status === 409 && typeof json.takeLead === "number") {
-          setPriceMoved(json.takeLead);
-          setServerErr(json.error ?? "Price moved. Review the new minimum.");
-        } else if (json.code === "RESERVATION_CONFLICT" && json.expiresAt) {
-          const heldUntil = new Date(json.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-          setServerErr(`${json.error ?? "This element has a held take quote."} Held until ${heldUntil}.`);
-        } else if (typeof json.field === "string" && typeof json.error === "string") {
-          // Field-specific server feedback renders under its input (Phase 5).
-          setServerField({ field: json.field, message: json.error });
-          setServerErr(null);
-        } else {
-          setServerErr(json.error ?? "Something went wrong. Try again.");
-        }
+        // Every branch below is decided in lib/checkoutFace.checkoutRefusal:
+        // only a board that actually moved may quote a new price (R06-3), and a
+        // `field` the form has no node for lands on the shared line rather than
+        // in state nobody renders (R06-4).
+        const refusal = checkoutRefusal(res.status, json);
+        setPriceMoved(refusal.priceMoved);
+        setServerField(refusal.field);
+        setServerErr(refusal.serverErr);
         onDone(json.error ?? "Checkout failed — retry when ready.");
         setSubmitting(false);
         return;
       }
+      attempt.current = null; // the checkout started; the next one is a new claim
       window.location.href = json.checkoutUrl as string;
     } catch {
+      // The key is deliberately kept: the fetch may have reached the server.
       setServerErr("Network error. Try again.");
       onDone("Network error — retry checkout.");
       setSubmitting(false);
@@ -322,10 +381,15 @@ export function CheckoutPreview({
     <Modal open={open} onClose={onClose} label={`Stake on ${el.name}`}>
       <h2 className="font-display text-xl font-bold">Stake on <span className="text-money">{el.name}</span> 🚩</h2>
       <p className="text-sm text-mutedink mt-1">Rank is your total stake. Past stake still counts — top up to climb.</p>
+      {/* R06-8: the provider's cancel_url lands back here. Nothing was charged,
+          the claim is untouched, and the old page said so with a shrug. */}
+      {canceled && (
+        <div className="mt-2 rounded-2xl bg-goldwash p-3 text-xs font-bold">⚠️ {CHECKOUT_MSG.canceled}</div>
+      )}
       {/* Polite announcements for async checkout states (Phase 5): submitting,
           price moves, and server errors — focus itself never moves. */}
       <div role="status" aria-live="polite" className="sr-only">
-        {submitting ? "Starting checkout…" : serverErr ?? (serverField ? serverField.message : priceMoved != null ? `Price moved to $${priceMoved}.` : "")}
+        {submitting ? "Starting checkout…" : serverErr ?? (serverField ? serverField.message : priceMoved != null ? `Price moved to $${priceMoved}.` : humanCheckFailed ? CHECKOUT_MSG.humanCheck : "")}
       </div>
       <form
         noValidate
@@ -356,7 +420,7 @@ export function CheckoutPreview({
           />
           {(badUrl || serverField?.field === "url") && (
             <div id="co-url-error" className="text-xs text-red-700">
-              {serverField?.field === "url" ? <span className="font-bold">{serverField.message}</span> : "Enter a full URL starting with https://"}
+              {serverField?.field === "url" ? <span className="font-bold">{serverField.message}</span> : urlMessage(tab)}
             </div>
           )}        </div>
         <div>
@@ -372,7 +436,7 @@ export function CheckoutPreview({
           />
           {(badTitle || serverField?.field === "title") && (
             <div id="co-title-error" className="text-xs text-red-700">
-              {serverField?.field === "title" ? <span className="font-bold">{serverField.message}</span> : "Name must be 2–32 characters."}
+              {serverField?.field === "title" ? <span className="font-bold">{serverField.message}</span> : CHECKOUT_MSG.title}
             </div>
           )}        </div>
         <div>
@@ -388,7 +452,7 @@ export function CheckoutPreview({
           />
           {(badPitch || serverField?.field === "pitch") && (
             <div id="co-pitch-error" className="text-xs text-red-700">
-              {serverField?.field === "pitch" ? <span className="font-bold">{serverField.message}</span> : "Pitch must be 2–140 characters."}
+              {serverField?.field === "pitch" ? <span className="font-bold">{serverField.message}</span> : CHECKOUT_MSG.pitch}
             </div>
           )}        </div>
         <div>
@@ -396,12 +460,16 @@ export function CheckoutPreview({
           <IcyInput
             id="co-email" name="co-email" type="email" autoComplete="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => { setEmail(e.target.value); setServerField(null); }}
             placeholder="you@startup.com"
-            aria-invalid={badEmail}
-            aria-describedby={badEmail ? "co-email-error" : undefined}
+            aria-invalid={badEmail || serverField?.field === "email"}
+            aria-describedby={badEmail || serverField?.field === "email" ? "co-email-error" : undefined}
           />
-          {badEmail && <div id="co-email-error" className="text-xs text-red-700">That email doesn&apos;t look right.</div>}
+          {(badEmail || serverField?.field === "email") && (
+            <div id="co-email-error" className="text-xs text-red-700">
+              {serverField?.field === "email" ? <span className="font-bold">{serverField.message}</span> : CHECKOUT_MSG.email}
+            </div>
+          )}
         </div>
         <div>
           <label htmlFor="co-amount" className="mb-1 block text-[11px] font-extrabold text-mutedink">Stake amount (whole dollars)</label>
@@ -476,7 +544,11 @@ export function CheckoutPreview({
           sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY}
           onToken={(t) => {
             turnstileRef.current = t;
+            // A widget that rendered can hand out a token, so the earlier
+            // failure is over (R06-6).
+            if (t) setHumanCheckFailed(false);
           }}
+          onLoadFail={() => setHumanCheckFailed(true)}
         />
       ) : null}
       <ChunkyButton

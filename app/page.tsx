@@ -61,6 +61,9 @@ function HomeInner() {
   const [checkoutAmtMinted, setCheckoutAmtMinted] = useState(false);
   // Reclaim deep link (?r=DOMAIN): the domain whose listing the modal prefills.
   const [checkoutDomain, setCheckoutDomain] = useState<string | null>(null);
+  // True when the buyer arrived back from the provider having cancelled
+  // (?canceled=SYM), so the form says nothing was charged (R06-8).
+  const [checkoutCanceled, setCheckoutCanceled] = useState(false);
   const [mobileActivityOpen, setMobileActivityOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [actMin, setActMin] = useState(false);
@@ -106,11 +109,13 @@ function HomeInner() {
   }
 
   // Deep links: /?paid=SYM (post-checkout success), /?unsub=done|unknown,
-  // /?el=SYM&stake=N&r=DOMAIN (outbid reclaim prefill from email).
+  // /?el=SYM&stake=N&r=DOMAIN (outbid reclaim prefill from email),
+  // /?canceled=SYM (the provider's cancel_url).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paid = params.get("paid");
     const unsub = params.get("unsub");
+    const canceled = params.get("canceled");
     const elParam = params.get("el");
     const stakeParam = params.get("stake");
     const reclaimParam = params.get("r");
@@ -122,6 +127,20 @@ function HomeInner() {
       mutateTiles();
       mutateStats();
       mutateActivity();
+    }
+    if (canceled) {
+      // The provider's cancel_url. Nothing was charged and the pending row
+      // simply expires, but this used to land on a plain board with the
+      // parameter silently rewritten away (R06-8). Re-open the form they left
+      // and say the conservative half out loud: the amount is not in this URL,
+      // so no figure may be named here.
+      const found = findElementBySymbol(canceled);
+      if (found) {
+        setSelected(found);
+        setCheckoutEl(found);
+        setCheckoutCanceled(true);
+      }
+      toast("Not paid — nothing was charged. Your claim is still here.");
     }
     if (elParam) {
       // Casing is not identity (R04-4): mail clients and pasted links are
@@ -156,7 +175,7 @@ function HomeInner() {
     }
     if (unsub === "done") toast("You're unsubscribed. Past stake still counts.");
     if (unsub === "unknown") toast("Already unsubscribed or unknown link.");
-    if (paid || unsub || elParam) window.history.replaceState({}, "", window.location.pathname);
+    if (paid || unsub || canceled || elParam) window.history.replaceState({}, "", window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -189,6 +208,8 @@ function HomeInner() {
     setCheckoutAmtMinted(true);
     // A manual stake is a fresh purchase: never carry a reclaim prefill over.
     setCheckoutDomain(null);
+    // Nor the "you cancelled" note from an earlier trip to the provider.
+    setCheckoutCanceled(false);
   }, []);
 
   // The buyer's hands on the amount field (typing, chips, "Use $N"): the figure
@@ -427,9 +448,13 @@ function HomeInner() {
         amount={checkoutAmt}
         amountMinted={checkoutAmtMinted}
         prefillDomain={checkoutDomain}
+        canceled={checkoutCanceled}
         onAmount={onCheckoutAmount}
         onReconcile={setCheckoutAmt}
-        onClose={() => setCheckoutEl(null)}
+        onClose={() => {
+          setCheckoutEl(null);
+          setCheckoutCanceled(false);
+        }}
         onDone={(m) => toast(m)}
       />
       <FooterBar />

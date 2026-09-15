@@ -79,9 +79,18 @@ export function isBlockedDomain(domain: string): boolean {
   return BLOCKED_DOMAINS.some((b) => d === b || d.endsWith("." + b));
 }
 
+/** Shared email shape check. The checkout route used to accept anything holding
+ *  an `@`, so `a@b` reached the provider and only bounced when the buyer tried
+ *  to pay (R06-10); profile updates already applied this rule. */
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+export function isEmail(value: string): boolean {
+  return EMAIL_RE.test(value.trim());
+}
+
 export type CheckoutInputResult =
   | { ok: true; url: string; domain: string; title: string; pitch: string; linkType: "product" | "social" }
-  | { ok: false; error: string; field?: "url" | "title" | "pitch" };
+  | { ok: false; error: string; field?: "url" | "title" | "pitch" | "email" };
 
 /** Full checkout input validation — mirrors spec 01-checkout-flow.md. */
 export function validateCheckoutInput(input: {
@@ -146,7 +155,7 @@ export function validateProfileInput(input: {
   });
   if (!base.ok) return base;
   if (input.email != null && input.email !== "") {
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(input.email.trim())) {
+    if (!isEmail(input.email)) {
       return { ok: false, error: "That email doesn't look right.", field: "email" };
     }
   }
