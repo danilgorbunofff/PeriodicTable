@@ -410,6 +410,23 @@ export function stripePayloadIsFailed(payload: unknown): boolean {
   return FAILED_EVENT_TYPES.has(stripeEventType(payload));
 }
 
+/** A single declined card attempt (R08-6).
+ *
+ * Not a failure and not unrelated. `payment_intent.payment_failed` fires when
+ * one attempt is declined while the session it belongs to stays open and
+ * payable, so it must not change the payment — but it is also not noise: it is
+ * the buyer being turned down, and the register should be able to say so.
+ *
+ * The distinction matters because this event is not in the endpoint's
+ * subscribed event list (see PROD-READINESS-CHECKLIST.md): if it is ever
+ * subscribed, the delivery must arrive already classified rather than falling
+ * into "unrelated-event" and looking like a stream we do not act on. */
+const DECLINED_EVENT_TYPES = new Set(["payment_intent.payment_failed"]);
+
+export function stripePayloadIsDeclined(payload: unknown): boolean {
+  return DECLINED_EVENT_TYPES.has(stripeEventType(payload));
+}
+
 /** Money-reversing signals: the provider returned, or clawed back, the buyer's
  * money. Kept strictly separate from PAID *and* FAILED.
  *

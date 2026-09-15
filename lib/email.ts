@@ -7,6 +7,7 @@ import { prisma } from "./prisma";
 import { outbidHtml, outbidSubject } from "../emails/outbid";
 import { outbidReclaimUrl } from "./links";
 import { receiptHtml, receiptSubject } from "../emails/receipt";
+import { refundHtml, refundSubject } from "../emails/refund";
 import { reportHtml, reportSubject } from "../emails/report";
 import { waitlistHtml, waitlistSubject } from "../emails/waitlist";
 
@@ -132,6 +133,41 @@ export async function sendReceiptEmail(p: ReceiptEmailParams) {
   await logEmail({
     to: p.to,
     template: "receipt",
+    elementSymbol: p.elementSymbol,
+    amountUsd: p.amountUsd,
+    status,
+    detail: subject,
+  });
+}
+
+export type RefundEmailParams = {
+  to: string;
+  unsubToken: string;
+  elementSymbol: string;
+  elementName: string;
+  amountUsd: number;
+  domain: string;
+  providerRef: string | null;
+};
+
+/** Buyer notice for a reversed payment (R08-2). Enqueued inside the reversal
+ *  transaction, so the notice survives a process death between commit and
+ *  delivery — a refund the buyer never hears about is the one mail in this
+ *  system that cannot be left to best-effort. */
+export async function sendRefundEmail(p: RefundEmailParams) {
+  const subject = refundSubject({ elementSymbol: p.elementSymbol, amountUsd: p.amountUsd });
+  const html = refundHtml({
+    elementSymbol: p.elementSymbol,
+    elementName: p.elementName,
+    amountUsd: p.amountUsd,
+    domain: p.domain,
+    providerRef: p.providerRef,
+    unsubUrl: `${APP_URL}/api/unsubscribe?token=${p.unsubToken}`,
+  });
+  const status = await deliver(p.to, subject, html, { unsubToken: p.unsubToken });
+  await logEmail({
+    to: p.to,
+    template: "refund",
     elementSymbol: p.elementSymbol,
     amountUsd: p.amountUsd,
     status,

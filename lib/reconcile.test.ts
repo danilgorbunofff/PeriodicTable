@@ -7,6 +7,7 @@ import { hasTestDb, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "../app/api/jobs/reconcile/route";
+import { recordProviderEvent } from "./settle";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -24,6 +25,8 @@ type Report = {
   ok: boolean;
   paidTotal: number;
   divergent: { count: number; samples: { id: string; amountUsd: number; providerAmount: number | null }[] };
+  unapplied: { count: number; scanned: number; samples: { event: string; detail: string | null }[] };
+  stale: { count: number; samples: { id: string; createdAt: string }[]; note: string };
   unverified: {
     count: number;
     byProvider: { provider: string; count: number }[];
@@ -147,5 +150,120 @@ describe.skipIf(!hasDb)("money reconciliation report", () => {
     expect(report.divergent.samples.length).toBe(5);
     await prisma.payment.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
     expect((await call()).divergent.count).toBe(0);
+  });
+
+  // R08-3: a delivery that ended in ERROR and was never superseded. It is the
+  // one finding the register can raise about money that moved while the ledger
+  // did not, so it fails ok — and it must not fire on an attempt that may still
+  // be retrying.
+  const pending = (ageMs: number, over: { providerCheckoutUrl?: string } = {}) =>
+    prisma.payment.create({
+      data: {
+        elementId: TE,
+        startupId,
+        amountUsd: 5,
+        path: "TAKE",
+        provider: "STRIPE",
+        idempotencyKey: `rec-p-${Date.now()}-${keyN++}`,
+        status: "PENDING",
+        createdAt: new Date(Date.now() - ageMs),
+        ...over,
+      },
+    });
+
+  /** An ERROR delivery on a payment, written through the real writer (so the
+   *  attribution columns are filled the way production fills them) and aged. */
+  const errorDelivery = async (paymentId: string, ageMs: number) => {
+    const eventId = `evt-err-${Date.now()}-${keyN++}`;
+    await recordProviderEvent({
+      provider: "stripe",
+      eventId,
+      eventType: "checkout.session.completed",
+      paymentId,
+      outcome: "ERROR",
+      detail: "amount-mismatch",
+      payload: { id: eventId },
+    });
+    await prisma.providerEvent.update({
+      where: { providerEventId: eventId },
+      data: { createdAt: new Date(Date.now() - ageMs) },
+    });
+    return eventId;
+  };
+
+  it("does not page on a rejected delivery that may still be retrying", async () => {
+    const p = await pending(60_000);
+    const eventId = await errorDelivery(p.id, 5 * 60_000);
+    const report = await call();
+    expect(report.ok).toBe(true);
+    expect(report.unapplied.samples.map((s) => s.event)).not.toContain(eventId);
+    await prisma.providerEvent.deleteMany({ where: { providerEventId: eventId } });
+    await prisma.payment.delete({ where: { id: p.id } });
+  });
+
+  it("fails ok on a rejected capture that was never applied", async () => {
+    const p = await pending(60_000);
+    const eventId = await errorDelivery(p.id, 2 * 3_600_000);
+    const before = (await call()).unapplied.count;
+    expect(before).toBeGreaterThanOrEqual(1);
+
+    const report = await call();
+    expect(report.ok).toBe(false);
+    expect(report.unapplied.count).toBe(before);
+    // Every row the report counted is shown when there are five or fewer: a
+    // count nobody can trace to a delivery is not actionable.
+    if (report.unapplied.count <= 5) {
+      expect(report.unapplied.samples.map((s) => s.event)).toContain(eventId);
+    }
+
+    await prisma.providerEvent.deleteMany({ where: { providerEventId: eventId } });
+    await prisma.payment.delete({ where: { id: p.id } });
+    expect((await call()).ok).toBe(true);
+  });
+
+  it("separates a reversal that never unwound from a rejection the payment superseded", async () => {
+    // The payment applied and is PAID; the question is whether the rejection
+    // came before that (superseded — a stale row, not a live contradiction) or
+    // after (money came back and the stake is still on the board).
+    const p = await prisma.payment.create({
+      data: {
+        elementId: TE,
+        startupId,
+        amountUsd: 5,
+        path: "TAKE",
+        provider: "STRIPE",
+        idempotencyKey: `rec-rev-${Date.now()}-${keyN++}`,
+        status: "PAID",
+        paidAt: new Date(Date.now() - 3 * 3_600_000),
+        providerAmount: 500,
+        providerCurrency: "usd",
+      },
+    });
+    const superseded = await errorDelivery(p.id, 4 * 3_600_000);
+    const live = await errorDelivery(p.id, 2 * 3_600_000);
+
+    const report = await call();
+    expect(report.ok).toBe(false);
+    const ids = report.unapplied.samples.map((s) => s.event);
+    // The row that predates the application can never be reported, however many
+    // findings there are.
+    expect(ids).not.toContain(superseded);
+    if (report.unapplied.count <= 5) expect(ids).toContain(live);
+
+    await prisma.providerEvent.deleteMany({ where: { providerEventId: { in: [superseded, live] } } });
+    await prisma.payment.delete({ where: { id: p.id } });
+  });
+
+  it("reads a pending payment older than the provider session as operator work, not a page", async () => {
+    const before = (await call()).stale.count;
+    const staleRow = await pending(25 * 3_600_000, { providerCheckoutUrl: "https://checkout.stripe.com/c/pay/cs_lost" });
+
+    const report = await call();
+    expect(report.stale.count).toBeGreaterThanOrEqual(before + 1);
+    expect(report.stale.note).toContain("abandoned-checkouts");
+    // Advisory: it is money we never heard about, and it does not fail ok.
+    expect(report.ok).toBe(true);
+
+    await prisma.payment.delete({ where: { id: staleRow.id } });
   });
 });

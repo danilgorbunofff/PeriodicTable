@@ -6,13 +6,14 @@ import {
   paymentIdFromStripePayload,
   stripePayloadIsPaid,
   stripePayloadIsFailed,
+  stripePayloadIsDeclined,
   stripePayloadReversal,
   stripeEventId,
   stripeEventType,
   stripeMoney,
 } from "@/lib/stripe";
 import { validateProviderMoney } from "@/lib/money";
-import { settlePayment, reversePayment } from "@/lib/settle";
+import { settlePayment, reversePayment, recordProviderEvent } from "@/lib/settle";
 
 export const dynamic = "force-dynamic";
 
@@ -55,20 +56,30 @@ export async function POST(req: NextRequest) {
   const eventType = stripeEventType(payload);
   const paymentId = paymentIdFromStripePayload(payload);
   if (!paymentId) {
-    await prisma.providerEvent.upsert({
-      where: { providerEventId: eventId },
-      create: { provider: "STRIPE", providerEventId: eventId, eventType, outcome: "IGNORED", detail: "no-paymentId", payload: payload as object },
-      update: { outcome: "IGNORED", detail: "no-paymentId" },
+    await recordProviderEvent({
+      provider: "stripe",
+      eventId,
+      eventType,
+      paymentId: null,
+      outcome: "IGNORED",
+      detail: "no-paymentId",
+      payload,
     });
     return NextResponse.json({ ok: true, note: "no paymentId in payload" });
   }
 
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   if (!payment) {
-    await prisma.providerEvent.upsert({
-      where: { providerEventId: eventId },
-      create: { provider: "STRIPE", providerEventId: eventId, eventType, outcome: "IGNORED", detail: "unknown-payment", payload: payload as object },
-      update: { outcome: "IGNORED", detail: "unknown-payment" },
+    // No paymentId on the row: it would violate the foreign key, and the
+    // delivery is not about a payment we know. The id is in the payload.
+    await recordProviderEvent({
+      provider: "stripe",
+      eventId,
+      eventType,
+      paymentId: null,
+      outcome: "IGNORED",
+      detail: "unknown-payment",
+      payload,
     });
     // 200: retrying an unknown payment can never succeed.
     return NextResponse.json({ ok: true, note: "unknown payment" });
@@ -107,10 +118,19 @@ export async function POST(req: NextRequest) {
     // (P0-03): record IGNORED and leave the pending payment untouched — a
     // noisy event stream must never cancel a real checkout.
     if (!stripePayloadIsFailed(payload)) {
-      await prisma.providerEvent.upsert({
-        where: { providerEventId: eventId },
-        create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "IGNORED", detail: "unrelated-event", payload: payload as object },
-        update: { outcome: "IGNORED", detail: "unrelated-event" },
+      // R08-6: a declined card ATTEMPT is not an unrelated event. Nothing is
+      // changed (the session stays payable, see stripePayloadIsDeclined), but
+      // the register should say a buyer was turned down rather than bury it in
+      // the noise — it is the difference between "no signal" and "the buyer
+      // could not pay".
+      await recordProviderEvent({
+        provider: "stripe",
+        eventId,
+        eventType,
+        paymentId,
+        outcome: "IGNORED",
+        detail: stripePayloadIsDeclined(payload) ? "declined-attempt" : "unrelated-event",
+        payload,
       });
       return NextResponse.json({ ok: true, outcome: "ignored" });
     }
@@ -127,10 +147,14 @@ export async function POST(req: NextRequest) {
   const check = validateProviderMoney(payment.amountUsd, money);
   if (check.status === "rejected") {
     const moneyErr = check.reason;
-    await prisma.providerEvent.upsert({
-      where: { providerEventId: eventId },
-      create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail: moneyErr, payload: payload as object },
-      update: { outcome: "ERROR", detail: moneyErr },
+    await recordProviderEvent({
+      provider: "stripe",
+      eventId,
+      eventType,
+      paymentId,
+      outcome: "ERROR",
+      detail: moneyErr,
+      payload,
     });
     // Non-2xx is wrong here (redelivery won't fix a mismatch); 200 + ERROR
     // row routes it to operator review instead of retrying forever.
@@ -138,10 +162,14 @@ export async function POST(req: NextRequest) {
   }
   if (money.providerRef && payment.providerRef && money.providerRef !== payment.providerRef) {
     const detail = `reference-mismatch:${money.providerRef}`;
-    await prisma.providerEvent.upsert({
-      where: { providerEventId: eventId },
-      create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail, payload: payload as object },
-      update: { outcome: "ERROR", detail },
+    await recordProviderEvent({
+      provider: "stripe",
+      eventId,
+      eventType,
+      paymentId,
+      outcome: "ERROR",
+      detail,
+      payload,
     });
     return NextResponse.json({ ok: false, error: detail }, { status: 200 });
   }
@@ -151,19 +179,27 @@ export async function POST(req: NextRequest) {
     const claimed = await prisma.payment.findUnique({ where: { providerRef: money.providerRef } });
     if (claimed && claimed.id !== paymentId) {
       const detail = `reference-claimed:${money.providerRef}`;
-      await prisma.providerEvent.upsert({
-        where: { providerEventId: eventId },
-        create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "ERROR", detail, payload: payload as object },
-        update: { outcome: "ERROR", detail },
+      await recordProviderEvent({
+        provider: "stripe",
+        eventId,
+        eventType,
+        paymentId,
+        outcome: "ERROR",
+        detail,
+        payload,
       });
       return NextResponse.json({ ok: false, error: detail }, { status: 200 });
     }
   }
   if (payment.status !== PaymentStatus.PENDING) {
-    await prisma.providerEvent.upsert({
-      where: { providerEventId: eventId },
-      create: { provider: "STRIPE", providerEventId: eventId, eventType, paymentId, outcome: "DUPLICATE", detail: `already-${payment.status.toLowerCase()}`, payload: payload as object },
-      update: { outcome: "DUPLICATE", detail: `already-${payment.status.toLowerCase()}` },
+    await recordProviderEvent({
+      provider: "stripe",
+      eventId,
+      eventType,
+      paymentId,
+      outcome: "DUPLICATE",
+      detail: `already-${payment.status.toLowerCase()}`,
+      payload,
     });
     return NextResponse.json({ ok: true, outcome: "already-settled" });
   }

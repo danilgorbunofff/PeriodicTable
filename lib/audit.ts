@@ -23,7 +23,8 @@ export type AuditAction =
   | "WAITLIST_JOINED"
   | "REPORT_TRIAGED"
   | "PROFILE_MODERATED"
-  | "PAYMENT_REVERSED";
+  | "PAYMENT_REVERSED"
+  | "CHECKOUT_ABANDONED";
 
 export async function audit(
   entry: {

@@ -75,30 +75,107 @@ function logSettle(msg: string, fields: Record<string, unknown>): void {
  *  must not hold it open for a stalled provider call (deliver() times out at 10s). */
 const SETTLE_MAIL_DRAIN_BUDGET_MS = 15_000;
 
-/** Record a provider delivery outcome (best-effort, never throws). */
-async function recordEvent(params: {
+/** How a further delivery for an event id already on file is written down.
+ *
+ * The register is evidence (R08-1). A row that recorded a DECISION is final:
+ * a replayed `checkout.session.completed` used to overwrite the APPLIED row
+ * with `duplicate` and erase the detail that explained it, so the only record
+ * of the delivery that moved the money read as though nothing had happened.
+ * A terminal outcome is therefore never rewritten at all — a replay of a
+ * settled event writes nothing, and `detail` is never nulled by a delivery that
+ * carries none.
+ *
+ * A retryable ERROR row is the one exception: it exists to say "this attempt
+ * failed", and a later attempt for the same id must be able to replace it —
+ * both duplicate guards in this file skip it for the same reason.
+ *
+ * Returns null when nothing may be written at all. */
+export function providerEventUpdate(
+  prior: { outcome: ProviderEventOutcome; detail: string | null } | null,
+  next: { outcome: ProviderEventOutcome; detail?: string | null }
+): { outcome: ProviderEventOutcome; detail: string | null } | null {
+  if (prior && prior.outcome !== ProviderEventOutcome.ERROR) return null;
+  // The new delivery's own reason wins: a retry that fails again replaces the
+  // message, and a retry that succeeds (an operator corrected the amount, say)
+  // must not leave the old rejection text next to `applied`. The one thing that
+  // must never happen — an absent detail erasing the only explanation of an
+  // ERROR row — can only arise for another ERROR write, which keeps what it has.
+  return {
+    outcome: next.outcome,
+    detail: next.detail ?? (next.outcome === ProviderEventOutcome.ERROR ? prior?.detail ?? null : null),
+  };
+}
+
+/** Write a delivery to the register (throws — callers decide what a failed
+ *  write may cost; `recordEvent` below swallows it, the webhook route does not).
+ *
+ * The single writer for every route and both settle functions, so the
+ * precedence rule above cannot be applied inconsistently. */
+export async function recordProviderEvent(params: {
   provider: "stripe" | "dev";
   eventId: string;
   eventType: string;
   paymentId: string | null;
   outcome: ProviderEventOutcome;
-  detail?: string;
+  detail?: string | null;
   payload?: unknown;
 }): Promise<void> {
+  // Attribution is copied, not joined (R08-7): paymentId is ON DELETE SET NULL,
+  // so once a payment is deleted its register rows are the only surviving record
+  // of which element and startup the delivery concerned. Resolved here so that
+  // no call site can forget it.
+  const attribution = params.paymentId
+    ? await prisma.payment.findUnique({
+        where: { id: params.paymentId },
+        select: { elementId: true, startupId: true },
+      })
+    : null;
+  const prior = await prisma.providerEvent.findUnique({
+    where: { providerEventId: params.eventId },
+    select: { outcome: true, detail: true },
+  });
+  const patch = providerEventUpdate(prior, { outcome: params.outcome, detail: params.detail ?? null });
+  // A terminal row is never rewritten, so a replay is not a write at all — the
+  // register is append-only per delivery (R08-1). Returning here also keeps the
+  // upsert's `update` provably non-empty.
+  if (!patch) return;
+  await prisma.providerEvent.upsert({
+    where: { providerEventId: params.eventId },
+    create: {
+      provider: params.provider === "stripe" ? "STRIPE" : "DEV",
+      providerEventId: params.eventId,
+      eventType: params.eventType,
+      paymentId: params.paymentId,
+      elementId: attribution?.elementId ?? null,
+      startupId: attribution?.startupId ?? null,
+      outcome: params.outcome,
+      detail: params.detail ?? null,
+      payload: (params.payload ?? {}) as object,
+    },
+    update: {
+      ...patch,
+      // A row that may be rewritten is only ever a failed attempt, and the
+      // delivery that replaces it is brought up to date on the fields the
+      // failure could not fill in: an ERROR row for a payment that did not exist
+      // yet carries no paymentId, so promoting it to APPLIED would otherwise
+      // leave the money-moving line unable to say which payment moved (R08-7).
+      // Spreading conditionally means nothing is written back to null.
+      ...(params.paymentId
+        ? {
+            paymentId: params.paymentId,
+            elementId: attribution?.elementId ?? null,
+            startupId: attribution?.startupId ?? null,
+          }
+        : {}),
+      ...(params.payload !== undefined ? { payload: params.payload as object } : {}),
+    },
+  });
+}
+
+/** Record a provider delivery outcome (best-effort, never throws). */
+async function recordEvent(params: Parameters<typeof recordProviderEvent>[0]): Promise<void> {
   try {
-    await prisma.providerEvent.upsert({
-      where: { providerEventId: params.eventId },
-      create: {
-        provider: params.provider === "stripe" ? "STRIPE" : "DEV",
-        providerEventId: params.eventId,
-        eventType: params.eventType,
-        paymentId: params.paymentId,
-        outcome: params.outcome,
-        detail: params.detail ?? null,
-        payload: (params.payload ?? {}) as object,
-      },
-      update: { outcome: params.outcome, detail: params.detail ?? null },
-    });
+    await recordProviderEvent(params);
   } catch (e) {
     console.error("provider event record failed (non-blocking):", e);
   }
@@ -349,6 +426,10 @@ export async function reversePayment(paymentId: string, event: ReversalEvent): P
       outcome: "REFUNDED",
       detail: `reversed-before-paid:${payment.status.toLowerCase()}:${event.reversal}`,
     });
+    // No buyer mail: nothing was ever applied, so there is no position of
+    // theirs to explain, and the provider's own refund notice is the complete
+    // record for a payment we never acted on (R08-2 covers the reversal of a
+    // stake that did exist).
     logSettle("reverse-before-paid", { paymentId, eventId: event.eventId, priorStatus: payment.status });
     return { outcome: "not-paid", paymentId };
   }
@@ -384,10 +465,37 @@ export async function reversePayment(paymentId: string, event: ReversalEvent): P
             tx
           );
 
-          // Deliberately no buyer email. The provider's own reversal notice is
-          // authoritative, and RECEIPT_EMAIL would render a "receipt" for money
-          // going back — the wrong document entirely. Operators get the audit
-          // row; the public feed gets the ActivityLog row from the unwind.
+          // The buyer is told (R08-2). A reversal used to be silent on the
+          // argument that the provider's own notice is authoritative — true,
+          // and not enough: that notice says nothing about the listing, and the
+          // local record is the one the buyer can point at. REFUND_EMAIL, never
+          // RECEIPT_EMAIL: a receipt for money going back would document a
+          // purchase that no longer stands.
+          const element = await tx.element.findUniqueOrThrow({ where: { id: locked.elementId } });
+          const payer = await tx.startup.findUniqueOrThrow({ where: { id: locked.startupId } });
+          const refundTo = locked.email ?? payer.email ?? null;
+          if (refundTo) {
+            await enqueueOutbox(tx, {
+              type: "REFUND_EMAIL",
+              dedupeKey: `refund-${paymentId}`,
+              payload: {
+                to: refundTo,
+                unsubToken: payer.unsubToken,
+                elementSymbol: element.symbol,
+                elementName: element.name,
+                amountUsd: locked.amountUsd,
+                domain: payer.domain,
+                // Captured at reversal time: providerRef is what the buyer
+                // quotes to their bank, and it is the session reference for
+                // this charge.
+                providerRef: locked.providerRef,
+              },
+            });
+          }
+
+          // Deliberately no RECEIPT_EMAIL and no OUTBID_EMAIL here: nobody won
+          // anything, and the stake coming off the board is the ActivityLog row
+          // from the unwind. Operators get the audit row above.
           return reversed;
         },
         MONEY_TX
@@ -406,6 +514,18 @@ export async function reversePayment(paymentId: string, event: ReversalEvent): P
       element: result.elementSymbol,
       remainingUsd: result.remainingUsd,
     });
+    // Same bounded inline delivery as a settle: the refund notice is durable
+    // either way (the outbox row is committed), this just gets it out now.
+    try {
+      const drained = await drainDueWithin(SETTLE_MAIL_DRAIN_BUDGET_MS, 10, [
+        "REFUND_EMAIL",
+        "RECEIPT_EMAIL",
+        "OUTBID_EMAIL",
+      ]);
+      logSettle("post-reversal-drain", { paymentId, eventId: event.eventId, ...drained });
+    } catch (e) {
+      console.error("post-reversal mail drain failed (non-blocking):", e);
+    }
     return { outcome: "reversed", paymentId, remainingUsd: result.remainingUsd, elementSymbol: result.elementSymbol };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);

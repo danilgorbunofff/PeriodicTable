@@ -9,7 +9,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
-import { sendOutbidEmail, sendReceiptEmail, sendReportEmail, sendWaitlistEmail } from "./email";
+import { sendOutbidEmail, sendReceiptEmail, sendRefundEmail, sendReportEmail, sendWaitlistEmail } from "./email";
 import { persistPreview } from "./screenshots";
 
 export const OUTBOX_MAX_ATTEMPTS = 5;
@@ -17,6 +17,7 @@ export const OUTBOX_MAX_ATTEMPTS = 5;
 export type OutboxType =
   | "RECEIPT_EMAIL"
   | "OUTBID_EMAIL"
+  | "REFUND_EMAIL"
   | "REPORT_EMAIL"
   | "WAITLIST_EMAIL"
   | "PREVIEW_GENERATE"
@@ -30,6 +31,19 @@ export type ReceiptPayload = {
   amountUsd: number;
   rank: number;
   domain: string;
+};
+
+/** R08-2: the buyer's notice that their payment was reversed. Separate type
+ * from RECEIPT_EMAIL because it is a different document, not a different
+ * wording of the same one — a refund is not a receipt. */
+export type RefundPayload = {
+  to: string;
+  unsubToken: string;
+  elementSymbol: string;
+  elementName: string;
+  amountUsd: number;
+  domain: string;
+  providerRef: string | null;
 };
 
 export type OutbidPayload = {
@@ -94,6 +108,9 @@ async function handleOne(type: string, payload: Record<string, unknown>): Promis
       return;
     case "OUTBID_EMAIL":
       await sendOutbidEmail(payload as unknown as OutbidPayload);
+      return;
+    case "REFUND_EMAIL":
+      await sendRefundEmail(payload as unknown as RefundPayload);
       return;
     case "REPORT_EMAIL": {
       const p = payload as unknown as ReportEmailPayload;

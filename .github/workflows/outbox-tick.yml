@@ -1,9 +1,10 @@
 name: outbox tick
 
-# Free scheduler for the background workers (receipt/outbid email retry and
-# preview generation) — Vercel's free plan only allows a cron once a day.
-# GitHub cron is best-effort and may fire a few minutes late; vercel.json adds
-# a once-a-day backstop so a missed tick can never strand mail for a full day.
+# Free scheduler for the background workers (receipt/outbid email retry, preview
+# generation, the abandoned-checkout sweep) and the alerting channel for money
+# that contradicts itself (doc 08 R08-3): Vercel's free plan allows two crons,
+# both daily and already taken by the mail/preview backstops, so a third cron
+# cannot carry reconcile — this ten-minute tick is the only thing that polls it.
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -34,6 +35,7 @@ jobs:
             echo "::error::CRON_SECRET repository secret is not set (Settings → Secrets and variables → Actions) — every worker call would 401."
             exit 1
           fi
+
       - name: Verify the queue can actually move (manual only)
         if: inputs.backfill
         run: |
@@ -44,12 +46,14 @@ jobs:
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
             -d '{"backfill":true,"limit":10}'
+
       - name: Drain email outbox
         run: |
           curl -fsS -X POST "$BASE_URL/api/jobs/outbox" \
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "Content-Type: application/json" \
             -d '{"limit":25}'
+
       - name: Generate due previews
         run: |
           curl -fsS -X POST "$BASE_URL/api/jobs/screenshot" \
@@ -57,24 +61,47 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"limit":10}'
 
-      # --- Diagnostics, deliberately LAST ------------------------------------
-      # These fail the run on a non-2xx, which is the point: until now NOTHING
-      # called either route -- no workflow, no vercel.json cron, no script, only
-      # tests and docs. GET /api/jobs/reconcile is the sole reader for a PAID
-      # payment whose stored provider figure diverges from the provider's
-      # (real money, never merely a warning), and GET /api/jobs/config answers
-      # 503 when a REQUIRED_PROD_ENV var is missing. Both deliberately answer
-      # 200 for their advisory findings, so red here always means something real.
+      - name: Abandon stale checkouts (never reached a provider)
+        run: |
+          # Closes the PENDING rows a buyer walked away from: older than
+          # CHECKOUT_ABANDON_TTL_MS with no provider checkout URL and no provider
+          # reference. Cannot hide the money check below — a payment that did
+          # reach a provider always carries one of the two, so it is never
+          # eligible here.
+          curl -fsS -X POST "$BASE_URL/api/jobs/abandoned-checkouts" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{"limit":50}'
+
+      # --- Diagnostics: money FIRST, config second --------------------------
+      # Reconcile runs ahead of the config check so a missing TURNSTILE_SECRET
+      # cannot bury a money alarm in the log. Both carry `if: ${{ !cancelled() }}`:
+      # by default a failed step skips every step after it, so without the guard
+      # one 503 would keep the other from ever running — and during an incident
+      # both must still report.
       #
-      # `if: ${{ !cancelled() }}` on both is load-bearing, not decoration: by
-      # default a failed step skips every step after it, so without the guard a
-      # non-200 from the first would keep the second from ever running -- a
-      # missing secret would leave the money check dark. They must also still
-      # report during an incident, which is precisely when a failed earlier step
-      # would otherwise suppress them.
-      #
-      # Expect this red until TURNSTILE_SECRET is set: it is a `required`
-      # finding, so 503 is the correct answer, not a regression in this workflow.
+      # GET /api/jobs/reconcile is the sole reader for money that contradicts
+      # itself: a PAID row whose stored provider figure diverges, a captured
+      # charge that never applied, or a reversal whose ERROR row landed after
+      # payment. Those answer 503 AND are counted in the body, so this step
+      # checks both. Its advisory findings (`unverified`, `stale`) answer 200 by
+      # design — for the operator to read, not to page on.
+      # GET /api/jobs/config answers 503 when a REQUIRED_PROD_ENV var is missing:
+      # expect that step red until TURNSTILE_SECRET is set, which is correct.
+      - name: Reconcile — money that contradicts itself
+        if: ${{ !cancelled() }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/reconcile.json" -w '%{http_code}' \
+            "$BASE_URL/api/jobs/reconcile" -H "Authorization: Bearer $CRON_SECRET")
+          cat "$RUNNER_TEMP/reconcile.json"; echo
+          # jq ships with ubuntu-latest; `|| echo ?` keeps a missing or
+          # unparseable body from aborting before the findings are named.
+          div=$(jq -r '.divergent.count // 0' "$RUNNER_TEMP/reconcile.json" 2>/dev/null || echo '?')
+          un=$(jq -r '.unapplied.count // 0' "$RUNNER_TEMP/reconcile.json" 2>/dev/null || echo '?')
+          if [ "$code" != "200" ] || [ "$div" != "0" ] || [ "$un" != "0" ]; then
+            echo "::error::/api/jobs/reconcile HTTP $code — divergent=${div:-?} unapplied=${un:-?}. Real money: read the body above, settle a captured-but-unapplied charge by hand and correct any divergent PAID row (doc/review/08-settlement-and-ledger-integrity.md)."
+            exit 1
+          fi
       - name: Config gaps — a required prod secret is missing
         if: ${{ !cancelled() }}
         run: |
@@ -83,15 +110,5 @@ jobs:
           cat "$RUNNER_TEMP/config.json"; echo
           if [ "$code" != "200" ]; then
             echo "::error::/api/jobs/config answered $code — read the findings above: a 'required' entry is missing."
-            exit 1
-          fi
-      - name: Reconcile — money that contradicts itself
-        if: ${{ !cancelled() }}
-        run: |
-          code=$(curl -sS -o "$RUNNER_TEMP/reconcile.json" -w '%{http_code}' \
-            "$BASE_URL/api/jobs/reconcile" -H "Authorization: Bearer $CRON_SECRET")
-          cat "$RUNNER_TEMP/reconcile.json"; echo
-          if [ "$code" != "200" ]; then
-            echo "::error::/api/jobs/reconcile answered $code — a PAID row's stored provider figure diverges. Read the body above."
             exit 1
           fi

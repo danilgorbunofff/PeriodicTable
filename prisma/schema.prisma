@@ -327,12 +327,22 @@ model ProviderEvent {
   eventType       String
   paymentId       String?
   payment         Payment?             @relation(fields: [paymentId], references: [id])
+  // R08-7: attribution copied at write time, never joined. paymentId is
+  // ON DELETE SET NULL, so deleting a payment used to leave a register row that
+  // could no longer say which element or startup the delivery concerned — the
+  // delivery is the evidence, and the payment is the thing that gets deleted.
+  // Plain columns, no relation: elements and startups are edited and cleared by
+  // demo scripts, and a historical record must not be restricted by them.
+  elementId       Int?
+  startupId       String?
   outcome         ProviderEventOutcome @default(RECEIVED)
   detail          String?
   payload         Json?
   createdAt       DateTime             @default(now())
 
   @@index([paymentId, createdAt])
+  // R08-3: the operator report scans for ERROR rows older than a deadline.
+  @@index([outcome, createdAt])
 }
 
 model ActivityLog {
