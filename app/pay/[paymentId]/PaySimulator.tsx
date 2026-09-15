@@ -5,7 +5,13 @@ import { useState } from "react";
 
 /** The dev-only simulator UI. Kept as a client component because it drives
  *  /api/dev/pay and routes on the result; the page that renders it is the
- *  server gate that 404s whenever Stripe is configured (R05-8). */
+ *  server gate that 404s whenever Stripe is configured, whenever the
+ *  configuration is half-set, or on any production deployment (R05-8, R07-1).
+ *
+ *  The copy states what this page *is* rather than why it is here (R07-7): the
+ *  previous sentence promised "no Stripe keys configured", which was false
+ *  whenever exactly one key was set, and the server gate cannot see that
+ *  difference from here. */
 export function PaySimulator({ paymentId }: { paymentId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -55,7 +61,7 @@ export function PaySimulator({ paymentId }: { paymentId: string }) {
         <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, color: "#666" }}>DEV SIMULATOR</div>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: "10px 0 6px" }}>Complete your stake</h1>
         <p style={{ color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-          No Stripe keys configured — this simulator stands in for the real checkout. On Pay, the stake applies
+          A local stand-in for the real checkout: no payment is taken and no money moves. On Pay, the stake applies
           instantly.
         </p>
         <div style={{ background: "#F4F4F0", borderRadius: 16, padding: 16, margin: "18px 0" }}>

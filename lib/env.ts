@@ -8,9 +8,11 @@
  * - Development-only fallbacks (localhost URLs, dev salts, simulator paths)
  *   are permitted outside production only.
  * - In production every value listed in REQUIRED_PROD_ENV must be present and
- *   valid; requireProdEnv() throws otherwise. It has no call site yet, so
- *   nothing enforces that today: getProdConfigReport() — served by
- *   /api/jobs/config — is where the gaps are currently visible.
+ *   valid; requireProdEnv() throws otherwise. It is the *strict* form and still
+ *   has no call site: refusing to boot a deployment is an operator decision, so
+ *   the startup path reports instead (reportProdEnvAtStartup(), called from
+ *   lib/prisma.ts), and getProdConfigReport() — served by /api/jobs/config — is
+ *   the authenticated surface that answers with the same list. See R07-3.
  * - During `next build` (NEXT_PHASE === "phase-production-build") validation
  *   is deferred so static prerendering without prod secrets still works;
  *   requireProdEnv() is the check that must be invoked at runtime.
@@ -40,6 +42,7 @@ export const REQUIRED_PROD_ENV = [
   "DATABASE_URL",
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
+  "ADMIN_TOKEN",
   "NEXT_PUBLIC_APP_URL",
   "TURNSTILE_SECRET",
   "CLICK_SALT",
@@ -72,6 +75,11 @@ const PROD_ENV_REASONS: Record<RequiredProdEnvKey, string> = {
   DATABASE_URL: "DATABASE_URL is required in production",
   STRIPE_SECRET_KEY: "STRIPE_SECRET_KEY is required in production",
   STRIPE_WEBHOOK_SECRET: "STRIPE_WEBHOOK_SECRET is required in production",
+  // R07-3: promoted from an advisory. The report that lists missing variables is
+  // itself behind adminAuth(), so without this the deployment could be locked
+  // out of the one endpoint that explains what else is missing — and the
+  // operator's only other symptom is a 403 on every moderation action.
+  ADMIN_TOKEN: "ADMIN_TOKEN is required in production (adminAuth() fails closed: moderation triage and outbox retry must stay reachable)",
   NEXT_PUBLIC_APP_URL: "NEXT_PUBLIC_APP_URL must be an https URL in production (no localhost)",
   TURNSTILE_SECRET: "TURNSTILE_SECRET is required in production (bot checks must not bypass)",
   CLICK_SALT: "CLICK_SALT must be set to a private random value in production",
@@ -100,6 +108,51 @@ export type ProdConfigSeverity = "required" | "operator" | "degraded";
 export type ProdConfigFinding = { key: string; severity: ProdConfigSeverity; detail: string };
 
 /**
+ * The single definition of `ok`: "would requireProdEnv() refuse to serve?".
+ * Extracted so every surface that adds findings (the credential probe below,
+ * R07-4) answers that question the same way instead of re-deriving it.
+ */
+export function configFindingsOk(findings: ProdConfigFinding[]): boolean {
+  return !findings.some((f) => f.severity === "required");
+}
+
+/**
+ * The result of asking the provider whether a credential works, as opposed to
+ * whether the variable is set (lib/stripe.ts probeStripeKey()). `unknown` is
+ * deliberately separate from `invalid`: a probe that could not reach Stripe says
+ * nothing about the key.
+ */
+export type CredentialHealth =
+  | { status: "absent" }
+  | { status: "valid" }
+  | { status: "invalid"; detail: string }
+  | { status: "unknown"; detail: string };
+
+/**
+ * Turns a provider credential probe into a config finding (R07-4).
+ *
+ * A key the provider *rejects* is a `required` finding, and the only one here
+ * that is derived from a live check rather than from the environment's shape:
+ * presence passes every other test while every checkout answers 502, so the
+ * deployment is unservable in the way that matters most and the pinger must fail
+ * on it. `absent` is already reported by REQUIRED_PROD_ENV — never doubled — and
+ * an unreachable provider is a `degraded` advisory: a network blip must not
+ * raise an alert.
+ */
+export function credentialFinding(key: string, health: CredentialHealth): ProdConfigFinding | null {
+  if (health.status === "absent") return null;
+  if (health.status === "valid") return null;
+  if (health.status === "invalid") {
+    return {
+      key,
+      severity: "required",
+      detail: `${key} is present but the provider rejects it (${health.detail}): every checkout would fail`,
+    };
+  }
+  return { key, severity: "degraded", detail: `could not verify ${key}: ${health.detail}` };
+}
+
+/**
  * Config whose absence does not stop the site, so nothing fails and the
  * degradation is only visible if something reports it. Each entry names the
  * concrete consequence rather than only the missing variable.
@@ -110,13 +163,6 @@ const PROD_ENV_ADVISORIES: {
   satisfied: (env: NodeJS.ProcessEnv) => boolean;
   detail: string;
 }[] = [
-  {
-    key: "ADMIN_TOKEN",
-    severity: "operator",
-    satisfied: (env) => !!env.ADMIN_TOKEN,
-    detail:
-      "ADMIN_TOKEN is unset: adminAuth() fails closed, so moderation triage and outbox retry are unreachable in production",
-  },
   {
     key: "UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN",
     severity: "degraded",
@@ -153,7 +199,32 @@ export function getProdConfigReport(
       findings.push({ key: advisory.key, severity: advisory.severity, detail: advisory.detail });
     }
   }
-  return { ok: !findings.some((f) => f.severity === "required"), findings };
+  return { ok: configFindingsOk(findings), findings };
+}
+
+/**
+ * Startup validation (R07-3). Returns the missing-required descriptions and logs
+ * them once per cold start at `error` level, so an incomplete production
+ * environment appears in the deployment logs without anyone asking for it.
+ *
+ * This is the report-only half on purpose. A throw at import time takes the
+ * whole deployment down — including /api/jobs/config, the surface that explains
+ * why — so refusing to boot stays an explicit operator decision
+ * (requireProdEnv(), below), and until that switch is thrown the gap is loud
+ * rather than fatal. Callers must not otherwise act on the result: the app keeps
+ * serving, exactly as it did before, and money paths stay closed by
+ * paymentsLiveServer() in the meantime.
+ */
+export function reportProdEnvAtStartup(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (!isProduction() || isBuildPhase()) return [];
+  const missing = getMissingProdEnv(env);
+  if (missing.length > 0) {
+    console.error(
+      `startup: production configuration is incomplete (${missing.length} required) — ` +
+        `GET /api/jobs/config reports the same list to an authenticated caller:\n- ${missing.join("\n- ")}`
+    );
+  }
+  return missing;
 }
 
 /**

@@ -1,19 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaymentProvider } from "@prisma/client";
 import { settlePayment } from "@/lib/settle";
-import { getProviderMode } from "@/lib/stripe";
+import { devSimulatorEnabled } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Dev-only payment simulator (Phase 2: same settle service as production).
- * Disabled whenever Stripe is fully configured, and refuses non-DEV payments,
- * so it can never grant stakes for free in production.
+ *
+ * This route invents a paid `Payment`, so it is the most dangerous endpoint in
+ * the app and its gate is the deployment, not the provider mode: the mode is
+ * derived from credential presence alone, so a production box whose
+ * STRIPE_WEBHOOK_SECRET was missing read as 'dev' and this route granted stakes
+ * for free to anyone holding a paymentId (R07-1). A paymentId is not a secret —
+ * it is in the /pay/<id> URL — so that gate was the only thing in the way.
+ *
+ * Gates, in order, cheapest and least dependent first:
+ *   1. devSimulatorEnabled() — false in production and false whenever Stripe
+ *      credentials are configured, so production can never mint a stake here.
+ *      Checked before the body is parsed and before the database is touched,
+ *      so a refused request costs nothing and reveals nothing.
+ *   2. paymentId is required.
+ *   3. the row's provider must be DEV — a legacy WHOP row that predates the
+ *      Stripe migration cannot be settled through a simulator (R07-6).
  */
 export async function POST(req: NextRequest) {
-  if (getProviderMode() !== "dev") {
-    return NextResponse.json({ error: "Disabled when Stripe is enabled." }, { status: 403 });
+  if (!devSimulatorEnabled()) {
+    return NextResponse.json({ error: "Simulator disabled on this deployment." }, { status: 403 });
   }
   const { paymentId, outcome } = (await req.json()) as { paymentId?: string; outcome?: string };
   if (!paymentId) return NextResponse.json({ error: "paymentId required" }, { status: 400 });

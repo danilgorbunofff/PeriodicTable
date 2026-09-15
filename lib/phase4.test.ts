@@ -198,7 +198,11 @@ describe("createStripeCheckoutSession", () => {
   it("reports the provider's status and message when it refuses the session", async () => {
     liveKeys();
     const calls = stubProvider(401, { error: { status: 401, message: "Your API Key is invalid." } });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // R07-4: a refusal is logged at `error`, not `warn` — it is every buyer's
+    // checkout failing, not a caveat — and the line is throttled to one a minute
+    // with a suppressed count (lib/stripe.ts logCheckoutRejection). This file
+    // triggers exactly one refusal, so the line is unsuppressed here.
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
 
     expect(await createStripeCheckoutSession(params)).toBeNull();
     const logged = warn.mock.calls.flat().join(" ");

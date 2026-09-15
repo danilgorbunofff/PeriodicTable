@@ -13,6 +13,8 @@ import {
   stripeEnabled,
   getProviderMode,
   stripePartiallyConfigured,
+  probeStripeKey,
+  logCheckoutRejection,
   paymentIdFromStripePayload,
   stripePayloadIsPaid,
   stripePayloadIsFailed,
@@ -54,6 +56,118 @@ describe("provider mode", () => {
     // The string doubles as the Prisma PaymentProvider value.
     expect(getProviderMode()).toBe("stripe");
     expect(stripePartiallyConfigured()).toBe(false);
+  });
+
+  it("mode is not permission: production with half a pair reads 'dev' (R07-1)", async () => {
+    // The whole finding in three lines. getProviderMode() cannot tell a
+    // production box from a laptop, so the gate that grants value must not be
+    // built on it — which is why devSimulatorEnabled() lives in lib/flags.ts.
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "");
+    expect(getProviderMode()).toBe("dev");
+    const { devSimulatorEnabled } = await import("./flags");
+    expect(devSimulatorEnabled()).toBe(false); // VITEST makes this a test process, not a development one
+    const { paymentsLiveServer } = await import("./flags");
+    expect(paymentsLiveServer()).toBe(false);
+  });
+});
+
+describe("probeStripeKey (R07-4)", () => {
+  // Distinct keys per case: the probe caches by key for a minute, and a shared
+  // literal would let one test's answer stand in for the next one's.
+  const calls: { url: string; init: RequestInit }[] = [];
+  const stub = (status: number, body = "") =>
+    vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(body, { status });
+    }) as unknown as typeof fetch;
+
+  afterEach(() => {
+    calls.length = 0;
+    vi.useRealTimers();
+  });
+
+  it("answers 'absent' with no key anywhere, without calling out", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    const impl = stub(200);
+    expect(await probeStripeKey({ fetchImpl: impl })).toEqual({ status: "absent" });
+    expect(impl).not.toHaveBeenCalled();
+  });
+
+  it("asks the cheapest authenticated endpoint, once, with the key in the header", async () => {
+    const health = await probeStripeKey({ key: "sk_test_probe_shape", fetchImpl: stub(200, "{}") });
+    expect(health).toEqual({ status: "valid" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://api.stripe.com/v1/balance");
+    expect(calls[0].init.method ?? "GET").toBe("GET");
+    expect(String((calls[0].init.headers as Record<string, string>).Authorization)).toContain("sk_test_probe_shape");
+    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("a refused key is 'invalid', and the detail carries no credential", async () => {
+    const body = '{"error":{"message":"Invalid API Key provided: sk_test_refused_key_9 and whsec_leaked_7"}}';
+    const health = await probeStripeKey({ key: "sk_test_probe_401", fetchImpl: stub(401, body) });
+    expect(health.status).toBe("invalid");
+    if (health.status !== "invalid") throw new Error("unreachable");
+    expect(health.detail).toContain("HTTP 401");
+    expect(health.detail).not.toContain("key_9");
+    expect(health.detail).not.toContain("leaked_7");
+    // 403 is a restricted key: it cannot read the balance, so it cannot be
+    // trusted to create a session either.
+    expect((await probeStripeKey({ key: "sk_test_probe_403", fetchImpl: stub(403, "{}") })).status).toBe("invalid");
+  });
+
+  it("an unreachable or broken provider is 'unknown', never 'invalid'", async () => {
+    // A network blip must not be reported as a bad key: the operator would go
+    // looking for a credential problem that does not exist.
+    expect((await probeStripeKey({ key: "sk_test_probe_500", fetchImpl: stub(500, "oops") })).status).toBe("unknown");
+    const boom = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    const down = await probeStripeKey({ key: "sk_test_probe_down", fetchImpl: boom });
+    expect(down.status).toBe("unknown");
+    if (down.status !== "unknown") throw new Error("unreachable");
+    expect(down.detail).toContain("could not be reached");
+  });
+
+  it("caches the answer for a minute, per key", async () => {
+    const t0 = 1_700_000_000_000;
+    const impl = stub(200, "{}");
+    const key = "sk_test_probe_cache";
+    await probeStripeKey({ key, fetchImpl: impl, now: t0 });
+    await probeStripeKey({ key, fetchImpl: impl, now: t0 + 59_000 });
+    expect(impl).toHaveBeenCalledTimes(1);
+    // Past the window it asks again — a key can be revoked between two pings.
+    await probeStripeKey({ key, fetchImpl: impl, now: t0 + 61_000 });
+    expect(impl).toHaveBeenCalledTimes(2);
+    // A different key is a different question and never reuses the answer.
+    await probeStripeKey({ key: "sk_test_probe_cache_2", fetchImpl: impl, now: t0 + 61_000 });
+    expect(impl).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("logCheckoutRejection (R07-4)", () => {
+  it("logs once a minute and counts what it stood in for", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
+      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
+      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date("2025-01-01T00:01:01Z"));
+      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
+      expect(spy).toHaveBeenCalledTimes(2);
+      // The suppressed count is the difference between "one buyer had a bad
+      // time" and "every buyer since the last line had a bad time".
+      expect(spy.mock.calls[1][0]).toContain("+2 more rejected checkouts");
+      expect(spy.mock.calls[1][0]).toContain("bad key");
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
 

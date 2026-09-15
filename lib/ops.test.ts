@@ -1,6 +1,6 @@
 /* Phase 6 ops tests — pure (no DB): trusted IP, URL validation, rate-store
    behavior, job/admin auth branches, visibility truth tables. */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { clientIp } from "./ip";
 import { normalizeUrl, isPublicHost, domainFromUrl } from "./validate";
@@ -26,6 +26,7 @@ afterEach(() => {
   for (const k of Object.keys(saved)) set(k, saved[k]);
   for (const k of Object.keys(saved)) delete saved[k];
   setSharedRateLimitStore(null);
+  vi.unstubAllGlobals();
 });
 
 const headers = (h: Record<string, string>) => new Headers(h);
@@ -130,7 +131,12 @@ describe("config report route", () => {
     set("CRON_SECRET", "s3cr3t");
     // Outside production jobAuth permits the local rehearsal shape.
     const local = await call();
-    const body = (await local.json()) as { ok: boolean; env: string; findings: { key: string; severity: string; detail: string }[] };
+    const body = (await local.json()) as {
+      ok: boolean;
+      env: string;
+      stripeKey: string;
+      findings: { key: string; severity: string; detail: string }[];
+    };
     expect(body.env).toBe("test");
     // The status code — not the `ok` field — is the only thing the external
     // pinger can read (the free cron-job.org tier fails a job on non-2xx and
@@ -147,11 +153,21 @@ describe("config report route", () => {
     }
     // Findings describe configuration shape, never the configured values.
     expect(JSON.stringify(body.findings)).not.toContain("s3cr3t");
+    // R07-4: the live key check is a production-only probe — a rehearsal must
+    // not reach out to Stripe, and must say so rather than pretending it passed.
+    expect(body.stripeKey).toBe("not-checked");
 
     // In production the report is not public.
     set("VITEST", undefined);
     set("NODE_ENV", "production");
     set("VERCEL_ENV", "production");
+    set("STRIPE_SECRET_KEY", undefined);
+    // Prove the probe is the only network call this route can make: with no key
+    // there is nothing to probe, and a regression that probes anyway fails here
+    // instead of quietly spending a real API call from a test run.
+    vi.stubGlobal("fetch", () => {
+      throw new Error("the config route must not call out during tests");
+    });
     expect((await call()).status).toBe(401);
     expect((await call({ authorization: "Bearer wrong" })).status).toBe(401);
     const allowed = await call({ authorization: "Bearer s3cr3t" });
@@ -159,9 +175,10 @@ describe("config report route", () => {
     // never a blanket 200 either: the report is non-fatal in that it always
     // *answers* with its findings, which has never meant "answers 200" — the
     // status code reports health so the pinger can see it.
-    const prod = (await allowed.json()) as { ok: boolean };
+    const prod = (await allowed.json()) as { ok: boolean; stripeKey: string };
     expect(typeof prod.ok).toBe("boolean");
     expect(allowed.status).toBe(prod.ok ? 200 : 503);
+    expect(prod.stripeKey).toBe("absent");
   });
 
   it("answers 200 with nothing required missing, and 503 the moment one is", async () => {
@@ -173,14 +190,26 @@ describe("config report route", () => {
     const { GET } = await import("../app/api/jobs/config/route");
     const call = () => GET(new NextRequest("http://localhost/api/jobs/config") as never);
 
+    // Pin the environment rather than inheriting it: all required variables are
+    // about to be set, and in a production process that would let the S4 probe
+    // issue a real call with the stub key "x".
+    set("VERCEL_ENV", undefined);
+    set("VITEST", "true");
+    set("NODE_ENV", "test");
+
     for (const k of REQUIRED_PROD_ENV) set(k, "x");
     set("NEXT_PUBLIC_APP_URL", "https://periodictable.lol");
     set("CLICK_SALT", "a-private-random-value");
 
     const healthy = await call();
-    const healthyBody = (await healthy.json()) as { ok: boolean; findings: { key: string; severity: string }[] };
+    const healthyBody = (await healthy.json()) as {
+      ok: boolean;
+      stripeKey: string;
+      findings: { key: string; severity: string }[];
+    };
     expect(healthy.status).toBe(200);
     expect(healthyBody.ok).toBe(true);
+    expect(healthyBody.stripeKey).toBe("not-checked");
     // Advisories may or may not be present depending on the host environment;
     // what must be absent is anything that blocks serving.
     expect(healthyBody.findings.filter((f) => f.severity === "required")).toEqual([]);

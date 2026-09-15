@@ -8,7 +8,7 @@ import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
-import { paymentsLiveServer } from "@/lib/flags";
+import { devSimulatorEnabled, paymentsLiveServer } from "@/lib/flags";
 import { findOrCreateCheckoutStartup, fingerprintCheckout } from "@/lib/startups";
 import {
   getActiveReservation,
@@ -55,7 +55,11 @@ async function resumeCheckoutUrl(
   origin: string
 ): Promise<string | null> {
   if (payment.providerCheckoutUrl) return payment.providerCheckoutUrl;
-  if (getProviderMode() === "dev") {
+  // Only a deployment where the simulator is permitted may hand out a /pay/ URL
+  // (R07-2): an environment gate, not the provider mode, because mode is derived
+  // from credential presence and a preview sharing the production database
+  // would otherwise mint and settle real rows.
+  if (devSimulatorEnabled()) {
     const url = `/pay/${payment.id}`;
     await prisma.payment.update({ where: { id: payment.id }, data: { providerCheckoutUrl: url } });
     return url;
@@ -141,12 +145,31 @@ async function idempotentReplay(
   });
 }
 
+// Set once a half-configured Stripe pair has been reported (R07-5). Module scope
+// rather than per request: the environment cannot change while this instance
+// lives, so a second line would only repeat the first.
+let partialConfigLogged = false;
+
 export async function POST(req: NextRequest) {
+  // R07-5: this warning used to sit *below* the paused guard, so the environment
+  // that most needed it — production with a half-set Stripe pair, where payments
+  // are paused — never reached it. It is logged before the guard now, because a
+  // partial pair is a misconfiguration wherever it happens: in production it is
+  // the reason buyers get a waitlist, locally it is why checkout fell back to
+  // the simulator. Once per process, not once per request: the state cannot
+  // change while the function instance lives, and a per-request line is what the
+  // log becomes when someone points a load test at a paused shop.
+  if (!partialConfigLogged && stripePartiallyConfigured()) {
+    partialConfigLogged = true;
+    console.error(
+      "checkout: partial Stripe configuration (exactly one of STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET is set) — " +
+        (paymentsLiveServer()
+          ? "falling back to the dev simulator (permitted outside production only)"
+          : "payments are paused, and the simulator is unavailable on this deployment")
+    );
+  }
   if (!paymentsLiveServer()) {
     return NextResponse.json({ error: "Payments are paused — join the waitlist.", waitlist: true }, { status: 403 });
-  }
-  if (stripePartiallyConfigured()) {
-    console.warn("checkout: partial Stripe configuration (key without secret or vice versa) — running in dev provider mode");
   }
   const ip = clientIp(req.headers);
   let body: Body;

@@ -1,5 +1,7 @@
 /* Phase 0 containment tests (no DB): fail-closed payments + prod env validation. */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 type Env = Record<string, string | undefined>;
 const env = process.env as unknown as Env;
@@ -86,10 +88,20 @@ describe("payments fail closed in production", () => {
     set("VITEST", undefined);
     set("NODE_ENV", "development");
     set("PAYMENTS_LIVE", undefined);
-    const { paymentsLiveServer } = await import("./flags");
+    set("STRIPE_SECRET_KEY", undefined);
+    set("STRIPE_WEBHOOK_SECRET", undefined);
+    const { paymentsLiveServer, devSimulatorEnabled } = await import("./flags");
     expect(paymentsLiveServer()).toBe(true);
+    expect(devSimulatorEnabled()).toBe(true);
     set("PAYMENTS_LIVE", "false");
     expect(paymentsLiveServer()).toBe(false);
+    expect(devSimulatorEnabled()).toBe(false); // the kill switch reaches the stand-in provider too
+    set("PAYMENTS_LIVE", undefined);
+    // R07-1/R07-2: half a configuration is an incident, not a licence to invent
+    // payments — the storefront takes the waitlist instead.
+    set("STRIPE_SECRET_KEY", "k");
+    expect(paymentsLiveServer()).toBe(false);
+    expect(devSimulatorEnabled()).toBe(false);
   });
 
   it("client requires explicit NEXT_PUBLIC_PAYMENTS_LIVE=true in production", async () => {
@@ -146,6 +158,7 @@ describe("requireProdEnv", () => {
       CRON_SECRET: "x",
       RESEND_API_KEY: "x",
       EMAIL_FROM: "hi@periodictable.lol",
+      ADMIN_TOKEN: "opaque-admin",
     });
     expect(() => requireProdEnv(good)).not.toThrow();
     set("NEXT_PHASE", "phase-production-build");
@@ -190,29 +203,138 @@ describe("getProdConfigReport", () => {
     expect(getProdConfigReport(fakeEnv(FULL))).toEqual({ ok: true, findings: [] });
   });
 
-  it("surfaces the quiet degradations without throwing", async () => {
+  it("keeps degradation advisory while a missing ADMIN_TOKEN is now required (R07-3)", async () => {
     const { getProdConfigReport, requireProdEnv } = await import("./env");
-    const noOperator: Env = { ...FULL };
-    delete noOperator.ADMIN_TOKEN;
-    delete noOperator.UPSTASH_REDIS_REST_URL;
-    delete noOperator.UPSTASH_REDIS_REST_TOKEN;
+    const degraded: Env = { ...FULL };
+    delete degraded.UPSTASH_REDIS_REST_URL;
+    delete degraded.UPSTASH_REDIS_REST_TOKEN;
 
-    expect(getProdConfigReport(fakeEnv(noOperator)).findings.map((f) => [f.key, f.severity])).toEqual([
-      ["ADMIN_TOKEN", "operator"],
+    expect(getProdConfigReport(fakeEnv(degraded)).findings.map((f) => [f.key, f.severity])).toEqual([
       ["UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN", "degraded"],
     ]);
 
-    // Non-fatal by design: an operator lockout, or rate limits degrading to
-    // per-instance memory, must not take down public browsing.
+    // Non-fatal by design: rate limits degrading to per-instance memory must not
+    // take down public browsing.
     prodEnv();
-    expect(() => requireProdEnv(fakeEnv(noOperator))).not.toThrow();
+    expect(() => requireProdEnv(fakeEnv(degraded))).not.toThrow();
 
-    // ...and they must not fail `ok` either. /api/jobs/config answers ok:false
+    // ...and it must not fail `ok` either. /api/jobs/config answers ok:false
     // as a 503 that the external pinger alerts on, so an advisory reaching `ok`
     // would page every 10 minutes for a condition that is non-fatal by
     // definition — and a monitor that cries wolf on a schedule is muted long
     // before a required variable actually goes missing. The findings above are
     // still returned in full, so the degradation stays visible.
-    expect(getProdConfigReport(fakeEnv(noOperator)).ok).toBe(true);
+    expect(getProdConfigReport(fakeEnv(degraded)).ok).toBe(true);
+
+    // R07-3: ADMIN_TOKEN moved from that advisory list to the required one. It
+    // was the single variable whose absence locks the operator out of the report
+    // that lists every other absence — adminAuth() fails closed on it — so its
+    // absence now fails `ok`, the pinger and requireProdEnv() like the rest.
+    const noAdmin: Env = { ...FULL };
+    delete noAdmin.ADMIN_TOKEN;
+    expect(getProdConfigReport(fakeEnv(noAdmin)).findings).toContainEqual({
+      key: "ADMIN_TOKEN",
+      severity: "required",
+      detail: expect.stringContaining("ADMIN_TOKEN"),
+    });
+    expect(getProdConfigReport(fakeEnv(noAdmin)).ok).toBe(false);
+    expect(() => requireProdEnv(fakeEnv(noAdmin))).toThrow(/ADMIN_TOKEN/);
+  });
+});
+
+/* R07-4: presence and validity are different questions. The probe (in
+ * lib/stripe.ts) answers the second one; this turns that answer into a finding,
+ * and the severity is the whole decision — a key Stripe refuses fails every
+ * checkout, so it must fail `ok` and the pinger with it, while a probe that
+ * could not reach Stripe must raise nothing at all. */
+describe("credentialFinding / configFindingsOk", () => {
+  it("absent and valid keys add nothing (absence is REQUIRED_PROD_ENV's report)", async () => {
+    const { credentialFinding } = await import("./env");
+    expect(credentialFinding("STRIPE_SECRET_KEY", { status: "absent" })).toBeNull();
+    expect(credentialFinding("STRIPE_SECRET_KEY", { status: "valid" })).toBeNull();
+  });
+
+  it("a refused key is 'required' — presence passes every other check while sales fail", async () => {
+    const { credentialFinding, configFindingsOk } = await import("./env");
+    const finding = credentialFinding("STRIPE_SECRET_KEY", { status: "invalid", detail: "HTTP 401" });
+    expect(finding).toMatchObject({ key: "STRIPE_SECRET_KEY", severity: "required" });
+    expect(finding?.detail).toContain("HTTP 401");
+    expect(configFindingsOk(finding ? [finding] : [])).toBe(false);
+  });
+
+  it("an unreachable provider is 'degraded' — a network blip is not a bad key", async () => {
+    const { credentialFinding, configFindingsOk } = await import("./env");
+    const finding = credentialFinding("STRIPE_SECRET_KEY", { status: "unknown", detail: "network" });
+    expect(finding).toMatchObject({ key: "STRIPE_SECRET_KEY", severity: "degraded" });
+    expect(configFindingsOk(finding ? [finding] : [])).toBe(true);
+  });
+
+  it("ok means 'requireProdEnv() would refuse', so advisories never fail it", async () => {
+    const { configFindingsOk } = await import("./env");
+    expect(configFindingsOk([])).toBe(true);
+    expect(configFindingsOk([{ key: "UPSTASH", severity: "degraded", detail: "x" }])).toBe(true);
+    expect(configFindingsOk([{ key: "ADMIN_TOKEN", severity: "operator", detail: "x" }])).toBe(true);
+    expect(
+      configFindingsOk([
+        { key: "UPSTASH", severity: "degraded", detail: "x" },
+        { key: "STRIPE_SECRET_KEY", severity: "required", detail: "x" },
+      ])
+    ).toBe(false);
+  });
+});
+
+/* R07-3: production configuration was reported to nobody — an incomplete
+ * deployment booted quietly and looked identical to a healthy one until a buyer
+ * paid. The startup line is the report; throwing stays an explicit operator
+ * decision (requireProdEnv). */
+describe("reportProdEnvAtStartup", () => {
+  it("stays silent outside production and during a build", async () => {
+    const { reportProdEnvAtStartup } = await import("./env");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    set("VITEST", undefined);
+    set("NEXT_PHASE", undefined);
+    set("VERCEL_ENV", undefined);
+    set("NODE_ENV", "development");
+    expect(reportProdEnvAtStartup()).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+
+    // `next build` prerenders without the production secrets, by design.
+    set("NODE_ENV", "production");
+    set("VERCEL_ENV", "production");
+    set("NEXT_PHASE", "phase-production-build");
+    expect(reportProdEnvAtStartup()).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+
+    // In production it is exactly one line, and it never throws: a throw at
+    // import time takes down /api/jobs/config as well, which is the surface
+    // that explains what is missing.
+    set("NEXT_PHASE", undefined);
+    expect(() => reportProdEnvAtStartup()).not.toThrow();
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("names the missing variables and never their values", async () => {
+    prodEnv();
+    const { reportProdEnvAtStartup } = await import("./env");
+    set("DATABASE_URL", "postgresql://sentinel:sentinel@host/db");
+    set("STRIPE_SECRET_KEY", "sk_live_sentinel");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const missing = reportProdEnvAtStartup();
+    expect(spy).toHaveBeenCalledTimes(1);
+    const line = String(spy.mock.calls[0]?.[0] ?? "");
+    expect(line).toContain("STRIPE_WEBHOOK_SECRET"); // half a pair is named
+    expect(line).toContain(`${missing.length} required`);
+    expect(line).not.toContain("sentinel");
+    expect(missing.join(" ")).not.toContain("sentinel");
+    spy.mockRestore();
+  });
+
+  it("is called from the module every data path imports", () => {
+    // Static, because the call site is a module-scope side effect in lib/prisma.ts
+    // and no unit test can observe "the server said nothing at boot".
+    const src = readFileSync(join(__dirname, "..", "lib", "prisma.ts"), "utf8");
+    expect(src).toMatch(/reportProdEnvAtStartup\(\)/);
+    expect(src).toMatch(/from "@\/lib\/env"/);
   });
 });

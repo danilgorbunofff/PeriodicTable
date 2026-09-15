@@ -1,19 +1,33 @@
 /**
  * Stripe integration — env-gated. When STRIPE_SECRET_KEY +
- * STRIPE_WEBHOOK_SECRET are set the real API is used; otherwise checkout falls
- * back to the dev simulator (/pay/[paymentId]) so the full ledger flow works
- * locally without keys.
+ * STRIPE_WEBHOOK_SECRET are both set the real API is used; otherwise checkout
+ * falls back to the dev simulator (/pay/[paymentId]) so the full ledger flow
+ * works locally without keys.
  *
  * Phase 0: production payment gating lives in lib/flags.ts + lib/env.ts
  * (fail-closed: explicit PAYMENTS_LIVE=true AND both keys required).
  * This helper stays a pure "are both keys present" check.
  *
- * No SDK: the whole surface we need is one POST and one HMAC, and Node's fetch
- * and crypto cover both. Keeping the runtime dependency list at
- * Prisma/Next/React/SWR is worth more than the SDK's conveniences.
+ * Phase 7: "both keys present" is only a *shape* check, so it decides the
+ * provider mode and nothing else. Whether the dev simulator may exist at all is
+ * an environment question answered by devSimulatorEnabled() below — re-exported
+ * from lib/flags.ts so server code has one import site — and whether a
+ * simulator may mint stakes is answered only by the deployment environment
+ * (R07-1/R07-2).
+ *
+ * No SDK: the whole surface we need is one POST, one GET and one HMAC, and
+ * Node's fetch and crypto cover all three. Keeping the runtime dependency list
+ * at Prisma/Next/React/SWR is worth more than the SDK's conveniences.
  */
 import crypto from "crypto";
+import { type CredentialHealth } from "@/lib/env";
 import { type ProviderMoney } from "@/lib/money";
+
+// The one environment gate for the dev simulator (R07-1/R07-2): false in
+// production and false whenever Stripe credentials are configured, regardless of
+// provider mode. See lib/flags.ts for the rule and lib/phase5.test.ts for the
+// cases.
+export { devSimulatorEnabled } from "@/lib/flags";
 
 export const stripeEnabled = () =>
   !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_WEBHOOK_SECRET;
@@ -22,18 +36,114 @@ export const stripeEnabled = () =>
  * 'stripe' requires BOTH key and secret; anything partial is 'dev' locally and
  * payments-off in production (see lib/flags.ts + lib/env.ts).
  *
+ * This answers "which provider does a *record* belong to" — it is the value
+ * stored in Payment.provider. It is NOT permission to move money or to mint
+ * stakes: callers that grant value must additionally require the deployment to
+ * be a non-production one (devSimulatorEnabled()) or the real keys
+ * (paymentsLiveServer()), because this function cannot tell a production
+ * deployment from a laptop and answers 'dev' on a production box whose
+ * STRIPE_WEBHOOK_SECRET is missing (R07-1).
+ *
  * The string doubles as the Prisma PaymentProvider value (`Payment.provider`),
  * which is why the enum member is STRIPE @map("stripe"). */
 export type ProviderMode = "stripe" | "dev";
 export const getProviderMode = (): ProviderMode => (stripeEnabled() ? "stripe" : "dev");
 
 /** True when exactly one of key/secret is set — a misconfiguration that
- * strands payments (P1-04). Production refuses to start (lib/env.ts);
- * development logs a warning at checkout time. */
+ * strands payments (P1-04).
+ *
+ * The reaction differs by environment on purpose: locally it is a warning at
+ * checkout time (a developer may be halfway through pasting keys), while in
+ * production it makes paymentsLiveServer() false so the storefront takes the
+ * waitlist instead of money (R07-1) and the simulator is unavailable (R07-2)
+ * until the pair is complete. */
 export const stripePartiallyConfigured = () =>
   !!process.env.STRIPE_SECRET_KEY !== !!process.env.STRIPE_WEBHOOK_SECRET;
 
 const STRIPE_API = "https://api.stripe.com/v1";
+
+/** Anything key-shaped, so a provider message can be logged or reported without
+ * carrying a credential. Stripe masks keys in its own errors, but that is
+ * Stripe's promise rather than ours, and this text also travels into
+ * /api/jobs/config bodies. */
+function redactSecrets(text: string): string {
+  return text.replace(/\b(?:sk|rk|pk|whsec)_[A-Za-z0-9_]+/g, (m) => `${m.slice(0, m.indexOf("_") + 1)}[redacted]`);
+}
+
+/** How long a probe answer is reused. The pinger ticks every ten minutes, so a
+ * minute is generous for freshness and keeps a burst of config reads to one
+ * call. */
+const PROBE_TTL_MS = 60_000;
+const PROBE_TIMEOUT_MS = 3_000;
+let probeCache: { key: string; at: number; health: CredentialHealth } | null = null;
+
+/**
+ * Asks Stripe whether the configured key actually works (R07-4).
+ *
+ * Presence and validity are different questions, and only the second one decides
+ * whether a buyer can pay: a truncated key is "configured" by every check in the
+ * codebase, and every checkout then answers 502 while the storefront stays open.
+ * `GET /v1/balance` is the cheapest authenticated call Stripe offers — no money
+ * moves, nothing is created, and 401/403 answers exactly "would a session be
+ * accepted?". Resolve to `unknown` (never `invalid`) when Stripe cannot be
+ * reached, so a network blip is not reported as a bad key.
+ *
+ * Never returns or logs the key: the error text is redacted by shape.
+ */
+export async function probeStripeKey(
+  opts: { fetchImpl?: typeof fetch; key?: string; now?: number } = {}
+): Promise<CredentialHealth> {
+  const key = opts.key ?? process.env.STRIPE_SECRET_KEY ?? "";
+  if (!key) return { status: "absent" };
+  const now = opts.now ?? Date.now();
+  if (probeCache && probeCache.key === key && now - probeCache.at < PROBE_TTL_MS) return probeCache.health;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  let health: CredentialHealth;
+  try {
+    const res = await (opts.fetchImpl ?? fetch)(`${STRIPE_API}/balance`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    });
+    if (res.ok) {
+      health = { status: "valid" };
+    } else {
+      const body = await res.text().catch(() => "");
+      const detail = `HTTP ${res.status}${
+        body ? ` — ${redactSecrets(body).replace(/\s+/g, " ").slice(0, 200)}` : ""
+      }`;
+      health = res.status === 401 || res.status === 403 ? { status: "invalid", detail } : { status: "unknown", detail };
+    }
+  } catch {
+    health = { status: "unknown", detail: "the Stripe API could not be reached" };
+  } finally {
+    clearTimeout(timer);
+  }
+  probeCache = { key, at: now, health };
+  return health;
+}
+
+/** One `error` line per minute, carrying a count of what it stood in for
+ * (R07-4). A rejected checkout is a lost sale rather than a warning, and a key
+ * Stripe refuses fails *every* buyer — a line per request is a wall the operator
+ * scrolls past, while a minute is fast enough to see and slow enough to read.
+ *
+ * Exported for the R07-4 cadence test; the only production caller is
+ * createStripeCheckoutSession's failure path. */
+const REJECTION_LOG_INTERVAL_MS = 60_000;
+let rejectionLog = { at: 0, suppressed: 0 };
+
+export function logCheckoutRejection(message: string): void {
+  const now = Date.now();
+  if (now - rejectionLog.at < REJECTION_LOG_INTERVAL_MS) {
+    rejectionLog.suppressed += 1;
+    return;
+  }
+  const suppressed = rejectionLog.suppressed;
+  rejectionLog = { at: now, suppressed: 0 };
+  console.error(`${message}${suppressed > 0 ? ` (+${suppressed} more rejected checkouts since the previous line)` : ""}`);
+}
 
 /** Product tax code attached to every line item.
  *
@@ -132,9 +242,9 @@ export async function createStripeCheckoutSession(params: {
       const detail = await res.text().catch(() => "");
       const key = process.env.STRIPE_SECRET_KEY ?? "";
       const auth = key.startsWith("sk_live_") ? "sk_live" : key.startsWith("sk_test_") ? "sk_test" : "unexpected-format";
-      console.warn(
+      logCheckoutRejection(
         `stripe: checkout/sessions rejected (HTTP ${res.status}, key=${auth})` +
-          (detail ? ` — ${detail.replace(/\s+/g, " ").slice(0, 300)}` : "")
+          (detail ? ` — ${redactSecrets(detail).replace(/\s+/g, " ").slice(0, 300)}` : "")
       );
       return null;
     }
