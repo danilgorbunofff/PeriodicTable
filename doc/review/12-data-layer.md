@@ -457,7 +457,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** `SELECT … FROM pg_constraint WHERE contype='c' AND connamespace='public'::regnamespace` → **0 rows** (2026-09-15, scratch DB). `Stake.amountUsd`, `Payment.amountUsd`, `Element.totalPoolUsd` and `Element.stakeCount` are all bare `integer NOT NULL`. The only negative-money guard is a JS throw at `lib/recompute.ts:146-148` (`ledger-invariant:reverse-below-zero`), and the only trio guard is `assertLedgerInvariants` called from inside the writer's transaction (`lib/recompute.ts:97-101`). Both are bypassed by anything that writes this database without going through `lib/`: `npx prisma db seed`, `scripts/backfill-previews.ts`, a `psql` session, a future admin tool.
 - **Reproduction.** Run the check-constraint query above, then (on a scratch database) `UPDATE "Stake" SET "amountUsd" = -5 WHERE …` and observe that it succeeds while `Element.totalPoolUsd` keeps its old value — the trio is now inconsistent with `Stake` and nothing raised an error.
 - **Proposed fix.** Add the CHECKs that are expressible, in one migration: `Stake.amountUsd >= 0`, `Payment.amountUsd >= 0`, `Payment.providerAmount IS NULL OR "providerAmount" >= 0`, `Element.stakeCount >= 0`, `Element.totalPoolUsd >= 0`, and a `refundedAt IS NOT NULL ⇒ status = 'refunded'` pair on `Payment`. Leave the trio to R12-2, because a CHECK cannot aggregate another table.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R12-2 — The denormalized trio has no independent detector
 
@@ -466,7 +466,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** The trio is written by exactly one function (`lib/recompute.ts:85-108`) and asserted by `lib/recompute.ts:97-101` *inside that same transaction*. Nothing recomputes `Element.totalPoolUsd`/`stakeCount`/`currentLeaderId` from `Stake` and compares it afterwards: `lib/reconcile.ts` is payment-shaped ($5, read-only, `PAID`-only — `08` owns it), `/api/jobs/reconcile` calls that, and no admin route or view checks the aggregates. The zero-drift result in §5.3 came from ad-hoc SQL written for this doc, which will not run again after today.
 - **Reproduction.** Run the §5.3 drift query, hand-edit one `Stake.amountUsd` on a scratch database, and run it again: it reports the drift, and nothing in the product would have.
 - **Proposed fix.** Add the drift query as a second, always-run check inside `/api/jobs/reconcile` — it is read-only and that job already has the "divergent → 503" convention — reporting the offending element ids. It is one query over 122 rows.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R12-3 — `EmailLog.status` documents three values and the code writes a fourth
 
@@ -475,7 +475,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** `prisma/schema.prisma:371` — `status String @default("sent") // sent | suppressed | error`. `lib/email.ts`'s `deliver()` returns `"logged"` when `RESEND_API_KEY` is unset. All 32 local rows are `logged` (`receipt` 7, `report` 14, `waitlist` 11) because no key is set here: `SELECT template, status, count(*) FROM "EmailLog" GROUP BY 1,2`. The column is a plain string, so nothing rejects the fourth value.
 - **Reproduction.** `SELECT status, count(*) FROM "EmailLog" GROUP BY 1;` on any database used without a mail key, then read the schema comment above the column.
 - **Proposed fix.** Two lines: correct the comment to the real vocabulary (`sent | suppressed | error | logged`), and make `logged` explicit in the `lib/email.ts` return type so only `sent` reads as "the vendor accepted it". `10` owns the deliverability consequence; the schema-level ask is that the comment stop lying.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R12-4 — Every PII column can be found and none can be deleted
 
@@ -484,7 +484,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** No route, script, cron or admin endpoint deletes or exports a customer row: the only `deleteMany` calls outside tests are in `scripts/clear-demo-data.ts:172-200`, whose entire purpose is to remove *demo* rows, refusing any row that has acquired a customer signal (`lib/demoData.ts:33-47`). PII lives in `Payment.email`, `Startup.email`, `WaitlistEntry.email`, `EmailLog.to`, `ManageToken.email`, `Startup.unsubToken`, `Report.ipHash` — and, per §5.11, in plain text inside `AuditLog.detail` for two actions (23 of 35 rows here) in a table documented as append-only (`schema.prisma:300-301`). Deletion is also *blocked* rather than merely unwritten: `Payment.startupId` and `Payment.elementId` are `ON DELETE RESTRICT` (§5.7), so a "delete this customer" implementation must scrub in place, not delete rows. No retention window is stated anywhere in `doc/`.
 - **Reproduction.** Read the `deleteMany` list above; then `SELECT action, count(*) FROM "AuditLog" WHERE detail LIKE '%@%' GROUP BY action;` and compare with the PII inventory in §5.11.
 - **Proposed fix.** Decide and write down a retention window, then implement it as a scrub-in-place routine (null the address columns, replace `AuditLog.detail` addresses with a marker, keep the row and its ids) behind an operator-only path, with a `scripts/` entry so it can be run without a deploy. `16` owns the policy text and `17` the runbook; the schema-level requirement is that the routine must not delete rows.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R12-5 — Connection handling is unconfigured and unverifiable from the repository
 
@@ -493,7 +493,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** `lib/prisma.ts:5-9` is `new PrismaClient({ log: … })` and nothing more. A repository-wide search for `connection_limit`, `pool_timeout`, `statement_timeout`, `pgbouncer` or `directUrl` finds documentation only: `HANDOFF.md:645` (a *test* pool knob, offered if flakiness recurs), `HANDOFF.md:660-663` (`directUrl` is "the first thing to add" if a future migration fails on advisory locks), and nothing in `lib/`, `app/` or `prisma/schema.prisma:12-15`. `DATABASE_URL` is a Vercel **sensitive** variable whose value pulls back empty (`doc/PROD-READINESS-CHECKLIST.md:196,436`), so whether the connection string already carries a `connection_limit` cannot be determined from the repository at all.
 - **Reproduction.** The search above; then `vercel env pull` and observe an empty `DATABASE_URL` (`doc/PROD-READINESS-CHECKLIST.md:436`). The only positive proof of the runtime connection ceiling would be `SHOW max_connections` plus `SELECT count(*) FROM pg_stat_activity` against production, i.e. U12-2.
 - **Proposed fix.** Record the intended pool size as a decision — either an explicit `?connection_limit=N&pool_timeout=10` on `DATABASE_URL`, documented where its value lives, or a comment in `lib/prisma.ts` stating that Neon's pooled endpoint is the ceiling. `17` should own the resulting `pg_stat_activity` runbook step.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R12-6 — The strongest constraint in the schema exists only in a hand-written migration
 
@@ -502,7 +502,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** "At most one active quote per element" is enforced by `ClaimReservation_elementId_active_key` (`0001_phase1_ownership/migration.sql:280`, a partial unique index). `prisma/schema.prisma:205-206` documents it in a comment and cannot express it. Measured consequence: `npx prisma migrate diff --from-url $DATABASE_URL --to-schema-datamodel prisma/schema.prisma --script` → `-- This is an empty migration.` (2026-09-15) — Prisma's differ does not propose dropping it, which is reassuring for `migrate dev`, and equally does not know it exists, so a database created from `schema.prisma` (`prisma db push`, or any future CI that builds from the schema rather than the migration set) would silently lack the guarantee the checkout path treats as a hard invariant, and the take-lead race would come back.
 - **Reproduction.** `npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script` against a migrated database (read-only), then search the generated SQL for `ClaimReservation` — it is absent.
 - **Proposed fix.** No code change is needed while `migrate deploy` is the only way a database is created; the durable fix is a written rule ("databases come from `prisma/migrations`, never from `schema.prisma`") plus a cheap CI assertion that `pg_indexes` contains `ClaimReservation_elementId_active_key` after a fresh migrate — §5.4 already does that replay in this review.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R12-7 — Case is inconsistent across the read API, and only one of the two conventions is pinned
 
@@ -511,7 +511,7 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** Two payloads from the same running app (2026-09-15, dev server on port 3215): `/api/elements` → `"family":"EXOTIC_THEORETICAL","tier":"EXOTIC"` (uppercase, because `ChemicalFamily`/`PrestigeTier` are the two of nine enums with no `@map` — `schema.prisma:17-35`) and `/api/activity?limit=2` → `"kind":"join"` (lowercase, from a plain `String` column, `schema.prisma:345`). `lib/contracts.test.ts:63` pins the lowercase form as a wire contract; nothing pins the uppercase form. The third case belongs to the operator: `/api/admin/reports?status=` casts its input to the **uppercase** TypeScript member (`app/api/admin/reports/route.ts:14`) while the database stores `open` (confirmed on disk, §5.2), so the same value is spelled differently in the URL, in `psql`, and in the payload.
 - **Reproduction.** `curl.exe -sS "http://127.0.0.1:3215/api/elements" | head -c 200` and `curl.exe -sS "http://127.0.0.1:3215/api/activity?limit=2"`; then `SELECT DISTINCT status FROM "Report";` → `open`.
 - **Proposed fix.** Choose one wire convention for enum-valued fields and enforce it at the serialization boundary (a small map per route), then pin it in `lib/contracts.test.ts` the way `kind` already is. At minimum, document the split in `doc/ARCHITECTURE.md` so a client author is not left inferring it from two responses. `11` R11-6 owns the missing `?status=` validation.
-- **Status.** open (draft)
+- **Status.** open
 
 ## 8. Acceptance criteria
 

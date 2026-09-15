@@ -216,11 +216,11 @@ Updated whenever a doc is written, revised, or its findings change state. `—` 
 | 03 | The board | 1 | draft — fixes applied | 0 | 0 | R03-1…R03-4 (4 P3), all fixed | 2026-09-14 |
 | 04 | Element detail and pricing | 1 | draft — fixes applied | 0 | 0 | R04-1…R04-4 (1 P2, 3 P3), all fixed | 2026-09-14 |
 | 05 | Accessibility and content | 1 | draft — fixes applied | 0 | 0 | R05-1…R05-8 (2 P2, 6 P3), 7 fixed, R05-5 accepted risk | 2026-09-14 |
-| 06 | Checkout before payment | 2 | — | — | — | — | — |
-| 07 | Payment provider integration | 2 | — | — | — | — | — |
-| 08 | Settlement and ledger integrity | 2 | — | — | — | — | — |
-| 09 | Ownership and competition | 2 | — | — | — | — | — |
-| 10 | Email and notifications | 2 | — | — | — | — | — |
+| 06 | Checkout before payment | 2 | draft | 0 | 1 | R06-1…R06-10 (1 P1, 3 P2, 6 P3), all open | 2026-09-15 |
+| 07 | Payment provider integration | 2 | draft | 2 | 0 | R07-1…R07-7 (2 P0, 2 P2, 3 P3), all open | 2026-09-15 |
+| 08 | Settlement and ledger integrity | 2 | draft | 0 | 1 | R08-1…R08-7 (1 P1, 3 P2, 3 P3), all open | 2026-09-15 |
+| 09 | Ownership and competition | 2 | draft | 0 | 0 | R09-1…R09-7 (3 P2, 4 P3), all open | 2026-09-15 |
+| 10 | Email and notifications | 2 | draft | 1 | 1 | R10-1…R10-11 (1 P0, 1 P1, 5 P2, 4 P3), all open | 2026-09-15 |
 | 11 | API contracts | 3 | draft | 0 | 0 | R11-1…R11-6 (1 P2, 5 P3), all open | 2026-09-15 |
 | 12 | Data layer | 3 | draft | 0 | 0 | R12-1…R12-7 (2 P2, 5 P3), all open | 2026-09-15 |
 | 13 | Jobs and cron | 3 | draft | 0 | 1 | R13-1…R13-9 (1 P1, 4 P2, 4 P3), all open | 2026-09-15 |
@@ -237,6 +237,8 @@ On 2026-09-14 the operator asked for doc 01's fix pack, which is the go-ahead §
 The same day, `go next 02` was the go-ahead for doc 02's pack: R02-1…R02-7 are fixed in the working tree, cited per finding in `02` §7 with the verification in `02` §5.10, which also runs the two probes doc 02 had deferred (U02-2, U02-3) and answers both of its §9 questions. Row 02 likewise stays `draft` until the fix is committed.
 
 `71a851f` then committed all three of those packs at once, so rows 01-03 read `fixes applied` above while the two paragraphs before this one still describe a commit that was outstanding when they were written — the prose records the pass as it stood, the row records the tree. Doc 03 rode in that same commit and never got a paragraph of its own.
+
+On 2026-09-15 the batch-2 pass authored docs `06`–`10` against `9681bdc` — the money path, first pass, no fixes — so rows 06-10 read `draft` with every finding `open` and each doc's `Commit reviewed` set to that sha. 42 findings and 22 UNKNOWN rows were added to the register in id order (R06-1…R10-11, U06-1…U10-6); the P0s are `R07-1`/`R07-2` (a production-flagged process mints free stakes whenever Stripe is half-configured, and a preview deployment serves the simulator against the shared database) and `R10-2` (an unverified manage token takes over any listing outside production), each with a dated probe in its doc's §5. Batches 3, 4 and 5 are being authored concurrently on their own branches from the same base, so this table and the register are merge points: batch-2 owns rows 06-10 only.
 
 Doc 04's pack was asked for next — "look at the last commit and start doing … 04" — which is the same go-ahead §4 asks for: R04-1…R04-4 are fixed in the working tree (R04-4's dev-server probes in `04` §5.8 also retire the 404s §5.5 recorded), the register's `Fixed in` cells name the files, and row 04 stays `draft` until the fix is committed. Two notes on ordering, because the tracker is read top-down: this pack lands *out of order* — batch 1 still has doc 05 open, so row 04 moving ahead of row 05 is sequencing, not a re-prioritisation — and the fix pass answered two of doc 04's four §9 questions (Q3, Q4) while leaving the two product decisions (Q1, Q2) to the operator. One proposed fix was deliberately not taken as written: R04-2's `myPriorTotal` was rejected in favour of a `prices.boardComplete` flag, since answering "what does this domain already hold" from an edge-cached public route would have published concealed listings; `04` §7 R04-2 records the reasoning, as does R04-1 for its informational-not-refused banner.
 

@@ -301,7 +301,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** `lib/email.ts:66,68` return `"error"` (no throw) for a non-2xx or a thrown request; `lib/outbox.ts:126-134` therefore takes the success branch and sets `completedAt`; `lib/outbox.ts:128` skips completed rows on every later run; `app/api/admin/outbox/retry/route.ts:25-26` answers `409 ALREADY_DONE` for the same row. Witness §5.7: 115 rows all complete, zero retried, 32 `EmailLog` rows all `logged`.
 - **Reproduction.** With `RESEND_API_KEY` absent (so `deliver()` returns `"logged"`, `lib/email.ts:41`) enqueue a `RECEIPT_EMAIL` row and drain it; then read `EmailLog.status` — the row is complete and no mail exists. For the error branch, point `lib/email.ts:46` at a 500 and repeat; the same completion happens with `lastError` unset.
 - **Proposed fix.** In `handleOne`'s email cases, throw when `deliver()` returns `"error"` so the existing backoff and attempt limit apply; treat `"logged"` as non-terminal in production only (or surface `EmailLog.status` in the retry route's response so the operator can see it before re-arming).
-- **Status.** open (draft) — the *queue* semantics are this doc's; what a receipt must contain and whether a `logged` row counts as delivered is `10`'s.
+- **Status.** open — the *queue* semantics are this doc's; what a receipt must contain and whether a `logged` row counts as delivered is `10`'s. `10` §7 R10-1 registers the same defect from the delivery-contract side.
 
 ### R13-2 — Job authentication is fail-open outside production
 
@@ -310,7 +310,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** `lib/jobs.ts:25-28` returns `null` — i.e. *allow* — when the environment is not production. Measured on `:3215` (and re-confirmed by every §5.8 call, which carries no credential): unauthenticated `GET /api/jobs/outbox`, `/api/jobs/reconcile`, `/api/jobs/screenshot` all answer **200**; only `config` answers 503, and that is its findings, not its auth (§5.2). The same matrix on the production-mode build answers 401 with a 24-byte body for every one of them.
 - **Reproduction.** `npx next dev` with `DATABASE_URL` pointing at any database, then `curl -s "http://localhost:PORT/api/jobs/outbox?limit=25"` with no credentials — the drain runs.
 - **Proposed fix.** Treat `VERCEL_ENV`/`NODE_ENV` *not equal to* `production` as "require the secret if it is configured", and require it outright whenever `DATABASE_URL` points at a non-local host; or make the dev exemption depend on a loopback database.
-- **Status.** open (draft) — the reachability chain to a free stake through a preview deployment is `14`'s (`14` R14-1); this row registers the queue-draining half.
+- **Status.** open — the reachability chain to a free stake through a preview deployment is `14`'s (`14` R14-1); this row registers the queue-draining half; `10` §7 R10-10 registers the mail-queue half.
 
 ### R13-3 — The maintenance channel runs at 5 % of its nominal cadence, alerts one human, and cannot notice its own death; inside the queue, no failure notifies anyone
 
@@ -320,7 +320,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Nobody is told.** Per job, the failure surfaces are empty: a mail row that exhausts its five attempts (`lib/outbox.ts:15,128`) sets no flag, increments no counter anyone reads, and appears in no response field and no admin view (§5.11) — the only reader is a human with a `psql` session; an `EmailLog` row with `status='error'` (`lib/email.ts:66`) is written once and never read by any code in the repo; an invocation killed at `maxDuration` appears only in Vercel's function error log (§5.10, R13-4); and a tick that never arrives is invisible to the application, because the application never records one arriving (no heartbeat table, no `lastRunAt` column — the tick's only trace is in GitHub's Actions history, §5.6).
 - **Reproduction.** `gh run list --workflow=outbox-tick.yml --limit 200 --json event,startedAt,conclusion` and compare the scheduled count with elapsed time / 10 minutes.
 - **Proposed fix.** Two independent, cheap: (a) have the *app* record the last successful tick and let `config`'s report fail when it is older than an hour — a dead timer then becomes a 503 on the surviving path; (b) move `reconcile` onto the daily Vercel pair, where a schedule the platform owns cannot be starved by a shared CI queue. Add a heartbeat notification (email/Slack) on a red tick so the alert does not depend on one human reading the Actions tab.
-- **Status.** open (draft)
+- **Status.** open — that `reconcile` is absent from `vercel.json` and that nothing alerts on a terminal rejection is `08` §7 R08-3's; this row adds the measured cadence (5.1 %), the single alert recipient and the missing heartbeat.
 
 ### R13-4 — Both workers' worst-case work equals their `maxDuration` exactly
 
@@ -329,7 +329,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** §5.10: `jobs/outbox/route.ts:6,25,31` and `jobs/screenshot/route.ts:7,56,62` check a 20 s deadline *between* rows, while the in-flight row may run to its own 10 s ceiling (`lib/email.ts:64`, `lib/screenshots.ts:63`) — 20 s + 10 s = 30 s = `maxDuration`, with no allowance for the claim's own database round-trips or Prisma connection acquisition.
 - **Reproduction.** Enqueue 25 rows whose handler sleeps 10 s (a stub is enough) and call the route in production mode; the invocation can exceed the platform limit instead of returning the route's JSON.
 - **Proposed fix.** Budget the deadline *including* the in-flight ceiling: stop claiming rows once `remaining < perRowCeilingMs`, or shorten the loop deadline to 15 s so the worst case stays inside a 30 s function with margin.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R13-5 — The queue's retry cadence is the tick, and a backlog drains at the cadence rather than catching up
 
@@ -338,7 +338,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** `lib/outbox.ts:154-168` bounds a claim at 25 rows per run for the outbox path and 10 for the screenshot path (`jobs/outbox/route.ts:26`, `jobs/screenshot/route.ts:57`); the next opportunity is the next tick (median 3 h 12 m, §5.6) or the daily Vercel pair (`vercel.json:3-5`). The inline drains cover the common case only in bulk-up to 10 rows and 15 s in settlement (`lib/settle.ts:282`, budget `lib/settle.ts:76`) and 5 rows / 3 s for report and waitlist (`app/api/report/route.ts:74`, `app/api/waitlist/route.ts:63`).
 - **Reproduction.** Enqueue 30 `RECEIPT_EMAIL` rows with delivery failing and watch how many attempts accumulate per hour: at most 25 rows are touched per tick, and the backoff floor of 30 s per attempt means attempt 5 is an hour out (`lib/outbox.ts:73-74`).
 - **Proposed fix.** Have the tick loop until the queue is empty or a wall-clock budget is spent (the route already returns counts, so a second call is a curl away), and raise the daily backstop's `limit` above 25.
-- **Status.** open (draft) — the report/waitlist chain's own 3 s/5-row drain and 04:00 retry are settled in `05` §7 R05-7 and are cited, not re-reported.
+- **Status.** open — the report/waitlist chain's own 3 s/5-row drain and 04:00 retry are settled in `05` §7 R05-7 and are cited, not re-reported.
 
 ### R13-6 — A hard drain failure is reported as an empty queue
 
@@ -347,7 +347,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** `lib/outbox.ts:177-191`: the claim is awaited outside the `try`, the processing loop is inside it, and a throw is swallowed into `console.error("outbox drain failed (non-blocking):", e)` at `:188`. `drainDueWithin` (`:203-220`) then resolves with `{completed: 0, failed: 0, timedOut: false}` — indistinguishable from an idle queue in the response body the tick prints.
 - **Reproduction.** Make the handler throw for every row (or drop the database connection between claim and process) and call `/api/jobs/outbox`: the response is `{"ok":true,"claimed":n,"completed":0,"failed":0}`.
 - **Proposed fix.** Count swallowed failures into the `failed` field, or add an `errors` count to the response, so `claimed > 0 && completed === 0` can never be mistaken for a quiet queue.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R13-7 — The screenshot worker claims rows it cannot process, and reports them as `checked`
 
@@ -356,7 +356,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** §5.8: `jobs/screenshot/route.ts:58` claims with no type filter, `:65` continues past every non-`PREVIEW_GENERATE` row, `:70` reports `checked: claimed.length`. Measured on `:3215`: `{"ok":true,"checked":1,"updated":0,"failed":0}` while a `STAKE_ANALYTICS` row gained a 299 s lease (`attempts` unchanged at `0`, `completedAt` still null) and the outbox drain that could have processed it answered `{"ok":true,"claimed":0,…}`; after the lease expired the same drain answered `{"ok":true,"claimed":1,"completed":1,…}` and the row was complete.
 - **Reproduction.** Make a single non-preview row the only due row and call the route with `limit=1`; compare `checked` with what the job can act on.
 - **Proposed fix.** Pass `["PREVIEW_GENERATE"]` to `claimDueOutbox` (the parameter already exists — the inline drains use it) and report `checked` as the count of rows this job could act on.
-- **Status.** open (draft)
+- **Status.** open
 
 ### R13-8 — The mail send carries no provider idempotency key
 
@@ -365,7 +365,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** §5.12: `git grep -n 'Idempotency-Key'` matches exactly once, `lib/stripe.ts:122` (`pt_checkout_${paymentId}`); the Resend call (`lib/email.ts:46-64`) sets none, and its 10 s abort (`:64`) is what converts an unanswered-but-delivered send into an `"error"` (which §5.7 then marks complete).
 - **Reproduction.** Point `lib/email.ts:46` at a server that accepts the payload and never responds; the row completes as `"error"`, and `POST /api/admin/outbox/retry` with the same `dedupeKey` sends it a second time.
 - **Proposed fix.** Send a deterministic `Idempotency-Key` derived from `dedupeKey` (Resend honours it for 24 h), so a retry inside that window is a no-op rather than a duplicate.
-- **Status.** open (draft) — what a duplicate receipt costs the customer relationship is `10`'s.
+- **Status.** open — what a duplicate receipt costs the customer relationship is `10`'s.
 
 ### R13-9 — Money accepted without a provider cross-check is only visible in a CI log
 
@@ -374,7 +374,7 @@ So four routes are reachable by two schedulers and one human; `reconcile` and `c
 - **Evidence.** `app/api/jobs/reconcile/route.ts:64-80` counts `unverified` rows and groups them by provider; `:90` answers **200** for them by design, and the docstring at `:37-43` reasons that a report paging on it "would be muted before the divergent case ever fired". The only caller prints the body into the Actions log and fails the step on a non-200 (`outbox-tick.yml:89-98`), so the count reaches a reader only when someone opens the run.
 - **Reproduction.** `GET /api/jobs/reconcile` with credentials on a database holding a `PAID` payment with `providerAmount = null`: `ok: true` (200) with `unverified.count ≥ 1`.
 - **Proposed fix.** Have the tick assert the `unverified.count` against a recorded baseline and annotate the run when it grows (`echo "::warning::"`), which keeps the design's "never page on it" while making an increase visible without opening the log.
-- **Status.** open (draft) — this is a residual on a deliberate decision, not a re-report of it.
+- **Status.** open — this is a residual on a deliberate decision, not a re-report of it.
 
 ## 8. Acceptance criteria
 

@@ -619,7 +619,7 @@ production deployment that has lost `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRE
 `vercel env` edit, a rotated key, or a restore into a fresh project — an unauthenticated `POST /api/dev/pay`
 mints a real `Stake` in one request, with no credential, no payment and no signal.
 **Category** — authorisation, money integrity. Doc 07 owns what a settlement does; this finding owns the
-gate that decides who may trigger one.
+gate that decides who may trigger one. `07` §7 R07-1 registers the same fail-open from the Stripe-configuration side.
 **Evidence**
 - `app/api/dev/pay/route.ts:15-16` — the only rejection is `getProviderMode() !== "dev"`; nothing reads
   `NODE_ENV` or `isProduction()`.
@@ -652,7 +652,7 @@ at boot (or check `getProdConfigReport().ok` at the top of `/api/checkout` and `
 `paymentsLiveServer()` require `providerConfigured()` in production *even when* `PAYMENTS_LIVE === "true"`,
 so "live but unconfigured" resolves to "off", not "simulator". Then the two rows of §5.3's matrix that read
 `200` become `404`.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-2 — Every per-IP abuse control is keyed on a header the caller writes
 
@@ -684,7 +684,7 @@ stop appearing.
 fail-open path ("store failed open" at error level, alert if it happens more than N times an hour), and for
 the mail and money routes fail **closed** on store error instead of open. Add a limiter to the eight
 operator/scheduler routes so a leaked secret is not unlimited.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-3 — Anonymous third-party mail relay through `/api/waitlist`
 
@@ -712,7 +712,7 @@ confirmation link; only a click makes it a waitlist entry. If product wants the 
 it only when the address was not already on the list *and* require a Turnstile token (which today may be
 unset — U14-3), and raise the per-address bucket from one hour to 24. Either way, cap the number of
 *distinct recipients* per IP per day, which is the metric the current design does not have.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-4 — Two mail templates interpolate without escaping; a charset check three modules away is the only guard
 
@@ -731,12 +731,12 @@ templates interpolate is charset-constrained upstream or a code constant, so a s
   `winnerDomain`/`domain` come from `new URL().hostname` or from `domainFromSocial()` behind
   `/^[a-zA-Z0-9._]{2,30}$/` (`lib/validate.ts:107-111`), so no `<`, `>`, `"`, `&` can appear.
 - The CSP would not contain it: `script-src 'self' 'unsafe-inline' …` with no nonce (§5.1).
-**Reproduction** — the two `emails/preview` requests in §5.9; no mail is sent by that route.
+**Reproduction** — the two `emails/preview` requests in §5.9; no mail is sent by that route. `10` §7 R10-9 registers the same defect from the mail side.
 **Proposed fix** — import `esc()` in both templates and wrap every interpolation (mechanical: `{esc(sym)}`,
 `{esc(domain)}`, `{esc(name)}`). If HTML in mail is desired for a *deliberately* permissive field, then
 sanitise at the write boundary instead and say so in the schema comment. This is a two-file change with a
 one-line test per template.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-5 — The validated URL is thrown away and the raw one is stored
 
@@ -761,7 +761,7 @@ the v2 manage pages ship, plus the fact that the *validator* is already wrong no
 unnormalised value verbatim (no `https://` normalisation, no host lowercasing, no credential rejection).
 **Proposed fix** — `logoUrl: normalizeUrl(input.logoUrl) ?? null` in `validateProfileInput`'s return, plus a
 length cap (2048) and a rejection of control characters. The route then stores what was validated.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-6 — A caller-supplied token is reflected into an HTML response on `/api/unsubscribe`
 
@@ -778,7 +778,7 @@ stripped quote.
 **Proposed fix** — serve the token in a JSON response and let a client-rendered page post it, or escape it
 with `esc()` and set an explicit `Content-Security-Policy: default-src 'none'` on that response. A
 one-line response-header addition removes the class permanently.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-7 — A non-production deployment hands a management token to any caller
 
@@ -800,8 +800,8 @@ a local production build started with `VERCEL_ENV` unset (or `NODE_ENV=developme
 `process.env.VERCEL_ENV` being *absent or* `"production"` rather than on `isProduction()`, or hard-require a
 `DEV_MANAGE_TOKENS=1` opt-in that the Vercel project does not set. Also make the field name impossible to
 ship by accident (`__devToken` behind a `if (process.env.NODE_ENV === "development")` spread, as
-`emails/preview` does with its whole-route `404`).
-**Status** — open (draft)
+`emails/preview` does with its whole-route `404`). `10` §7 R10-2 owns the listing-takeover chain this token enables.
+**Status** — open
 
 ### R14-8 — The ops secret is accepted from the query string
 
@@ -823,7 +823,7 @@ and in doc 13's per-job tables.
 `searchParams` branch; rotate `CRON_SECRET` once, since it has been used in URLs. There is no limiter on
 these routes by design, which is fine for a 256-bit secret — the query string is what makes that argument
 weak.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-9 — One `/api/admin/*` route is authenticated but not audited
 
@@ -839,7 +839,7 @@ doc 14 owns it because "every `/api/admin/*` authenticated **and audited**" is a
 `SELECT count(*) FROM "AuditLog";` before/after — unchanged.
 **Proposed fix** — add an `OUTBOX_RETRY` action to `lib/audit.ts` and write it with the row count the retry
 reset, the same way `REPORT_TRIAGED` records its subject.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-10 — Rejected operator credentials and exhausted limits are invisible
 
@@ -859,7 +859,7 @@ alerting channel: none is wired in the repository (no Sentry/Datadog/log-drain c
 missing — never the value) at `warn`, and add one alert: more than N rejections on the eight privileged
 routes in an hour. Add a modest limiter (e.g. 60/h per IP) to those routes so a wrong secret costs the
 attacker time. If a hosted error tracker is added later, this is the first thing to route into it.
-**Status** — open (draft)
+**Status** — open
 
 ### R14-11 — `next@14.2.35` ships nine advisories, two of them RCE, on an enforced acceptance with an expiry
 
@@ -879,7 +879,7 @@ and someone must upgrade, which is the correct design.
 **Reproduction** — `npm run audit:prod` (exit 0 today) and `npm audit --omit=dev`.
 **Proposed fix** — schedule the upgrade (14.2.x latest or the 15 line) rather than waiting for the tripwire;
 when it happens, re-run `npm run audit:prod` and delete the acceptance entry rather than editing its expiry.
-**Status** — open (draft)
+**Status** — open
 
 ## 8. Acceptance criteria
 

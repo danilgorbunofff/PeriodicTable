@@ -370,7 +370,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** Every document and read API is `max-age=0, must-revalidate` or `no-store`; the read APIs add `s-maxage=10, stale-while-revalidate=30` (`lib/route.ts:20-32`). Production `/` reads `public, max-age=0, must-revalidate` with `age: 7567` (§5.3). Client polling continues every 30 s (`05` §9 Q2).
 **Reproduction** `curl.exe -sS -D - -o NUL https://www.periodictable.lol/`; compare with the same request for `/api/stats`.
 **Proposed fix** Either raise the browser window for the *static* parts of a document (they carry no live numbers) or use `stale-while-revalidate` on the client's SWR revalidation so a reader's re-poll is answered from the edge without an origin round trip. Not a correctness change: the live numbers keep their 30 s cadence.
-**Status** open (draft)
+**Status** open
 
 ### R15-2 — `/` ships 152 kB of uncompressed document and never preloads its own font
 
@@ -378,7 +378,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** `/` = 12 referenced assets, 608,994 B raw / 181,000 B gzip / **157,366 B brotli**; the document is 151,478 B in the build and `content-length: 152029` in production; fonts add up to 68,856 B for the four `basic-latin` subsets, and the emitted `index.html` contains exactly one `<link rel="preload">` — the webpack runtime with `fetchpriority="low"` (§5.1, §5.4).
 **Reproduction** Byte-budget script over `.next/` (raw + `zlib.gzip`/`brotliCompressSync` of each referenced file); `grep -c '<link rel="preload"' .next/server/app/index.html`.
 **Proposed fix** Preload the one display-face woff2 the LCP block actually uses (or `font-display: swap` on it alone), and consider a smaller above-the-fold document: the table markup is 151 kB for 122 cells today and scales with the inventory.
-**Status** open (draft)
+**Status** open
 
 ### R15-3 — A database outage is a blank screen, and with payments off it is indistinguishable from the launch pause
 
@@ -386,7 +386,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** With the database unreachable: `/api/stats`, `/api/board`, `/api/activity`, `/api/elements/Ts`, `/api/table-order`, `/api/search`, `/api/report`, `/api/waitlist`, `/api/manage/request`, `/api/admin/reports`, `/api/jobs/reconcile` and **`/api/checkout`** all answer `500` with a **0-byte body**; `/s/linear.app` answers a 6,560 B Next error document; with `PAYMENTS_LIVE` unset the checkout guard answers the intended `403 Payments are paused — join the waitlist.` before any query, so an outage and a commercial pause are the same words (§5.10). The log for the whole exercise has no request id and no path (§5.10).
 **Reproduction** Serve the production build with `DATABASE_URL` pointed at a closed port and issue the requests in §5.10's table; `curl.exe -sS -o NUL -w "%{http_code} %{size_download}"`.
 **Proposed fix** A minimal error node on every JSON route (`11` R11-4 owns the shape) with a distinguishable status/`code`, and — for the checkout specifically — never a blank answer to "did I pay": `14` R14-1's fail-closed answer is already correct, it just needs to be reachable when the database, not the flag, is what failed.
-**Status** open (draft)
+**Status** open
 
 ### R15-4 — Two of three board tabs scan `Element` for a flag with no index and no `take`
 
@@ -394,7 +394,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** `EXPLAIN (ANALYZE, BUFFERS)` on the `isLeader` filter: `Seq Scan on "Element" … Buffers: shared hit=2` at 122 rows; the `by-element` tab scans the same relation. `12` R12-6 records that the only partial index in the schema covers the other flag. Neither tab bounds its read with `take` (§5.6).
 **Reproduction** `EXPLAIN (ANALYZE, BUFFERS) SELECT … FROM "Element" WHERE "isLeader" LIMIT …` against the review container.
 **Proposed fix** A partial index mirroring the one that exists (`12` R12-6), and a `take` on the element scan in both tabs. Cheap now, and the inventory is the one dimension the product plans to grow.
-**Status** open (draft)
+**Status** open
 
 ### R15-5 — `/api/activity` is five round trips and its inner lookups are unbounded by the caller's `limit`
 
@@ -402,7 +402,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** `/api/activity` issues **5 statements** and joins 14 relations for one request; 27 ms at `limit=6`, 77 ms at `limit=20` — the only read whose cost a caller controls. No `.take()` bounds the inner lookups (§5.5).
 **Reproduction** Statement counters and the two timings in §5.5; `EXPLAIN` on the extracted query.
 **Proposed fix** Add explicit `take` ceilings on the inner lookups (the outer `limit` is not one) or denormalize the feed the way `12` §5.8 denormalizes the board.
-**Status** open (draft)
+**Status** open
 
 ### R15-6 — The money path is the one route a paying reader can cold-start
 
@@ -410,7 +410,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** First request after server start with the provider configured: **805 ms**; warm 56–128 ms. With no provider configured the same route answers in 58 ms because the gate short-circuits before the query (§5.8).
 **Reproduction** `next start` with a fabricated Stripe pair, then time the first `POST /api/checkout`.
 **Proposed fix** Nothing structural: this is a fraction of the 6.3%-of-ceiling tail already measured, and Vercel keeps functions warm under traffic. Recorded so that the *first* paying reader's experience is a known number rather than a surprise, and so a launch-day warm-up request is an available lever.
-**Status** open (draft)
+**Status** open
 
 ### R15-7 — Thirteen simultaneous settlements on one element all succeed, with a 3.8 s tail; the retry budget exceeds the function ceiling by 4×
 
@@ -418,23 +418,23 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** 13 concurrent settles on `As`: **13 × `200 paid`**, min 681 ms, median 2,480 ms, p95 = max **3,773 ms**, mean 2,278 ms; uncontended pair 223/251/350 ms. Inside the invocation, `MONEY_TX` allows 25 s per attempt and `TXN_MAX_ATTEMPTS = 10`, i.e. **250 s of retry budget against `maxDuration = 60`** (`app/api/webhooks/stripe/route.ts:21`); no attempt checks the remaining time (§5.9, §5.11).
 **Reproduction** Node script firing 13 distinct checkout+settle pairs at one symbol; wall-clock per pair.
 **Proposed fix** The measured case is 6.3% of the ceiling and needs nothing; the arithmetic case is safe but wasteful (a platform kill costs mail, not money, because the settlement commits first and `ProviderEvent` makes the retry idempotent). A deadline check between attempts would make the *stated* worst case honest.
-**Status** open (draft)
+**Status** open
 
 ### R15-8 — Eight equal-amount winners on one element are all told they are #1
 
-**Severity** P1 · **Category** money path / copy — **owned by `10` and `04`**, recorded here because this doc produced the concurrency that exposed it
+**Severity** P1 · **Category** money path / copy — **owned by `10` and `04`** (`10` §7 R10-3 the copy, `09` §7 R09-2 the silent expiry, `04` §7 R04-1/R04-2 the quote), recorded here because this doc produced the concurrency that exposed it
 **Evidence** 8 simultaneous $60 checkout+settle on `Ac`: **8 × `200 paid`**, and every receipt renders the unconditional subject/h1 "You're #1 in Ac (Actinium) 🎉" (`emails/receipt.tsx:17,25`; enqueue at `lib/settle.ts:206-220,282`). `OutboxEvent` holds only 4 `OUTBID_EMAIL` rows in total, so the displaced leaders are not being told either (§5.9; `11` §5.11).
 **Reproduction** §5.9 row 3.
 **Proposed fix** Derive the receipt's claim from the settled `Stake` position (or the `FirstClaim` row) rather than from the act of paying. This is batch 2's, not new behaviour: `04` §7 R04-1/R04-2 owns quote derivation and `10` owns mail content.
-**Status** open (draft)
+**Status** open
 
 ### R15-9 — One abandoned checkout freezes every competitor on that element for fifteen minutes
 
-**Severity** P1 · **Category** concurrency / money path (`09` owns ownership and competition)
+**Severity** P1 · **Category** concurrency / money path (`09` owns ownership and competition; §7 R09-1 owns the hold itself)
 **Evidence** With one unpurchased hold live, **12/12** competing take-quotes were refused in 47–91 ms with `RESERVATION_CONFLICT`, and the positive control (no live hold, 8 simultaneous quotes) produced `200` × 1 / `409` × 7 in 211–466 ms. The hold lives until `RESERVATION_TTL_MS = 15 min` (`lib/reservations.ts:14-20,34-49`; §5.9).
 **Reproduction** §5.9 rows 1–2.
 **Proposed fix** Batch 2's territory (`09`): shorten the hold, extend it only on evidence of an in-flight payment, or let a competitor join a queue for the element instead of being refused. The performance-relevant fact is that a single customer's inaction is a full-product outage *for that element*, at the product's most interesting moment.
-**Status** open (draft)
+**Status** open
 
 ### R15-10 — The element page served by the CDN can be the no-database shell
 
@@ -442,7 +442,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** The build emits `Ts.html` at **13,259 B** with the database reachable, yet the running production-mode server answers **11,778 B** for `/elements/Ts` with `x-nextjs-cache: STALE` — the fallback shell `app/elements/[sym]/page.tsx:53-80` returns when its own query fails — and `/` carries `s-maxage=31536000` while element pages revalidate at 60 s (`app/elements/[sym]/page.tsx:10`; §5.1, §5.3, §5.7).
 **Reproduction** Compare `.next/server/app/elements/Ts.html` with the served body and its `x-nextjs-cache` header (§5.1).
 **Proposed fix** Make the fallback shell say so (or fail the route) rather than render as a page, and give the element route an explicit `s-maxage` so its document lifetime matches its data lifetime. `12` §5.x settles what the contract should be.
-**Status** open (draft)
+**Status** open
 
 ### R15-11 — Nothing in the product measures itself, so nothing about cost or degradation is visible until an invoice or a customer
 
@@ -450,15 +450,15 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** No route reports its own duration, no counter records a cost driver, and the only budget-shaped control in the repository is the advisory expiry (`14` R14-11); the log has no request id and no path even for a total database outage (§5.10). The cost model in §5.12 is therefore invisible in operation: total spend, per-settlement writes, ISR write volume and mail volume are all unmeasured at runtime.
 **Reproduction** `grep` for `performance.now|Date.now()` around response construction in `app/api/**/route.ts` — none; `13` §5.9's `/api/jobs/config` reports configuration, not cost.
 **Proposed fix** A single `/api/jobs/config`-style operator surface extended with the four numbers that matter (invocations, settlements, outbox depth, ISR writes) or the cheapest alternative: a Vercel/Neon alert on spend and on 5xx rate, which needs no code change at all.
-**Status** open (draft)
+**Status** open
 
 ### R15-12 — A provider rejection leaves orphaned `pending` payment rows that no poller can see
 
-**Severity** P1 · **Category** money-path integrity — **owned by `07`/`08`** (batch 2); reported here because the failure injection that produced it is this doc's
+**Severity** P1 · **Category** money-path integrity — **owned by `07`/`08`** (batch 2: `06` §7 R06-7 owns the buyer-side half, `08` §7 R08-5 the unreachable `CANCELED` status); reported here because the failure injection that produced it is this doc's
 **Evidence** Three attempts against a rejecting provider left **three `Payment` rows with `status = pending`, `providerRef = NULL`, `path = join`, `provider = stripe`** and **no `ProviderEvent`**: the idempotency replay consumed the same key without adding a row. `13` shows both pollers driven by `ProviderEvent`, so these rows are invisible to the queue and only `reconcile` could ever close them. The customer is not charged and the error is honest — the residue is the issue (§5.8).
 **Reproduction** §5.8: checkout with `PAYMENTS_LIVE=true` and a fabricated `STRIPE_SECRET_KEY`, then inspect `Payment` and `ProviderEvent`.
 **Proposed fix** `07`'s ledger decision: either write a compensating terminal status on provider rejection, or emit the `ProviderEvent` that makes the attempt visible to the existing pollers instead of introducing a new one.
-**Status** open (draft)
+**Status** open
 
 ### R15-13 — Every settled dollar writes eleven rows across eight tables, and nothing trims them
 
@@ -466,7 +466,7 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Evidence** Per first-time settlement: `Startup` +1, `Stake` +1, `Payment` +1, `OutboxEvent` **+3** (`analytics-`, `preview-`, `receipt-` prefixed `dedupeKey`s), `AuditLog` **+2**, `EmailLog` +1, `ActivityLog` +1, `ProviderEvent` +1, `FirstClaim` +1, plus the `Element` aggregate update — confirmed by a 15-table `pg_stat_user_tables` diff and by ten further pairs (§5.9). Net database growth **5.6 kB per settlement**, of which `OutboxEvent` is the largest single object (256 kB / ~280 rows). No retention window exists for `OutboxEvent`, `AuditLog`, `EmailLog`, `ActivityLog` or `ProviderEvent` (`12` §5.x / U12).
 **Reproduction** Snapshot-diff `pg_stat_user_tables` around one settle pair (§5.9).
 **Proposed fix** At 1,000 checkouts/day this is 168 MB/month and 330,000 rows/month, so it is not urgent — but the growth is permanent and the read surfaces that touch these tables (`/api/activity`) already cost five round trips. A retention statement belongs with `12`'s PII work; a cheaper item is not writing three outbox rows where one would do.
-**Status** open (draft)
+**Status** open
 
 ## 8. Acceptance criteria
 

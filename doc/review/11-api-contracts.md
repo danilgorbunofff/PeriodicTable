@@ -213,15 +213,15 @@ After restart: `/api/stats` and `/api/elements/C` answer 200 with `x-request-id`
 
 ### R11-1 — The dev email preview 500s on every path but one
 
-- **Severity.** P3 · **Category.** correctness · **Status.** open (draft)
+- **Severity.** P3 · **Category.** correctness · **Status.** open
 - **Evidence.** §5.8. `app/api/emails/preview/route.ts:36` sets `X-Subject-Preview` to `outbidSubject({ elementSymbol: sym })`; the subject is `` `You were knocked off ${sym} 👑` `` (`emails/outbid.tsx:14-15`), and a crown emoji is not a legal HTTP header value, so `undici` throws before the response exists. Observed: `500`, zero-length body, no `x-request-id`, for `(none)`, `?template=outbid`, `?sym=C`, `?sym=Ts`, `?sym=<script>…`, `?template=nope`; `?template=receipt` is 200 because it sets no such header. Server log: `TypeError: Cannot convert argument to a ByteString … value of 55357` with the frame `webpack-internal:///(rsc)/./app/api/emails/preview/route.ts:44:12` (transpiled; source line 36).
 - **Reproduction.** `curl -i http://localhost:3215/api/emails/preview` on a dev build.
 - **Proposed fix.** Strip or percent-encode non-Latin-1 characters for the preview header (e.g. `encodeURIComponent`), or return the subject in the body instead of a header. Note the latent second defect at the same site: `sym` reaches `outbidHtml` unescaped (`emails/outbid.tsx:23`), currently masked because the throw happens first — whoever fixes the header must escape or filter `sym` in the same change.
-- **Status.** Production is unaffected: the route 404s on `NODE_ENV=production` (§5.10) and the real send path puts the subject in a JSON body (`lib/email.ts:61`), where the emoji is fine. This is a dev-surface defect and a latent escaping gap, not a live leak (`14` cross-checks the XSS reading).
+- **Status.** Production is unaffected: the route 404s on `NODE_ENV=production` (§5.10) and the real send path puts the subject in a JSON body (`lib/email.ts:61`), where the emoji is fine. This is a dev-surface defect and a latent escaping gap, not a live leak (`14` cross-checks the XSS reading). `10` §7 R10-8 registers the same default-template 500 on this route; this row adds the header mechanism and names the escaping gap.
 
 ### R11-2 — `/api/activity`'s limit is clamped at the top only
 
-- **Severity.** P3 · **Category.** correctness · **Status.** open (draft)
+- **Severity.** P3 · **Category.** correctness · **Status.** open
 - **Evidence.** §5.7. `app/api/activity/route.ts:16` — `Math.min(parseInt(v) || 6, 20)`; no lower bound. `?limit=-1` → 200 with **122 rows** (the whole feed) instead of 6; `?limit=0` → 6; `?limit=abc` → 6; `?limit=1e9` → 20.
 - **Reproduction.** `curl 'http://localhost:3215/api/activity?limit=-1' | jq '.activity | length'`.
 - **Proposed fix.** `Math.max(1, Math.min(parseInt(v) || 6, 20))`, and treat a non-numeric value as 400 or as the default explicitly.
@@ -229,7 +229,7 @@ After restart: `/api/stats` and `/api/elements/C` answer 200 with `x-request-id`
 
 ### R11-3 — Two error envelopes, and the failure envelope is empty
 
-- **Severity.** P3 · **Category.** contracts · **Status.** open (draft)
+- **Severity.** P3 · **Category.** contracts · **Status.** open
 - **Evidence.** §5.3, §5.4, §5.11, §5.15. 11 routes emit `{error, code}` + `x-request-id`; the other 15 emit neither. Framework 405s (six routes) and database-down 500s (seven routes) come back with a **zero-length body and no `x-request-id`**. Production reproduces the split on the wire: `/api/stats` 200 carries `X-Request-Id`, `/api/checkout` 400 does not. `lib/contracts.test.ts` pins the modern envelope only.
 - **Reproduction.** `curl -i -X GET http://localhost:3211/api/report` (405, empty); stop Postgres and `curl -i http://localhost:3211/api/stats` (500, empty, no reqId).
 - **Proposed fix.** Wrap the raw family in `apiError`/`apiJson` (or at least emit `code` + `reqId`), and add a route-level catch that answers a JSON 500 with the request id. Add a contracts test that asserts `x-request-id` on every `app/api/**` response, which is the cheapest guard against the split reopening.
@@ -237,7 +237,7 @@ After restart: `/api/stats` and `/api/elements/C` answer 200 with `x-request-id`
 
 ### R11-4 — The operator, job and money routes have no limiter
 
-- **Severity.** P2 · **Category.** security · **Status.** open (draft) — see `14` for exploitability
+- **Severity.** P2 · **Category.** security · **Status.** open — see `14` for exploitability
 - **Evidence.** §5.2, §5.6. `/api/admin/*` (4 routes), `/api/jobs/*` (4), `/api/dev/pay`, `/api/unsubscribe`, `/api/emails/preview`, `/api/webhooks/stripe` and the five read routes call no limiter. `/api/admin/outbox/retry` will drain the queue on every call from anyone holding the token; `/api/dev/pay` settles a payment per call in dev mode with no throttle (the 5-concurrent-settle probe in `15` shows what it does to one element).
 - **Reproduction.** `for i in $(seq 1 50); do curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $ADMIN_TOKEN" …/api/admin/outbox/retry; done` — every call is 200.
 - **Proposed fix.** Throttle the admin and job surfaces per token as well as per IP (`lib/rateStore.ts` already supports arbitrary keys), and give `/api/dev/pay` the same IP limiter as checkout — a dev-mode endpoint is still a production surface when the provider mode falls back to dev (`14`).
@@ -245,7 +245,7 @@ After restart: `/api/stats` and `/api/elements/C` answer 200 with `x-request-id`
 
 ### R11-5 — `/api/report` answers a limiter rejection as success
 
-- **Severity.** P3 · **Category.** contracts · **Status.** open (draft)
+- **Severity.** P3 · **Category.** contracts · **Status.** open
 - **Evidence.** §5.6. `app/api/report/route.ts:13-15` returns `{ok:true,note:"rate-limited"}` with 200 when the 10/hour key is exhausted. Observed at the boundary with `limits-and-headers.mjs`. Every other limited route answers 429.
 - **Reproduction.** Eleven `POST /api/report` calls in one hour; the eleventh is a 200.
 - **Proposed fix.** 429 with `{ok:false,code:"RATE_LIMITED"}` and keep the operator-facing "we may still have your report" wording in the form, not in the contract.
@@ -253,7 +253,7 @@ After restart: `/api/stats` and `/api/elements/C` answer 200 with `x-request-id`
 
 ### R11-6 — `?status=` on the admin report list is an unvalidated cast
 
-- **Severity.** P3 · **Category.** correctness · **Status.** open (draft)
+- **Severity.** P3 · **Category.** correctness · **Status.** open
 - **Evidence.** `app/api/admin/reports/route.ts:12` — `status ? { status: status as never } : undefined`. Observed: `?status=nope` → 200 with an empty list (Prisma casts the string, matches nothing). The triage route validates the same vocabulary properly (`admin/reports/[id]/route.ts:20-22` → 400 `BAD_STATUS`).
 - **Reproduction.** `curl -H "Authorization: Bearer $ADMIN_TOKEN" 'https://…/api/admin/reports?status=nope'` → 200 `{"reports":[]}`.
 - **Proposed fix.** Validate against the same `STATUSES` array and answer 400 `BAD_STATUS`; also add a `?before=` cursor, since the list is capped at 50 (`admin/reports/route.ts:14-18`).
