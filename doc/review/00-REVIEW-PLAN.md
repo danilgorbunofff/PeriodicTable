@@ -226,9 +226,9 @@ Updated whenever a doc is written, revised, or its findings change state. `—` 
 | 13 | Jobs and cron | 3 | — | — | — | — | — |
 | 14 | Security | 3 | — | — | — | — | — |
 | 15 | Performance, concurrency, cost, resilience | 3 | — | — | — | — | — |
-| 16 | Legal, privacy, tax | 4 | — | — | — | — | — |
-| 17 | Operator tooling and runbooks | 4 | — | — | — | — | — |
-| 18 | Observability, analytics, alerts | 4 | — | — | — | — | — |
+| 16 | Legal, privacy, tax | 4 | draft | 1 | 8 | R16-1…R16-14 (1 P0, 8 P1, 3 P2, 2 P3), none fixed | 2026-09-15 |
+| 17 | Operator tooling and runbooks | 4 | draft | 0 | 7 | R17-1…R17-16 (7 P1, 8 P2, 1 P3), none fixed | 2026-09-15 |
+| 18 | Observability, analytics, alerts | 4 | draft | 0 | 9 | R18-1…R18-15 (9 P1, 5 P2, 1 P3), none fixed | 2026-09-15 |
 | 19 | Launch and marketing readiness | 5 | — | — | — | — | — |
 | 20 | Post-launch and debt | 5 | — | — | — | — | — |
 
