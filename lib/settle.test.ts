@@ -14,6 +14,7 @@ import {
 } from "./stripe";
 import { validateProviderMoney, providerAmountAgrees, providerCurrencyAgrees } from "./money";
 import { reservationConflict, isReservationLive, RESERVATION_TTL_MS } from "./reservations";
+import { receiptHtml, receiptSubject } from "../emails/receipt";
 
 describe("strict paid classification (P0-03)", () => {
   it("accepts explicit paid signals only", () => {
@@ -145,13 +146,27 @@ import { PaymentStatus } from "@prisma/client";
 const prisma = testPrisma();
 const hasDb = hasTestDb;
 const T4 = 9996;
+// A second tile for the R09-2/R09-7 cases: they need a board they can build
+// from zero (a $5 leader to quote against, and a crown to take away).
+const T3 = 9986;
+const LAPSE_EMAIL = "lapse-t@example.com";
+const VICTIM_EMAIL = "victim-funding@example.com";
+const WINNER2_EMAIL = "winner2-t@example.com";
+let keyN = 0;
+const key = (tag: string) => `${tag}-${Date.now()}-${keyN++}`;
 
 beforeAll(async () => {
   if (!hasDb) return;
   await prisma.stake.deleteMany({ where: { elementId: T4 } });
+  await prisma.stake.deleteMany({ where: { elementId: T3 } });
   await prisma.element.upsert({
     where: { id: T4 },
     create: { id: T4, symbol: "TST4", name: "Test TST4", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
+    update: {},
+  });
+  await prisma.element.upsert({
+    where: { id: T3 },
+    create: { id: T3, symbol: "TST3", name: "Test TST3", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
     update: {},
   });
 });
@@ -161,16 +176,30 @@ afterAll(async () => {
     await prisma.$disconnect().catch(() => undefined);
     return;
   }
-  const domains = ["settle-t.dev", "settle2-t.dev"];
+  const domains = [
+    "settle-t.dev",
+    "settle2-t.dev",
+    "settle-floor-t.dev",
+    "settle-raider-t.dev",
+    "settle-lapse-t.dev",
+    "settle-victim-t.dev",
+    "settle-win-t.dev",
+    "settle-victim2-t.dev",
+    "settle-win2-t.dev",
+  ];
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: domains } } } } });
   await purgeSettledOutbox(prisma, { startup: { domain: { in: domains } } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: domains } } });
   await prisma.claimReservation.deleteMany({ where: { startup: { domain: { in: domains } } } });
   await prisma.payment.deleteMany({ where: { startup: { domain: { in: domains } } } });
   await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: domains } } } });
+  await prisma.emailLog.deleteMany({ where: { to: { in: [LAPSE_EMAIL, VICTIM_EMAIL, WINNER2_EMAIL] } } });
   await prisma.firstClaim.deleteMany({ where: { elementId: T4 } });
   await prisma.stake.deleteMany({ where: { elementId: T4 } });
   await prisma.element.deleteMany({ where: { id: T4 } });
+  await prisma.firstClaim.deleteMany({ where: { elementId: T3 } });
+  await prisma.stake.deleteMany({ where: { elementId: T3 } });
+  await prisma.element.deleteMany({ where: { id: T3 } });
   await prisma.startup.deleteMany({ where: { domain: { in: domains } } });
   await prisma.$disconnect();
 });
@@ -300,5 +329,141 @@ describe.skipIf(!hasDb)("atomic settle (P0-02)", () => {
     expect((await prisma.providerEvent.findUniqueOrThrow({ where: { providerEventId: eventId } })).outcome).toBe("APPLIED");
     const stake = await prisma.stake.findUniqueOrThrow({ where: { elementId_startupId: { elementId: T4, startupId: s.id } } });
     expect(stake.amountUsd).toBe(before.amountUsd + 4);
+  });
+});
+
+/* R09-2 (a lapsed take is applied, but receipted at the rank the board gave
+   it) and R09-7 (an outbid holder is reached through the payment that funded
+   the stake when the startup has no address, and recorded when nobody can be
+   reached at all). Both build their own board on T3 from an empty tile, so
+   they do not depend on how the T4 cases above spend their money. */
+describe.skipIf(!hasDb)("lapsed takes and unreachable victims (R09-2, R09-7)", () => {
+  const leaderTotal = async () =>
+    (await prisma.stake.findFirst({ where: { elementId: T3, isLeader: true }, select: { amountUsd: true } }))?.amountUsd ?? 0;
+
+  /** Settle a bid on T3, optionally minting the take quote the checkout would
+   *  have written before the buyer paid. */
+  async function bid(
+    domain: string,
+    amountUsd: number,
+    path: "JOIN" | "TAKE",
+    opts: { email?: string; reserve?: { reservedTotal: number; expiresAt: Date } } = {}
+  ) {
+    const startup = await fixtureStartup(domain);
+    const payment = await prisma.payment.create({
+      data: {
+        elementId: T3,
+        startupId: startup.id,
+        amountUsd,
+        path,
+        provider: "DEV",
+        idempotencyKey: key("settle-t3"),
+        status: "PENDING",
+        ...(opts.email ? { email: opts.email } : {}),
+      },
+    });
+    if (opts.reserve) {
+      await prisma.claimReservation.create({
+        data: {
+          elementId: T3,
+          startupId: startup.id,
+          paymentId: payment.id,
+          quotedLeaderTotal: opts.reserve.reservedTotal - 1,
+          quotedLeaderStartupId: null,
+          reservedTotal: opts.reserve.reservedTotal,
+          expiresAt: opts.reserve.expiresAt,
+        },
+      });
+    }
+    const out = await settlePayment(payment.id, {
+      provider: "dev",
+      eventId: key("dev-settle-t3"),
+      eventType: "dev.test",
+      paid: true,
+    });
+    expect(out.outcome).toBe("applied");
+    return { startup, payment };
+  }
+
+  it("records a lapsed take as such and receipts the rank the board gave it (R09-2)", async () => {
+    await bid("settle-floor-t.dev", 5, "JOIN");
+    // Someone else bids past the $6 the quote held while the buyer is still
+    // paying: the quote is worthless by the time the money lands.
+    await bid("settle-raider-t.dev", 60, "JOIN");
+    const { startup, payment } = await bid("settle-lapse-t.dev", 6, "TAKE", {
+      email: LAPSE_EMAIL,
+      reserve: { reservedTotal: 6, expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const stake = await prisma.stake.findUniqueOrThrow({
+      where: { elementId_startupId: { elementId: T3, startupId: startup.id } },
+    });
+    expect(stake.amountUsd).toBe(6);
+    // The quote promised #1: the money still applies, at the board's rank.
+    expect(stake.rank).toBe(2);
+    expect((await prisma.claimReservation.findUniqueOrThrow({ where: { paymentId: payment.id } })).status).toBe("EXPIRED");
+
+    const lapse = await prisma.auditLog.findFirst({ where: { action: "TAKE_LAPSED", paymentId: payment.id } });
+    expect(lapse?.elementId).toBe(T3);
+    expect(lapse?.startupId).toBe(startup.id);
+    expect(lapse?.detail).toBe("take-lapsed:2");
+
+    const receipt = await prisma.outboxEvent.findUniqueOrThrow({ where: { dedupeKey: `receipt-${payment.id}` } });
+    const payload = receipt.payload as { to: string; rank: number; lapsedTakeTotal?: number };
+    expect(payload.to).toBe(LAPSE_EMAIL);
+    expect(payload.rank).toBe(2);
+    expect(payload.lapsedTakeTotal).toBe(6);
+    // The mail the buyer receives owns the downgrade instead of congratulating
+    // a #2 stake as the crown the quote sold.
+    const props = {
+      elementSymbol: "TST3",
+      elementName: "Test TST3",
+      amountUsd: 6,
+      rank: payload.rank,
+      domain: startup.domain,
+      lapsedTakeTotal: payload.lapsedTakeTotal ?? null,
+      viewUrl: "https://periodictable.lol/s/x",
+      unsubUrl: "https://periodictable.lol/api/unsubscribe?token=x",
+    };
+    expect(receiptSubject(props)).toBe("You're #2 in TST3 (Test TST3)");
+    expect(receiptSubject(props)).not.toContain("🎉");
+    const html = receiptHtml(props);
+    expect(html).toContain("Your $6 take quote lapsed before this payment cleared");
+    expect(html).toContain("settled as an ordinary stake at <strong>#2</strong>");
+  });
+
+  it("reaches an outbid holder through the payment that funded the stake (R09-7)", async () => {
+    const lead = await leaderTotal();
+    const victim = await fixtureStartup("settle-victim-t.dev");
+    expect(victim.email).toBeNull();
+    await bid("settle-victim-t.dev", lead + 10, "JOIN", { email: VICTIM_EMAIL });
+
+    const { payment } = await bid("settle-win-t.dev", lead + 20, "TAKE");
+    const outbid = await prisma.outboxEvent.findUnique({ where: { dedupeKey: `outbid-${payment.id}` } });
+    expect(outbid?.payload).toMatchObject({
+      to: VICTIM_EMAIL,
+      elementSymbol: "TST3",
+      victimDomain: "settle-victim-t.dev",
+      victimTotal: lead + 10,
+      winnerDomain: "settle-win-t.dev",
+      winnerAmount: lead + 20,
+    });
+    expect(await prisma.auditLog.count({ where: { action: "OUTBID_UNNOTIFIED", paymentId: payment.id } })).toBe(0);
+  });
+
+  it("records an outbid nobody can be told about instead of dropping it (R09-7)", async () => {
+    const lead = await leaderTotal();
+    const victim = await fixtureStartup("settle-victim2-t.dev");
+    expect(victim.email).toBeNull();
+    // Neither the startup nor the funding payment captured an address.
+    await bid("settle-victim2-t.dev", lead + 10, "JOIN");
+
+    const { payment } = await bid("settle-win2-t.dev", lead + 20, "TAKE", { email: WINNER2_EMAIL });
+    expect(await prisma.outboxEvent.findUnique({ where: { dedupeKey: `outbid-${payment.id}` } })).toBeNull();
+    const miss = await prisma.auditLog.findFirst({ where: { action: "OUTBID_UNNOTIFIED", paymentId: payment.id } });
+    expect(miss?.startupId).toBe(victim.id);
+    expect(miss?.detail).toBe("no-address:settle-victim2-t.dev");
+    // The winner's own receipt is unaffected: only the notice is missing.
+    expect(await prisma.outboxEvent.findUnique({ where: { dedupeKey: `receipt-${payment.id}` } })).not.toBeNull();
   });
 });

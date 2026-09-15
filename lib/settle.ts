@@ -228,12 +228,18 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
       // Reservation: consume when valid; expire-and-continue when stale.
       const reservation = await tx.claimReservation.findUnique({ where: { paymentId } });
       let takeGuaranteed = false;
+      // R09-2: the figure the quote held when it lapsed. A lapsed take is still
+      // applied — the money is real and the ledger has no refund path for a
+      // PENDING row — but the downgrade is recorded and receipted at the rank
+      // the board granted, not the #1 the quote promised.
+      let lapsedTakeTotal: number | null = null;
       if (reservation && reservation.status === "ACTIVE") {
         if (reservation.expiresAt.getTime() <= Date.now()) {
           await tx.claimReservation.update({
             where: { id: reservation.id },
             data: { status: ReservationStatus.EXPIRED },
           });
+          lapsedTakeTotal = reservation.reservedTotal;
         } else {
           if (payment.amountUsd < reservation.reservedTotal) {
             throw new Error(`take-below-reserve:${payment.amountUsd}<${reservation.reservedTotal}`);
@@ -252,6 +258,19 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
         },
         tx
       );
+
+      if (lapsedTakeTotal != null) {
+        await audit(
+          {
+            action: "TAKE_LAPSED",
+            elementId: payment.elementId,
+            startupId: payment.startupId,
+            paymentId,
+            detail: `take-lapsed:${result.stake.rank}`,
+          },
+          tx
+        );
+      }
 
       if (reservation && takeGuaranteed) {
         await consumeReservation(tx, reservation.id);
@@ -293,17 +312,35 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
             amountUsd: payment.amountUsd,
             rank: result.stake.rank,
             domain: payer.domain,
+            ...(lapsedTakeTotal != null ? { lapsedTakeTotal } : {}),
           },
         });
       }
       if (result.info.dethroned && result.info.oldLeader) {
         const victim = await tx.startup.findUnique({ where: { domain: result.info.oldLeader.domain } });
-        if (victim?.email) {
+        // R09-7: an address may be on file even when the startup has none — the
+        // payment that funded the crowned stake captured one at checkout. A
+        // holder is only unreachable when both are missing, and that is
+        // recorded instead of silently dropped.
+        const fundingEmail = victim
+          ? await tx.payment.findFirst({
+              where: {
+                elementId: payment.elementId,
+                startupId: victim.id,
+                status: PaymentStatus.PAID,
+                email: { not: null },
+              },
+              orderBy: { paidAt: "desc" },
+              select: { email: true },
+            })
+          : null;
+        const victimEmail = victim?.email ?? fundingEmail?.email ?? null;
+        if (victim && victimEmail) {
           await enqueueOutbox(tx, {
             type: "OUTBID_EMAIL",
             dedupeKey: `outbid-${paymentId}`,
             payload: {
-              to: victim.email,
+              to: victimEmail,
               unsubToken: victim.unsubToken,
               elementSymbol: element.symbol,
               victimDomain: victim.domain,
@@ -312,6 +349,17 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
               winnerAmount: result.info.newLeader.amountUsd,
             },
           });
+        } else {
+          await audit(
+            {
+              action: "OUTBID_UNNOTIFIED",
+              elementId: payment.elementId,
+              startupId: victim?.id ?? null,
+              paymentId,
+              detail: `no-address:${result.info.oldLeader.domain}`,
+            },
+            tx
+          );
         }
       }
       await enqueueOutbox(tx, {

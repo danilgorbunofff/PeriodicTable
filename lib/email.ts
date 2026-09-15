@@ -116,16 +116,20 @@ export type ReceiptEmailParams = {
   amountUsd: number;
   rank: number;
   domain: string;
+  /** R09-2: present when the payment's take quote had lapsed before it
+   *  settled — the quoted total, so the mail can own the downgrade. */
+  lapsedTakeTotal?: number | null;
 };
 
 export async function sendReceiptEmail(p: ReceiptEmailParams) {
-  const subject = receiptSubject({ elementSymbol: p.elementSymbol, elementName: p.elementName });
+  const subject = receiptSubject({ elementSymbol: p.elementSymbol, elementName: p.elementName, rank: p.rank });
   const html = receiptHtml({
     elementSymbol: p.elementSymbol,
     elementName: p.elementName,
     amountUsd: p.amountUsd,
     rank: p.rank,
     domain: p.domain,
+    lapsedTakeTotal: p.lapsedTakeTotal ?? null,
     viewUrl: `${APP_URL}/s/${encodeURIComponent(p.domain)}`,
     unsubUrl: `${APP_URL}/api/unsubscribe?token=${p.unsubToken}`,
   });

@@ -162,6 +162,32 @@ describe("checkoutRefusal — what a refused response means (R06-3, R06-4)", () 
     expect(r.serverErr).toContain(new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   });
 
+  it("offers the amount that still lands, or says none does (R09-1)", () => {
+    const expiresAt = new Date(Date.now() + 9 * 60_000).toISOString();
+    const held = (extra: Record<string, unknown>) =>
+      checkoutRefusal(409, {
+        error: "This element has a held take quote at $13. Refresh for a new quote.",
+        code: "RESERVATION_CONFLICT",
+        reservedTotal: 13,
+        expiresAt,
+        ...extra,
+      });
+    // A $6 tile under a $13 hold: the buyer is told the number that works.
+    expect(held({ joinHint: 6 }).serverErr).toContain("A $6 bid still joins the ladder.");
+    // A $5 tile held for #1: no amount lands, and the copy may not pretend one
+    // does. The hold is still named first.
+    const blocked = held({ joinBlocked: true }).serverErr;
+    expect(blocked).toContain("This element has a held take quote at $13.");
+    expect(blocked).toContain("Held until");
+    expect(blocked).toContain("No amount lands until that hold ends.");
+    expect(blocked).not.toContain("joins the ladder");
+    // The hint wins when a server sends both: an amount that lands is better
+    // news than a wall.
+    const both = held({ joinHint: 6, joinBlocked: true }).serverErr;
+    expect(both).toContain("A $6 bid still joins the ladder.");
+    expect(both).not.toContain("No amount lands");
+  });
+
   it("hands back the reference of the row a provider failure left behind (R06-7)", () => {
     const r = checkoutRefusal(502, {
       error: "Payment provider unavailable. Try again.",

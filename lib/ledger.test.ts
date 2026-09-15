@@ -97,7 +97,7 @@ afterAll(async () => {
     await prisma.$disconnect().catch(() => undefined);
     return;
   }
-const domains = ["lead-t.dev", "join-t.dev", "tie-t.dev", "race1-t.dev", "race2-t.dev", "race3-t.dev", "race4-t.dev", "race5-t.dev"];
+const domains = ["lead-t.dev", "join-t.dev", "tie-t.dev", "tie2-t.dev", "tie3-t.dev", "tie4-t.dev", "race1-t.dev", "race2-t.dev", "race3-t.dev", "race4-t.dev", "race5-t.dev"];
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: domains } } } } });
   await prisma.outboxEvent.deleteMany({
     where: {
@@ -167,6 +167,45 @@ describe.skipIf(!hasDb)("ledger concurrency and pricing invariants", () => {
     expect(after.filter((r) => r.isLeader).length).toBe(1);
     expect(after.map((r) => r.rank)).toEqual(after.map((_, i) => i + 1));
     expect(before.length).toBe(after.length);
+  });
+  it("lands two equal claims without a coin flip (R09-3)", async () => {
+    // The tie rule is a checkout guard, not a ledger invariant: two equal
+    // claims that both reach settlement must keep their arrival order (then
+    // row id), so the outcome is reproducible rather than whichever row the
+    // database happened to return first.
+    const a = await pay("tie2-t.dev", 13);
+    const b = await pay("tie3-t.dev", 13);
+    expect(a.id).not.toBe(b.id);
+
+    const rows = await prisma.stake.findMany({ where: { elementId: T5 }, orderBy: { rank: "asc" } });
+    const tied = rows.filter((r) => r.amountUsd === 13);
+    // Both bids are on the board: a tie is not merged into one row.
+    expect(tied.map((r) => r.startupId).sort()).toEqual([a.id, b.id].sort());
+    const documented = [...tied].sort(
+      (x, y) => x.createdAt.getTime() - y.createdAt.getTime() || x.id.localeCompare(y.id)
+    );
+    expect(tied.map((r) => r.id)).toEqual(documented.map((r) => r.id));
+    expect(tied[0].rank).toBeLessThan(tied[1].rank);
+
+    // Same arrival instant: the id tie-break still decides, and a recompute
+    // (every apply re-ranks the whole tile) keeps that decision.
+    await prisma.stake.updateMany({
+      where: { id: { in: [tied[0].id, tied[1].id] } },
+      data: { createdAt: new Date() },
+    });
+    const byId = [...tied].sort((x, y) => x.id.localeCompare(y.id));
+    const outsider = await startup("tie4-t.dev");
+    await applyStakeTx({ elementId: T5, startupId: outsider.id, addUsd: 1, kind: "stake" });
+    const all = await prisma.stake.findMany({ where: { elementId: T5 }, orderBy: { rank: "asc" } });
+    const tiedAfter = all.filter((r) => r.amountUsd === 13);
+    expect(tiedAfter.map((r) => r.id)).toEqual(byId.map((r) => r.id));
+
+    // …and the board those two rows landed on is still a healthy ledger.
+    const el = await prisma.element.findUniqueOrThrow({
+      where: { id: T5 },
+      select: { totalPoolUsd: true, stakeCount: true, currentLeaderId: true },
+    });
+    expect(() => assertLedgerInvariants(all, el)).not.toThrow();
   });
   it("activity carries delta + resulting total + payment id (P2-06)", async () => {
     const log = await prisma.activityLog.findFirst({

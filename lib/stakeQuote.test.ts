@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { stakeQuote } from "./stakeQuote";
-import { classifyAndValidate, takeLeadPrice, reclaimFor } from "./pricing";
+import { stakeQuote, joinSpace, crownCopy } from "./stakeQuote";
+import { classifyAndValidate, takeLeadPrice, reclaimFor, smallestFreeAmount } from "./pricing";
 
 /* Review 04 (doc/review/04-element-detail-and-pricing.md) — the checkout form's
    two money claims, tested without a browser: the figure the app wrote into the
@@ -172,5 +172,145 @@ describe("stakeQuote — agrees with the server's classification", () => {
         expect(q.alreadyLead).toBe(priorTotal >= leaderTotal);
       }
     }
+  });
+});
+
+/* R09-1: the hold is named, never guessed at, and the sentence the buyer sees
+   is derived from the same figures the validator will enforce. */
+const FUTURE = new Date(Date.now() + 15 * 60_000).toISOString();
+const PAST = new Date(Date.now() - 60_000).toISOString();
+
+describe("joinSpace answers whether any amount is even available (R09-1)", () => {
+  it("calls the board locked when the hold sits at the floor", () => {
+    // A $5 tile held for #1: $5 is inside the quote, and every larger amount
+    // aims at #1 too — nothing lands.
+    expect(joinSpace([5], 6)).toEqual({ kind: "locked", free: 6 });
+    expect(joinSpace([5], 5)).toEqual({ kind: "locked", free: 6 });
+    expect(joinSpace([5], null)).toEqual({ kind: "free" });
+    // A hold above a floor that is still free leaves room below it.
+    expect(joinSpace([12, 7, 5000], 13)).toEqual({ kind: "room", amount: 5 });
+    expect(joinSpace([5, 12], 13)).toEqual({ kind: "room", amount: 6 });
+  });
+
+  it("offers the smallest amount the validator itself would accept", () => {
+    for (const [existingTotals, heldTotal] of [
+      [[5, 12], 13],
+      [[5, 5, 12], 20],
+      [[5, 6, 7, 9], 10],
+    ] as [number[], number][]) {
+      const space = joinSpace(existingTotals, heldTotal);
+      expect(space.kind).toBe("room");
+      if (space.kind !== "room") continue;
+      // The server's own rule, not a second opinion: the amount the client
+      // offers back must survive `classifyAndValidate` *and* clear the hold.
+      expect(space.amount).toBe(smallestFreeAmount(existingTotals));
+      expect(space.amount).toBeLessThan(heldTotal);
+      const verdict = classifyAndValidate({
+        amount: space.amount,
+        leaderTotal: Math.max(...existingTotals),
+        isNewHere: true,
+        myPriorTotal: 0,
+        existingTotals,
+      });
+      expect(verdict.ok && verdict.path).toBe("JOIN");
+    }
+  });
+});
+
+describe("the quote carries the live hold, and dates it (R09-1)", () => {
+  it("publishes the held total and its expiry for the client to render", () => {
+    const q = stakeQuote({ ...board, leaderTotal: 5, takeLead: 6, amount: 5, takeQuote: { expiresAt: FUTURE, reservedTotal: 6 } });
+    // The $5 bid itself is not a take — and while the hold runs it will be
+    // refused — so the payload has to carry the hold for the copy to explain.
+    expect(q.takeQuoted).toBe(false);
+    expect(q.need).toBe(6);
+    expect(q.heldByOtherUntil).toBe(FUTURE);
+    expect(q.heldByOtherTotal).toBe(6);
+  });
+
+  it("drops a hold that has lapsed, and never invents one", () => {
+    const lapsed = stakeQuote({ ...board, leaderTotal: 5, takeLead: 6, amount: 5, takeQuote: { expiresAt: PAST, reservedTotal: 6 } });
+    expect(lapsed.heldByOtherUntil).toBeNull();
+    expect(lapsed.heldByOtherTotal).toBeNull();
+    const none = stakeQuote({ ...board, leaderTotal: 5, takeLead: 6, amount: 5 });
+    expect([none.heldByOtherUntil, none.heldByOtherTotal]).toEqual([null, null]);
+    const empty = stakeQuote({ ...board, leaderTotal: 5, takeLead: 6, amount: 5, takeQuote: null });
+    expect(empty.heldByOtherUntil).toBeNull();
+    // A hold on a board the client cannot price is still a hold: it blocks
+    // amounts whatever the rest of the payload says.
+    const partial = stakeQuote({ ...board, boardComplete: false, amount: 5, takeQuote: { expiresAt: FUTURE, reservedTotal: 6 } });
+    expect(partial.heldByOtherTotal).toBe(6);
+    expect(partial.takeQuoted).toBe(false);
+  });
+});
+
+describe("the crown names the hold before it quotes a price (R09-1, R09-6)", () => {
+  const crown = (over: Partial<Parameters<typeof crownCopy>[0]> = {}) =>
+    crownCopy({
+      elementName: "Carbon",
+      boardComplete: true,
+      priorHere: false,
+      alreadyLead: false,
+      need: 6,
+      priorTotal: 0,
+      heldUntil: FUTURE,
+      heldTotal: 6,
+      existingTotals: [5],
+      ...over,
+    });
+
+  it("tells a newcomer the tile is a wall instead of naming an amount", () => {
+    const held = crown();
+    expect(held.lead).toContain("A take quote at $6 aims at #1 in Carbon until");
+    expect(held.joins).toBe("The lowest amount still free is $6, and the quote covers it.");
+  });
+
+  it("offers the smallest free amount when the floor is still open", () => {
+    const held = crown({ existingTotals: [5, 12], heldTotal: 13, need: 13 });
+    expect(held.lead).toContain("$13"); // the hold, named first
+    expect(held.joins).toBe("A first bid is $6+ while that quote runs — exact ties are refused, so stand $1 clear.");
+  });
+
+  it("keeps an incumbent's top-up honest while the hold runs", () => {
+    const back = crown({ priorHere: true, priorTotal: 3, need: 3, existingTotals: [5, 3] });
+    expect(back.joins).toBe("Top-ups are $1+ — $6 takes #1, but that total is inside the quote until " + new Date(FUTURE).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ".");
+    // The hold owner's own $1 lands on the quote's total, so clearing it costs
+    // one more dollar.
+    const leader = crown({ priorHere: true, alreadyLead: true, priorTotal: 5, need: 1, existingTotals: [5] });
+    expect(leader.lead).toBe("👑 You're #1 in Carbon — extend your lead!");
+    expect(leader.joins).toBe("Top-ups are $1+ — add $2 to clear that quote while it runs.");
+  });
+
+  it("says nothing about a hold that has lapsed", () => {
+    const lapsed = crown({ heldUntil: PAST, heldTotal: 6 });
+    expect(lapsed.lead).not.toContain("quote");
+    expect(lapsed.joins).not.toContain("quote");
+    expect(lapsed.joins).toContain("A first bid is $6+");
+  });
+});
+
+describe("crownCopy states the live price on a whole board (R09-6)", () => {
+  const crown = (over: Partial<Parameters<typeof crownCopy>[0]> = {}) =>
+    crownCopy({ elementName: "Carbon", boardComplete: true, priorHere: false, alreadyLead: false, need: 6, priorTotal: 0, existingTotals: [5], ...over });
+
+  it("derives both amounts instead of claiming a fixed floor", () => {
+    expect(crown().joins).toBe("A first bid is $6+ — $6 takes #1 right now. Exact ties are rejected, so stand $1 clear.");
+    // The claim is arithmetic on the board it was handed.
+    const busy = crown({ existingTotals: [9, 4, 5], need: 10 });
+    expect(busy.joins).toContain("A first bid is $6+");
+    expect(busy.joins).toContain("$10 takes #1 right now");
+  });
+
+  it("falls back to the plain invitation on a board it cannot see whole (R04-2)", () => {
+    const partial = crown({ boardComplete: false, need: 1 });
+    expect(partial.joins).toContain("Any $5+ amount joins the ladder");
+    expect(partial.joins).not.toContain("takes #1 right now");
+  });
+
+  it("still tells a returning staker what one more dollar does", () => {
+    const back = crown({ priorHere: true, priorTotal: 4, need: 1 });
+    expect(back.joins).toBe("Top-ups are $1+ — $1 more puts you back on top. Exact ties are rejected, so stand $1 clear.");
+    const leader = crown({ priorHere: true, alreadyLead: true, priorTotal: 9, need: 1 });
+    expect(leader.lead).toBe("👑 You're #1 in Carbon — extend your lead!");
   });
 });

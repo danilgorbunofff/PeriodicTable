@@ -19,6 +19,7 @@ import {
 } from "@/lib/reservations";
 import { withTxnRetry, MONEY_TX } from "@/lib/txn";
 import { audit } from "@/lib/audit";
+import { joinSpace } from "@/lib/stakeQuote";
 
 export const dynamic = "force-dynamic";
 
@@ -294,9 +295,41 @@ export async function POST(req: NextRequest) {
     // hidden row is still a collision in the ledger ranking.
     const existingTotals = stakes.map((s) => s.amountUsd as number);
 
+    // Live take hold (R09-1), read *before* classification. While a rival owns
+    // this element's quote nobody else can reach the reserved total, and on a
+    // floor-priced tile the tie rule refuses the only amount left below it — so
+    // the hold is the fact that decides the bid, and it is named ahead of the
+    // rule text that used to answer with "$5 is taken — add $1".
+    const active = await getActiveReservation(tx, element.id);
+    const conflict = reservationConflict({
+      reservation: active,
+      myStartupId: existing?.id ?? null,
+      myPriorTotal,
+      addUsd: amountUsd,
+    });
+
     // Phase 3: single classify+validate source (pre-check ran unlocked; this
     // re-runs authoritatively under the lock).
     const classified = classifyAndValidate({ amount: amountUsd, leaderTotal, isNewHere, myPriorTotal, existingTotals });
+    // A malformed amount keeps its shape message — a hold cannot explain it.
+    if (conflict.conflict && (classified.ok || classified.code !== "PRICE_MOVED")) {
+      // What can this bidder actually do while the hold runs? A newcomer needs
+      // the smallest total that still lands under it; when there is none the
+      // refusal says the tile is closed instead of hinting at a wrong amount.
+      const space = isNewHere ? joinSpace(existingTotals, conflict.reservedTotal) : null;
+      return {
+        ok: false as const,
+        status: 409,
+        body: {
+          error: `This element has a held take quote at $${conflict.reservedTotal}. Refresh for a new quote.`,
+          code: "RESERVATION_CONFLICT",
+          reservedTotal: conflict.reservedTotal,
+          expiresAt: conflict.expiresAt.toISOString(),
+          ...(space?.kind === "room" ? { joinHint: space.amount } : {}),
+          ...(space?.kind === "locked" ? { joinBlocked: true as const } : {}),
+        },
+      };
+    }
     if (!classified.ok) {
       return {
         ok: false as const,
@@ -316,27 +349,6 @@ export async function POST(req: NextRequest) {
           : classified.path === "RECLAIM"
             ? PaymentPath.RECLAIM
             : PaymentPath.STAKE;
-
-    // Reservation conflict (one ACTIVE take quote per element).
-    const active = await getActiveReservation(tx, element.id);
-    const conflict = reservationConflict({
-      reservation: active,
-      myStartupId: existing?.id ?? null,
-      myPriorTotal,
-      addUsd: amountUsd,
-    });
-    if (conflict.conflict) {
-      return {
-        ok: false as const,
-        status: 409,
-        body: {
-          error: `This element has a held take quote at $${conflict.reservedTotal}. Refresh for a new quote.`,
-          code: "RESERVATION_CONFLICT",
-          reservedTotal: conflict.reservedTotal,
-          expiresAt: conflict.expiresAt.toISOString(),
-        },
-      };
-    }
 
     // Ownership (Phase 1): existing profiles are IMMUTABLE here.
     const { startup } = await findOrCreateCheckoutStartup(

@@ -24,7 +24,14 @@ export type AuditAction =
   | "REPORT_TRIAGED"
   | "PROFILE_MODERATED"
   | "PAYMENT_REVERSED"
-  | "CHECKOUT_ABANDONED";
+  | "CHECKOUT_ABANDONED"
+  /** R09-2: a payment whose take quote had expired settled as an ordinary
+   *  stake. Reserved for the downgrade itself — the rank it landed at rides in
+   *  `detail` as `take-lapsed:<rank>`. */
+  | "TAKE_LAPSED"
+  /** R09-7: a dethroned holder could not be told it lost #1 — no address on
+   *  the startup and none on the funding payment. */
+  | "OUTBID_UNNOTIFIED";
 
 export async function audit(
   entry: {

@@ -41,13 +41,30 @@ describe("R04-1 an app-minted amount keeps tracking the board", () => {
 
   it("rewrites the field only against a board it can see whole", () => {
     const modals = src(MODALS);
-    expect(modals).toMatch(/import \{ stakeQuote \} from "\.\.\/lib\/stakeQuote"/);
+    expect(modals).toMatch(/import \{ stakeQuote, crownCopy \} from "\.\.\/lib\/stakeQuote"/);
     expect(modals).toMatch(/amountMinted\?: boolean;/);
     expect(modals).toMatch(/onReconcile: \(n: number\) => void;/);
     expect(modals).toMatch(/const liveAmount = quote\.reconciledAmount;/);
     // The effect settles: it compares before writing, so a re-run is a no-op.
     expect(modals).toMatch(/if \(!open \|\| !amountMinted \|\| liveAmount == null\) return;/);
     expect(modals).toMatch(/if \(Math\.round\(amount\) === liveAmount\) return;\s*onReconcile\(liveAmount\);/);
+  });
+
+  it("renders the crown sentence from the live board, not a fixed '$5+' claim (R09-6)", () => {
+    const modals = src(MODALS);
+    // The hold the server names in its rejection is the same hold the modal
+    // quotes, and the hold is read from the payload rather than re-derived.
+    expect(modals).toMatch(/takeQuote: data\?\.takeHold \?\? null/);
+    expect(modals).toMatch(/const crown =\s*need == null\s*\?\s*null\s*:\s*crownCopy\(\{\s*elementName: elSafe\.name,/);
+    expect(modals).toMatch(/boardComplete: data\?\.prices\.boardComplete === true,/);
+    expect(modals).toMatch(/heldUntil: heldByOtherUntil,\s*heldTotal: heldByOtherTotal,/);
+    expect(modals).toMatch(/\{crown\.lead\}/);
+    expect(modals).toMatch(/\{crown\.joins\}/);
+    // The three static sentences this replaced cannot come back: the only
+    // remaining copy site is the function in lib/stakeQuote.ts.
+    expect(modals).not.toMatch(/Any \$5\+ amount joins the ladder/);
+    expect(modals).not.toMatch(/takes #1 in \$\{el\.name\}/);
+    expect(modals).not.toMatch(/reclaims #1 in \$\{el\.name\}/);
   });
 
   it("drops the stale price from the reclaim toast but keeps the event", () => {

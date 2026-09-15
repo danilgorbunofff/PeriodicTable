@@ -8,6 +8,13 @@
  *
  * Expiry is lazy: readers treat expired ACTIVE rows as released, and writers
  * mark them EXPIRED opportunistically. No sweeper required (Phase 6 may add one).
+ *
+ * One consequence is load-bearing (R09-1): on a tile whose leader sits at the
+ * $5 floor the hold is minted at $6, so the only amount left below it is the
+ * leader's own $5 — which the tie rule refuses against the committed row. The
+ * element is then unbiddable until the hold lapses, so the checkout reports a
+ * live hold *before* it reports that tie (app/api/checkout/route.ts), and the
+ * payload publishes the hold so the modal can say so up front.
  */
 import { Prisma, ReservationStatus } from "@prisma/client";
 
@@ -33,7 +40,10 @@ export function isReservationLive(r: { expiresAt: Date } | null, now = Date.now(
 /**
  * Pure conflict rule (unit-tested). An ACTIVE reservation owned by another
  * startup blocks any stake whose RESULTING total reaches the reserved winning
- * total; the owner topping up never conflicts; anything below sails through.
+ * total; the owner topping up never conflicts; anything below sails through —
+ * including an exact tie with a row already on the board, which is the tie
+ * rule's business, not this one's (R09-1: the caller has to say which of the
+ * two refused it).
  */
 export function reservationConflict(params: {
   reservation: ActiveReservation | null;

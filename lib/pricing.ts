@@ -1,8 +1,10 @@
 /* Pricing engine — single server-side truth for every dollar number
    (doc/phase-2-ledger/02-pricing-ranks.md, ROADMAP §3 + Phase 3 remediation).
    Validators are split by intent (first join / join / top-up / take) so each
-   rule is testable in isolation. Ties are ALWAYS rejected at validation time;
-   settlement order is deterministic so a race can never flip ranks. */
+   rule is testable in isolation. A tie is refused against every total already
+   on the board — that check runs *before* commit, so two simultaneous claims
+   can still land on the same amount (R09-3); rank order is deterministic, so
+   the resulting pair is always ordered the same way. */
 
 export const MIN_STAKE = 5;
 
@@ -10,6 +12,17 @@ export const takeLeadPrice = (leaderTotal?: number) =>
   leaderTotal == null ? MIN_STAKE : leaderTotal + 1;
 
 export const joinMin = () => MIN_STAKE;
+
+/** The smallest whole-dollar bid at or above `floor` that no total on the board
+ * already holds. This is the "smallest acceptable amount" a bidder can actually
+ * land (R09-6), and the amount a live take quote has to leave room below to
+ * keep the tile biddable at all (R09-1). */
+export const smallestFreeAmount = (existingTotals: number[], floor: number = MIN_STAKE): number => {
+  const taken = new Set(existingTotals);
+  let amount = floor;
+  while (taken.has(amount)) amount += 1;
+  return amount;
+};
 
 export const reclaimFor = (
   leaderTotal: number | undefined,
@@ -24,12 +37,13 @@ export const validateFirstJoin = (amount: number): string | null => {
 };
 
 /** Newcomer joining a contested tile (P0-04): any $5+ amount below the take
- * price lands on the ladder — but never tied with another startup (P1-02). */
+ * price lands on the ladder — but never tied with a total already on the board
+ * (P1-02, R09-3). Concurrent claims are not visible here by design. */
 export const validateJoin = (amount: number, existingTotals: number[]): string | null => {
   const floor = validateFirstJoin(amount);
   if (floor) return floor;
   if (existingTotals.includes(amount)) {
-    return ` $${amount} is taken — add $1 more to stand clear of the tie.`.trim();
+    return ` $${amount} is already on the board — add $1 to stand clear of the tie.`.trim();
   }
   return null;
 };
@@ -43,7 +57,7 @@ export const validateTopUpAmount = (
 ): string | null => {
   if (!Number.isInteger(amount) || amount < 1) return "Whole dollars only, min $1 top-up.";
   if (otherTotals.includes(priorTotal + amount)) {
-    return `$${priorTotal + amount} would tie another staker — add $1 more to stand clear.`;
+    return `$${priorTotal + amount} would tie a bid already on the board — add $1 to stand clear.`;
   }
   return null;
 };
@@ -90,9 +104,9 @@ export type Classification =
  *
  * - Empty tile + newcomer → JOIN (first join, $5+)
  * - Contested + newcomer + amount >= leader+1 → TAKE (reservation)
- * - Contested + newcomer + amount < leader+1 → JOIN ($5+, no ties)
+ * - Contested + newcomer + amount < leader+1 → JOIN ($5+, no committed tie)
  * - Existing holder + resulting total retakes the lead → RECLAIM
- * - Otherwise → STAKE (top-up / moat, no ties)
+ * - Otherwise → STAKE (top-up / moat, no committed tie)
  */
 export function classifyAndValidate(params: {
   amount: number;
@@ -135,8 +149,9 @@ export type DethroneInfo = {
 /**
  * Pure rank math over an element's stakes (used by recompute + tests).
  * Deterministic secondary order (Phase 3 item 4): amount desc, then earliest
- * created, then id. Ties cannot occur post-validation, but the order is total
- * regardless so recomputation can never flip ranks unpredictably.
+ * created, then id. A tie is only refused against rows already committed, so an
+ * equal pair can exist; the order stays total regardless, so recomputation can
+ * never flip ranks unpredictably (R09-3).
  */
 export function rankStakes<T extends { amountUsd: number; createdAt?: Date | string | number; id?: string }>(
   stakes: T[]

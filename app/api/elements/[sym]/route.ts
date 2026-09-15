@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { takeLeadPrice, joinMin, reclaimFor } from "@/lib/pricing";
 import { apiJson, apiError, READ_CACHE } from "@/lib/route";
 import { findElementBySymbol } from "@/lib/elements";
+import { getActiveReservation } from "@/lib/reservations";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +22,11 @@ export async function GET(req: NextRequest, { params }: { params: { sym: string 
       where: { symbol },
       include: {
         stakes: {
-          // Hidden bidders are excluded from display; aggregates still count all.
-          where: { startup: { moderationState: { not: "HIDDEN" } } },
+          // Hidden bidders are excluded from display; aggregates still count
+          // all. Fully reversed stakes (amountUsd 0) are rows kept for click
+          // history and first claims, not bids (R09-4): listing one would show
+          // a bidder who has no bid, ranked first, without the crown.
+          where: { startup: { moderationState: { not: "HIDDEN" } }, amountUsd: { gt: 0 } },
           orderBy: [{ amountUsd: "desc" }, { createdAt: "asc" }, { id: "asc" }],
           include: {
             startup: { select: { domain: true, title: true, pitch: true, logoUrl: true, previewImgUrl: true, url: true } },
@@ -34,6 +38,12 @@ export async function GET(req: NextRequest, { params }: { params: { sym: string 
   ]);
 
   if (!element) return apiError("Element not found", { status: 404, code: "NOT_FOUND" });
+
+  // A live take hold is public information about the tile — anyone quoting a
+  // number needs it, and on a floor-priced element it is the reason the whole
+  // reachable range is refused (R09-1). Who holds it is not public, so the hold
+  // carries its amount and end time and neither the startup nor the payment.
+  const hold = await getActiveReservation(prisma, element.id);
 
   // Leader is the top LIVE bid, not simply row 0: a fully reversed stake sits
   // last with amountUsd 0, and reading it as the leader would advertise a $1
@@ -75,8 +85,12 @@ export async function GET(req: NextRequest, { params }: { params: { sym: string 
       family: element.family,
       tier: element.tier,
       pool: element.totalPoolUsd,
-      count: element.stakeCount,
+      // Recomputed from the listed rows (R09-4): the stored stakeCount also
+      // counts concealed rows and fully reversed ones, so reading it here could
+      // claim a staker the payload does not list.
+      count: stakes.length,
       stakes,
+      takeHold: hold ? { reservedTotal: hold.reservedTotal, expiresAt: hold.expiresAt.toISOString() } : null,
       prices: {
         takeLead: takeLeadPrice(leaderTotal),
         joinMin: joinMin(),

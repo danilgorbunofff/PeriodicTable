@@ -9,7 +9,7 @@ import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
 import { classifyAndValidate } from "../lib/pricing";
-import { stakeQuote } from "../lib/stakeQuote";
+import { stakeQuote, crownCopy } from "../lib/stakeQuote";
 import { domainFromUrl, domainFromSocial, isEmail } from "../lib/validate";
 import {
   CHECKOUT_MSG,
@@ -188,8 +188,11 @@ export function CheckoutPreview({
     domainKnown: !!domain,
     priorTotal: myPriorTotal,
     amount: Math.round(amount) || 0,
+    // R09-1: a live take quote holds #1 for someone else, so the copy below has
+    // to name it instead of promising a takeover.
+    takeQuote: data?.takeHold ?? null,
   });
-  const { priorHere, alreadyLead, need, belowNeed, takeQuoted } = quote;
+  const { priorHere, alreadyLead, need, belowNeed, takeQuoted, heldByOtherUntil, heldByOtherTotal } = quote;
   const classified = classifyAndValidate({
     amount: Math.round(amount) || 0,
     leaderTotal,
@@ -216,6 +219,22 @@ export function CheckoutPreview({
   if (!elSafe) return null;
   const effectiveTitle = title.trim() || domain || "";
   const effectivePitch = pitch.trim() || `Staked on ${elSafe.name}`;
+  // The two sentences over the amount field, derived from the quote (R09-6).
+  // Only rendered inside the `need != null` guard below, where a quote exists.
+  const crown =
+    need == null
+      ? null
+      : crownCopy({
+          elementName: elSafe.name,
+          boardComplete: data?.prices.boardComplete === true,
+          priorHere,
+          alreadyLead,
+          need,
+          priorTotal: myPriorTotal,
+          heldUntil: heldByOtherUntil,
+          heldTotal: heldByOtherTotal,
+          existingTotals: stakeTotals,
+        });
 
   async function joinWaitlist() {
     if (waitBusy) return;
@@ -479,19 +498,11 @@ export function CheckoutPreview({
           </div>
         </div>
       </div>
-      {need != null && (
+      {need != null && crown && (
         <>
-          <div className="mt-2 text-sm font-extrabold">
-            {alreadyLead
-              ? `👑 You're #1 in ${el.name} — extend your lead!`
-              : priorHere
-                ? `👑 $${need} more reclaims #1 in ${el.name}!`
-                : `👑 $${need} takes #1 in ${el.name}!`}
-          </div>
+          <div className="mt-2 text-sm font-extrabold">{crown.lead}</div>
           <div className="mt-1 text-xs text-mutedink">
-            {priorHere
-              ? `Top-ups are $1+ — $${need} more puts you back on top. Exact ties are rejected, so stand $1 clear.`
-              : `Any $5+ amount joins the ladder — $${need} grabs #1 right now. Exact ties are rejected, so stand $1 clear.`}
+            {crown.joins}
             {takeQuoted ? " Your take quote is held for 15 min once you continue." : ""}
           </div>
           {belowNeed && !clientErr && (

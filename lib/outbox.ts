@@ -31,6 +31,8 @@ export type ReceiptPayload = {
   amountUsd: number;
   rank: number;
   domain: string;
+  /** R09-2: set when the take quote had lapsed before settlement. */
+  lapsedTakeTotal?: number | null;
 };
 
 /** R08-2: the buyer's notice that their payment was reversed. Separate type

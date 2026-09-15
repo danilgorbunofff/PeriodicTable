@@ -72,7 +72,7 @@ describe("validateJoin (P0-04: contested $5 joins)", () => {
     expect(validateJoin(5, [50, 24])).toBeNull();
   });
   it("join amount equal to an existing total is a tie → rejected", () => {
-    expect(validateJoin(24, [50, 24])).toMatch(/taken/);
+    expect(validateJoin(24, [50, 24])).toMatch(/already on the board/);
   });
   it("below floor still rejected", () => {
     expect(validateJoin(3, [50])).toMatch(/\$5/);

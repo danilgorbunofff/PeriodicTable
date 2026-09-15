@@ -18,11 +18,14 @@ import { isStatsResponse, isTableOrderRows, isBoardRows, isActivityRows, isSearc
 const prisma = testPrisma();
 const hasDb = hasTestDb;
 const T6 = 9994;
+// A second fixture tile for the R09-1 hold tests: it needs a board whose only
+// bid sits on the $5 floor, which T6 (with a $5,000 leader) can never be.
+const T9 = 9990;
 // A symbol the inventory actually authors (`Hbar`, not `HBAR`) is the only way
 // to test canonical casing end to end (R04-4).
 const HBAR = 9992;
 const HIDDEN = "helemprobe.dev";
-const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN];
+const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN, "rt-hold-a.dev", "rt-hold-b.dev", "rt-zero-t.dev"];
 let keyN = 0;
 let madeHbar = false;
 const key = () => `p4-route-${Date.now()}-${keyN++}`;
@@ -36,6 +39,11 @@ beforeAll(async () => {
   await prisma.element.upsert({
     where: { id: T6 },
     create: { id: T6, symbol: "TST6", name: "Test Six", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
+    update: {},
+  });
+  await prisma.element.upsert({
+    where: { id: T9 },
+    create: { id: T9, symbol: "TST9", name: "Test Nine", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
     update: {},
   });
   if (!(await prisma.element.findUnique({ where: { symbol: "Hbar" } }))) {
@@ -66,6 +74,8 @@ afterAll(async () => {
     return;
   }
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
+  // Holds point at payments, so they go first (R09-1 fixtures).
+  await prisma.claimReservation.deleteMany({ where: { elementId: { in: [T6, T9] } } });
   await purgeSettledOutbox(prisma, {
     OR: [{ startup: { domain: { in: DOMAINS } } }, { startup: { domain: { startsWith: "rl-probe-" } } }],
   });
@@ -74,6 +84,8 @@ afterAll(async () => {
   await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
   await prisma.firstClaim.deleteMany({ where: { elementId: T6 } });
   await prisma.stake.deleteMany({ where: { elementId: T6 } });
+  await prisma.stake.deleteMany({ where: { elementId: T9 } });
+  await prisma.firstClaim.deleteMany({ where: { elementId: T9 } });
   if (madeHbar) {
     await prisma.firstClaim.deleteMany({ where: { elementId: HBAR } });
     await prisma.stake.deleteMany({ where: { elementId: HBAR } });
@@ -82,6 +94,7 @@ afterAll(async () => {
   }
   await prisma.payment.deleteMany({ where: { startup: { domain: { startsWith: "rl-probe-" } } } });
   await prisma.element.deleteMany({ where: { id: T6 } });
+  await prisma.element.deleteMany({ where: { id: T9 } });
   await prisma.startup.deleteMany({ where: { OR: [{ domain: { in: DOMAINS } }, { domain: { startsWith: "rl-probe-" } }] } });
   await prisma.$disconnect();
 });
@@ -261,6 +274,137 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     expect(json.prices.boardComplete).toBe(false);
     expect(json.stakes.some((s) => s.domain === HIDDEN)).toBe(false);
     // …and the concealed amount still must not move the visible floor.
+    expect(json.prices.takeLead).toBe(5001);
+  });
+
+  /* R09-1: a live take hold is the fact that decides a bid, and the payload
+     has to publish it — the refusal on a floor-priced tile has no amount to
+     offer, and the client may not promise a takeover it will not get. */
+  const holdProbe = (sym: string, ip: string) => async (amountUsd: number, stamp: string) =>
+    checkoutPOST(
+      req("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": ip },
+        body: JSON.stringify({
+          elementSym: sym,
+          amountUsd,
+          attest: true,
+          idempotencyKey: key(),
+          startup: {
+            title: `RT${stamp}`,
+            pitch: "take hold probe pitch",
+            url: `https://rl-probe-${stamp}-${key()}.dev`,
+            linkType: "product",
+          },
+        }),
+      })
+    );
+
+  it("publishes the live hold and closes a floor tile instead of hinting (R09-1)", async () => {
+    const owner = await prisma.startup.upsert({
+      where: { domain: "rt-hold-a.dev" },
+      create: { domain: "rt-hold-a.dev", title: "Hold A", pitch: "hold fixture pitch", url: "https://rt-hold-a.dev", logoUrl: "x" },
+      update: {},
+    });
+    const join = await prisma.payment.create({
+      data: { elementId: T9, startupId: owner.id, amountUsd: 5, path: "JOIN", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
+    });
+    const settled = await settlePayment(join.id, { provider: "dev", eventId: `dev-${key()}`, eventType: "dev.test", paid: true });
+    expect(settled.outcome).toBe("applied");
+
+    // The leader owns the quote on a $5 tile, so the hold is minted at $6: $5
+    // is the tie and everything above it is the hold.
+    const quote = await prisma.payment.create({
+      data: { elementId: T9, startupId: owner.id, amountUsd: 6, path: "TAKE", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
+    });
+    const expiresAt = new Date(Date.now() + 10 * 60_000);
+    await prisma.claimReservation.create({
+      data: { elementId: T9, startupId: owner.id, paymentId: quote.id, quotedLeaderTotal: 5, quotedLeaderStartupId: owner.id, reservedTotal: 6, expiresAt },
+    });
+
+    // The board says so before the buyer types: this is what the modal's crown
+    // sentence reads (R09-1, R09-6).
+    const open = await elementGET(req("/api/elements/TST9"), { params: { sym: "TST9" } } as never);
+    const openJson = (await open.json()) as { count: number; stakes: { amount: number }[]; takeHold: { reservedTotal: number; expiresAt: string } | null };
+    expect(openJson.takeHold).toEqual({ reservedTotal: 6, expiresAt: expiresAt.toISOString() });
+    expect(openJson.count).toBe(openJson.stakes.length);
+    expect(openJson.stakes[0]?.amount).toBe(5);
+
+    // The refusal names the hold, and does not offer the amount the tie rule
+    // would have hinted at (it does not land either).
+    const walled = await holdProbe("TST9", "198.51.100.11")(6, "wall");
+    expect(walled.status).toBe(409);
+    const walledBody = (await walled.json()) as { code?: string; reservedTotal?: number; expiresAt?: string; joinBlocked?: boolean; joinHint?: number };
+    expect(walledBody.code).toBe("RESERVATION_CONFLICT");
+    expect(walledBody.reservedTotal).toBe(6);
+    expect(walledBody.expiresAt).toBe(expiresAt.toISOString());
+    expect(walledBody.joinBlocked).toBe(true);
+    expect(walledBody.joinHint).toBeUndefined();
+
+    // When the hold lapses the same $6 is a plain take: the tile was never
+    // closed, it was held.
+    await prisma.claimReservation.updateMany({ where: { elementId: T9 }, data: { status: "EXPIRED" } });
+    const after = await elementGET(req("/api/elements/TST9"), { params: { sym: "TST9" } } as never);
+    expect(((await after.json()) as { takeHold: unknown }).takeHold).toBeNull();
+    expect((await holdProbe("TST9", "198.51.100.12")(6, "after")).status).toBe(200);
+  });
+
+  it("hints an amount that still lands under a hold, and it lands (R09-1)", async () => {
+    const owner = await prisma.startup.upsert({
+      where: { domain: "rt-hold-b.dev" },
+      create: { domain: "rt-hold-b.dev", title: "Hold B", pitch: "hold fixture pitch", url: "https://rt-hold-b.dev", logoUrl: "x" },
+      update: {},
+    });
+    const leader = await prisma.startup.findUniqueOrThrow({ where: { domain: "ct-a.dev" } });
+    const quote = await prisma.payment.create({
+      data: { elementId: T6, startupId: owner.id, amountUsd: 5001, path: "TAKE", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
+    });
+    await prisma.claimReservation.create({
+      data: {
+        elementId: T6,
+        startupId: owner.id,
+        paymentId: quote.id,
+        quotedLeaderTotal: 5000,
+        quotedLeaderStartupId: leader.id,
+        reservedTotal: 5001,
+        expiresAt: new Date(Date.now() + 10 * 60_000),
+      },
+    });
+
+    const post = holdProbe("TST6", "198.51.100.13");
+    // Aiming at #1 is exactly what the hold refuses.
+    const refused = await post(5001, "aim");
+    expect(refused.status).toBe(409);
+    const refusedBody = (await refused.json()) as { code?: string; joinHint?: number; joinBlocked?: boolean };
+    expect(refusedBody.code).toBe("RESERVATION_CONFLICT");
+    expect(refusedBody.joinBlocked).toBeUndefined();
+    expect(refusedBody.joinHint).toBe(5);
+    // The amount the server just printed is one the server accepts.
+    expect((await post(refusedBody.joinHint as number, "hint")).status).toBe(200);
+  });
+
+  it("keeps a fully reversed row off the board it can no longer lead (R09-4)", async () => {
+    const ghost = await prisma.startup.upsert({
+      where: { domain: "rt-zero-t.dev" },
+      create: { domain: "rt-zero-t.dev", title: "Zero", pitch: "zero fixture pitch", url: "https://rt-zero-t.dev", logoUrl: "x" },
+      update: {},
+    });
+    // What an unwind leaves behind: the row survives for click history and the
+    // first claim, with nothing left on it.
+    await prisma.stake.create({ data: { elementId: T6, startupId: ghost.id, amountUsd: 0, rank: 50, isLeader: false } });
+
+    const res = await elementGET(req("/api/elements/TST6"), { params: { sym: "TST6" } } as never);
+    const json = (await res.json()) as { count: number; pool: number; stakes: { domain: string; amount: number; rank: number }[]; prices: { takeLead: number } };
+    expect(json.stakes.some((s) => s.domain === "rt-zero-t.dev")).toBe(false);
+    expect(json.stakes.every((s) => s.amount > 0)).toBe(true);
+    // Ranks are re-derived from the listed rows, so nothing is skipped.
+    expect(json.stakes.map((s) => s.rank)).toEqual(json.stakes.map((_, i) => i + 1));
+    // The count the tile prints is the count it lists; pool keeps counting all
+    // money (a reversed row contributes nothing anyway).
+    expect(json.count).toBe(json.stakes.length);
+    const el = await prisma.element.findUniqueOrThrow({ where: { id: T6 } });
+    expect(json.pool).toBe(el.totalPoolUsd);
+    // A $0 row must not price the lead either: the floor is still $5, not $1.
     expect(json.prices.takeLead).toBe(5001);
   });
 });

@@ -55,9 +55,11 @@ export default async function ElementPage({ params }: { params: { sym: string } 
       include: {
         // Same visibility contract as /api/elements/[sym]: hidden listings
         // never reach the ranked list, so the CTA price and JSON-LD derived
-        // from stakes[0] cannot disclose a concealed bid.
+        // from stakes[0] cannot disclose a concealed bid. Fully reversed
+        // stakes (amountUsd 0) are rows, not bids, and are left out too (R09-4)
+        // — the stored aggregates still count them.
         stakes: {
-          where: { startup: { moderationState: { not: "HIDDEN" } } },
+          where: { startup: { moderationState: { not: "HIDDEN" } }, amountUsd: { gt: 0 } },
           orderBy: { amountUsd: "desc" },
           include: { startup: { select: { domain: true, title: true, pitch: true } } },
         },
@@ -66,7 +68,9 @@ export default async function ElementPage({ params }: { params: { sym: string } 
     if (element) {
       // stakeCount/totalPoolUsd deliberately still count every stake
       // (lib/moderation.ts: financial history is never deleted), so the page
-      // owes the reader an explanation for the difference in row count.
+      // owes the reader an explanation for the difference in row count — and
+      // it reads the visible+live rows rather than stakeCount, which also
+      // counts fully reversed rows (R09-4).
       hiddenStakes = await prisma.stake.count({
         where: { elementId: element.id, startup: { moderationState: "HIDDEN" } },
       });
@@ -120,7 +124,7 @@ export default async function ElementPage({ params }: { params: { sym: string } 
           {el?.name ?? element.symbol} ({element.symbol}) — startups on the table
         </h1>
         <p className="text-sm text-mutedink mt-1">
-          {element.stakeCount} stakers · ${element.totalPoolUsd} pool · take #1 for ${takeLead}
+          {element.stakes.length + hiddenStakes} stakers · ${element.totalPoolUsd} pool · take #1 for ${takeLead}
         </p>
         <table className="mt-4 w-full bg-white rounded-2xl overflow-hidden text-sm">
           <tbody>
