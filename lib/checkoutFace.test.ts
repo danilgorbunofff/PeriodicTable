@@ -10,6 +10,7 @@ import {
   titleShapeBad,
   urlMessage,
   urlShapeBad,
+  type CheckoutTab,
 } from "./checkoutFace";
 import { isEmail } from "./validate";
 
@@ -21,7 +22,7 @@ import { isEmail } from "./validate";
    lib/checkoutIntake.test.ts. */
 
 const form = {
-  tab: "url" as const,
+  tab: "url" as CheckoutTab,
   url: "https://acme.dev",
   title: "Acme",
   pitch: "a pitch that clears the length rule",
