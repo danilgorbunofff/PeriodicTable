@@ -83,10 +83,10 @@ const PAGES: Record<string, LegalPage> = {
         ],
       },
       {
-        h: "No refunds & disputes",
+        h: "Refunds & disputes",
         ps: [
-          "All stakes are final. A stake buys advertising inventory that is delivered immediately (your listing appears on the table and in leaderboards as soon as the payment settles), so we do not offer refunds, withdrawals, or cancellations — including if you are later outbid or if you change your mind.",
-          "If something went wrong with a payment, contact us before disputing the charge. Chargebacks filed without first contacting us may result in the permanent removal of all your listings without refund.",
+          "All stakes are final. A stake buys advertising inventory that is delivered immediately (your listing appears on the table and in leaderboards as soon as the payment settles), so we do not offer discretionary refunds, withdrawals, or cancellations — including if you are later outbid or if you change your mind.",
+          "If something went wrong with a payment, contact us before disputing the charge. If a payment is refunded (by us, or by your card issuer after a dispute), the stake behind it is reversed with it: the listing falls back to the previous holder and any leaderboard position it bought is lost. Chargebacks filed without first contacting us may result in the permanent removal of all your listings.",
           "You are responsible for any taxes arising from your purchase under your local law.",
         ],
       },
@@ -142,7 +142,7 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
   const page = PAGES[params.slug];
   if (!page) return notFound();
   return (
-    <main className="min-h-screen bg-profilebg text-ink">
+    <main id="main" className="min-h-screen bg-profilebg text-ink">
       <div className="max-w-2xl mx-auto px-4 py-8">
         <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
         <h1 className="font-display text-2xl font-bold mt-3">{page.title}</h1>

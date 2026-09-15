@@ -33,7 +33,7 @@ export function WorldOrder({
         >
           <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white text-2xl shadow-card">⚗️</div>
           <div className="min-w-0 flex-1 pt-0.5">
-            <div className="text-[11px] tracking-[.14em] text-ink/60 font-extrabold uppercase">the table · live</div>
+            <div className="text-[11px] tracking-[.14em] text-ink/70 font-extrabold uppercase">the table · live</div>
             <h2 className="mt-0.5 font-display text-[27px] leading-none font-bold text-ink">Table Order</h2>
             <div className="mt-1.5 text-xs font-extrabold text-ink/70">TOP 10 · MOST SPENT</div>
           </div>

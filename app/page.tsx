@@ -440,7 +440,9 @@ function HomeInner() {
 export default function Home() {
   return (
     <ToastHost>
-      <HomeInner />
+      <main id="main">
+        <HomeInner />
+      </main>
     </ToastHost>
   );
 }

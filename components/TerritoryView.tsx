@@ -78,7 +78,7 @@ export function TerritoryView({
             {el.symbol}
           </div>
           <div className="min-w-0 flex-1 pt-0.5">
-            <div className="text-[11px] tracking-widest font-extrabold uppercase text-ink/60">
+            <div className="text-[11px] tracking-widest font-extrabold uppercase text-ink/70">
               {rows.length ? "CLAIMED ELEMENT" : "OPEN ELEMENT"}
             </div>
             <h2 className="mt-0.5 font-display text-[27px] leading-none font-bold text-ink">

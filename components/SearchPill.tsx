@@ -114,7 +114,7 @@ export function SearchPill({
           }
         }}
         placeholder="find your startup..."
-        className="flex-1 bg-transparent outline-none text-sm placeholder:text-mutedink"
+        className="flex-1 bg-transparent outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink rounded-full text-sm placeholder:text-mutedink"
       />
       <button
         aria-label="Search"

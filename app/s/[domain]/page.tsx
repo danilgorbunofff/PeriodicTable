@@ -97,7 +97,7 @@ export default async function Profile({ params }: { params: { domain: string } }
   }
 
   return (
-    <div className="min-h-screen bg-profilebg text-ink">
+    <main id="main" className="min-h-screen bg-profilebg text-ink">
       <div className="max-w-5xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between">
           <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
@@ -108,7 +108,7 @@ export default async function Profile({ params }: { params: { domain: string } }
 
         <div className="mt-4 rounded-card p-6 text-center shadow-card" style={{ background: "linear-gradient(180deg,#FFEFC1,#FFCE4B)" }}>
           <div className="text-xs font-extrabold tracking-widest">✦ OFFICIALLY ON THE TABLE ✦</div>
-          <div className="font-display text-2xl font-bold mt-1">{domain} is on the table</div>
+          <h1 className="font-display text-2xl font-bold mt-1">{domain} is on the table</h1>
           <div className="text-sm font-bold mt-1">{title} · {held} elements claimed</div>
         </div>
 
@@ -164,7 +164,7 @@ export default async function Profile({ params }: { params: { domain: string } }
           ))}
         </div>
 
-        <h3 className="mt-6 font-display font-bold">Elements held</h3>
+        <h2 className="mt-6 font-display font-bold">Elements held</h2>
         <div className="mt-2 grid md:grid-cols-2 gap-3">
           {boards.map((board) => {
             const fam = board.family as keyof typeof FAMILY_FILL;
@@ -202,6 +202,6 @@ export default async function Profile({ params }: { params: { domain: string } }
           Public page · standings are live. Anyone can list any link — a listing doesn&apos;t imply the company added it.
         </div>
       </div>
-    </div>
+    </main>
   );
 }

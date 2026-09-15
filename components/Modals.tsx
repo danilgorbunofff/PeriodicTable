@@ -307,7 +307,7 @@ export function CheckoutPreview({
           >
             <label htmlFor="wl-email" className="mb-1 block text-[11px] font-extrabold text-mutedink">Email</label>
             <IcyInput id="wl-email" name="wl-email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@startup.com" aria-invalid={!!waitErr} aria-describedby={waitErr ? "wl-email-error" : undefined} />
-            {waitErr && <div id="wl-email-error" className="mt-2 text-xs text-red-500 font-bold">{waitErr}</div>}
+            {waitErr && <div id="wl-email-error" className="mt-2 text-xs text-red-700 font-bold">{waitErr}</div>}
             <ChunkyButton type="submit" className="w-full mt-3 text-sm px-5 h-12" disabled={waitBusy}>
               {waitBusy ? "Joining…" : "Join waitlist"}
             </ChunkyButton>
@@ -354,9 +354,11 @@ export function CheckoutPreview({
             aria-invalid={badUrl || serverField?.field === "url"}
             aria-describedby={badUrl || serverField?.field === "url" ? "co-url-error" : undefined}
           />
-          {badUrl && <div id="co-url-error" className="text-xs text-red-500">Enter a full URL starting with https://</div>}
-          {serverField?.field === "url" && <div id="co-url-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
-        </div>
+          {(badUrl || serverField?.field === "url") && (
+            <div id="co-url-error" className="text-xs text-red-700">
+              {serverField?.field === "url" ? <span className="font-bold">{serverField.message}</span> : "Enter a full URL starting with https://"}
+            </div>
+          )}        </div>
         <div>
           <label htmlFor="co-title" className="mb-1 block text-[11px] font-extrabold text-mutedink">Startup name</label>
           <IcyInput
@@ -368,9 +370,11 @@ export function CheckoutPreview({
             aria-invalid={badTitle || serverField?.field === "title"}
             aria-describedby={badTitle || serverField?.field === "title" ? "co-title-error" : undefined}
           />
-          {badTitle && <div id="co-title-error" className="text-xs text-red-500">Name must be 2–32 characters.</div>}
-          {serverField?.field === "title" && <div id="co-title-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
-        </div>
+          {(badTitle || serverField?.field === "title") && (
+            <div id="co-title-error" className="text-xs text-red-700">
+              {serverField?.field === "title" ? <span className="font-bold">{serverField.message}</span> : "Name must be 2–32 characters."}
+            </div>
+          )}        </div>
         <div>
           <label htmlFor="co-pitch" className="mb-1 block text-[11px] font-extrabold text-mutedink">One-line pitch</label>
           <IcyInput
@@ -382,9 +386,11 @@ export function CheckoutPreview({
             aria-invalid={badPitch || serverField?.field === "pitch"}
             aria-describedby={badPitch || serverField?.field === "pitch" ? "co-pitch-error" : undefined}
           />
-          {badPitch && <div id="co-pitch-error" className="text-xs text-red-500">Pitch must be 2–140 characters.</div>}
-          {serverField?.field === "pitch" && <div id="co-pitch-error" className="text-xs text-red-500 font-bold">{serverField.message}</div>}
-        </div>
+          {(badPitch || serverField?.field === "pitch") && (
+            <div id="co-pitch-error" className="text-xs text-red-700">
+              {serverField?.field === "pitch" ? <span className="font-bold">{serverField.message}</span> : "Pitch must be 2–140 characters."}
+            </div>
+          )}        </div>
         <div>
           <label htmlFor="co-email" className="mb-1 block text-[11px] font-extrabold text-mutedink">Email for receipt + outbid alerts (optional)</label>
           <IcyInput
@@ -395,7 +401,7 @@ export function CheckoutPreview({
             aria-invalid={badEmail}
             aria-describedby={badEmail ? "co-email-error" : undefined}
           />
-          {badEmail && <div id="co-email-error" className="text-xs text-red-500">That email doesn&apos;t look right.</div>}
+          {badEmail && <div id="co-email-error" className="text-xs text-red-700">That email doesn&apos;t look right.</div>}
         </div>
         <div>
           <label htmlFor="co-amount" className="mb-1 block text-[11px] font-extrabold text-mutedink">Stake amount (whole dollars)</label>
@@ -449,8 +455,8 @@ export function CheckoutPreview({
           );
         })}
       </div>
-      {clientErr && <div className="mt-2 text-xs text-red-500 font-bold">{clientErr}</div>}
-      {serverErr && <div className="mt-2 text-xs text-red-500 font-bold">{serverErr}</div>}
+      {clientErr && <div className="mt-2 text-xs text-red-700 font-bold">{clientErr}</div>}
+      {serverErr && <div className="mt-2 text-xs text-red-700 font-bold">{serverErr}</div>}
       <input
         type="text"
         value={honeypot}

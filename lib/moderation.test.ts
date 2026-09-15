@@ -76,6 +76,16 @@ afterAll(async () => {
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
   await purgeSettledOutbox(prisma, { startup: { domain: { in: DOMAINS } } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: DOMAINS } } });
+  // R05-7: report intake also enqueues a notice keyed on the report id, which
+  // purgeSettledOutbox (payment keys only) does not cover. Read the ids first —
+  // deleting the reports is what removes the key.
+  const reports = await prisma.report.findMany({
+    where: { startup: { domain: { in: DOMAINS } } },
+    select: { id: true },
+  });
+  await prisma.outboxEvent.deleteMany({
+    where: { dedupeKey: { in: reports.map((r) => `report-mail:${r.id}`) } },
+  });
   await prisma.report.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
   await prisma.payment.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });
   await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: DOMAINS } } } });

@@ -30,7 +30,7 @@ export function BoundaryNotice({
 }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-profilebg px-4 py-10 text-ink">
-      <main className="w-full max-w-md">
+      <main id="main" className="w-full max-w-md">
         <a href="/" className="font-display text-[22px] font-bold text-ink no-underline">
           periodictable<span className="text-money">.lol</span>
         </a>

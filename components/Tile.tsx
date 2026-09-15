@@ -60,7 +60,7 @@ function TileInner({
       tabIndex={tabIndex}
       title={face.title}
       aria-label={`${el.symbol} ${el.name}${face.ariaLabelSuffix}`}
-      className={`tile-lift group relative rounded-lg border cursor-pointer flex flex-col items-center justify-center leading-none ${
+      className={`tile-lift group relative rounded-lg border cursor-pointer flex flex-col items-center justify-center leading-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
         exoticTheme
           ? `exotic-tile ${exoticTheme.className}`
           : "border-hairline shadow-[0_2px_7px_rgba(31,43,62,.12)] hover:shadow-lg"

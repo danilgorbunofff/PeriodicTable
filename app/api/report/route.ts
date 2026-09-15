@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
+import { enqueueOutbox, drainDueWithin } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,44 @@ export async function POST(req: NextRequest) {
   const ipHash = createHash("sha256")
     .update(`${ip}:${process.env.CLICK_SALT ?? "ptl-dev-salt"}`)
     .digest("hex");
-  await prisma.report.create({ data: { stakeId, startupId, domain, reason, ipHash } });
+  const created = await prisma.report.create({
+    data: { stakeId, startupId, domain, reason, ipHash },
+    select: { id: true, createdAt: true },
+  });
+  await notifyOperator({ id: created.id, domain, stakeId, reason, createdAt: created.createdAt });
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Operator notice for a new report (R05-7): the mail is what turns the
+ * "actioned within 72 hours" promise into something that actually arrives.
+ * Bounded to a few seconds so the always-200 intake response is never held
+ * open by a slow webhook; anything left behind is drained by the daily
+ * /api/jobs/outbox cron, and the Report row stays the durable record.
+ */
+async function notifyOperator(report: {
+  id: string;
+  domain: string | null;
+  stakeId: string | null;
+  reason: string;
+  createdAt: Date;
+}) {
+  try {
+    await enqueueOutbox(prisma, {
+      type: "REPORT_EMAIL",
+      payload: {
+        to: process.env.REPORT_NOTIFY_EMAIL ?? "abuse@periodictable.lol",
+        id: report.id,
+        domain: report.domain,
+        stakeId: report.stakeId,
+        reason: report.reason,
+        createdAt: report.createdAt.toISOString(),
+      },
+      dedupeKey: `report-mail:${report.id}`,
+    });
+    await drainDueWithin(3_000, 5, ["REPORT_EMAIL"]);
+  } catch (err) {
+    // The report is already stored; a failed notice must not fail intake.
+    console.warn("report notify failed", err);
+  }
 }

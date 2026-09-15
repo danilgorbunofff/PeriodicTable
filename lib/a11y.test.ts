@@ -3,7 +3,7 @@
    these lock the computable parts: AA contrast ratios, grid-nav math, and
    the structural requirements every overlay/form must keep. */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import tailwindConfig from "../tailwind.config";
 import { cellMap, stepCell, rowEnd } from "./gridNav";
@@ -118,7 +118,9 @@ describe("text contrast meets WCAG 2.2 AA (4.5:1 small text)", () => {
   it("the dev pay simulator keeps its muted text at AA", () => {
     // Inline-styled (no Tailwind tokens), so the class-based guard above misses
     // it: the light grey #999 is only 2.84:1 on the card's #fff at 12px.
-    const pay = src("app/pay/[paymentId]/page.tsx");
+    // R05-8 moved the simulator out of the route: page.tsx is now the dev-only
+    // gate, so the inline-styled markup lives (and is checked) here.
+    const pay = src("app/pay/[paymentId]/PaySimulator.tsx");
     expect(ratio("#999999", "#FFFFFF")).toBeLessThan(4.5);
     expect(ratio("#666666", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
     expect(pay).not.toMatch(/(?<![-a-zA-Z])color:\s*"#[89abAB][0-9a-fA-F]{2}"/);
@@ -240,5 +242,171 @@ describe("form + status contracts (static)", () => {
     expect(css).toMatch(/prefers-reduced-motion: reduce/);
     expect(css).toMatch(/\.exotic-tile::before/);
     expect(css).toMatch(/animation: none !important/);
+  });
+});
+/* ------------------------------------------------------------------ *
+ * Phase 05 — accessibility & content.
+ * ------------------------------------------------------------------ */
+
+/** Every rendered UI source, so a sweep cannot miss one surface. */
+const uiFiles = (): string[] => {
+  const pick = (dir: string, prefix: string) =>
+    (readdirSync(join(__dirname, "..", dir), { recursive: true }) as string[])
+      .filter((f) => f.endsWith(".tsx"))
+      .map((f) => prefix + "/" + f.replace(/\\/g, "/"));
+  return [...pick("components", "components"), ...pick("app", "app")];
+};
+
+/** Composite a translucent foreground (Tailwind`s `text-x/70`) over a backdrop. */
+const over = (fg: string, bg: string, alpha: number): string => {
+  const ch = [0, 2, 4].map((i) => {
+    const f = parseInt(fg.slice(1 + i, 3 + i), 16);
+    const b = parseInt(bg.slice(1 + i, 3 + i), 16);
+    return Math.round(f * alpha + b * (1 - alpha));
+  });
+  return "#" + ch.map((v) => v.toString(16).padStart(2, "0")).join("");
+};
+
+describe("R05-1 small text away from the tile palette (static)", () => {
+  const colors = tailwindConfig.theme!.extend!.colors as Record<string, string>;
+  it("muted copy is ink/70 — ink/60 fails AA on both light backdrops", () => {
+    expect(ratio(over(colors.ink, "#FFFFFF", 0.7), "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(over(colors.ink, colors.icy, 0.7), colors.icy)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(over(colors.ink, "#FFFFFF", 0.6), "#FFFFFF")).toBeLessThan(4.5);
+    expect(ratio(over(colors.ink, colors.icy, 0.6), colors.icy)).toBeLessThan(4.5);
+    for (const p of ["components/TerritoryView.tsx", "components/WorldOrder.tsx"]) {
+      expect(src(p), p).not.toMatch(/text-ink\/60/);
+      expect(src(p), p).toMatch(/text-ink\/70/);
+    }
+  });
+  it("error text is red-700, not the 3.76:1 red-500", () => {
+    expect(ratio("#EF4444", "#FFFFFF")).toBeLessThan(4.5);
+    expect(ratio("#B91C1C", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("#B91C1C", colors.icy)).toBeGreaterThanOrEqual(4.5);
+    for (const p of uiFiles()) expect(src(p), p).not.toMatch(/text-red-500/);
+  });
+});
+
+describe("R05-2 focus is never invisible (static)", () => {
+  const colors = tailwindConfig.theme!.extend!.colors as Record<string, string>;
+  it("every outline-none keeps a focus-visible outline on the same element", () => {
+    const bare: string[] = [];
+    for (const p of uiFiles()) {
+      src(p).split("\n").forEach((line, i) => {
+        if (/outline-none/.test(line) && !/focus-visible:outline/.test(line)) bare.push(p + ":" + (i + 1));
+      });
+    }
+    expect(bare).toEqual([]);
+  });
+  it("the outline-none inventory is exactly the three that still need one", () => {
+    const counts: Record<string, number> = {};
+    for (const p of uiFiles()) {
+      const n = (src(p).match(/outline-none/g) ?? []).length;
+      if (n > 0) counts[p] = n;
+    }
+    // A bare `outline-none` is an invisible focus state unless a ring replaces
+    // it: add the ring beside the new one, then extend this map deliberately.
+    expect(counts).toEqual({
+      "components/IcyInput.tsx": 1,
+      "components/Modal.tsx": 1,
+      "components/SearchPill.tsx": 1,
+    });
+  });
+  it("each ring uses the colour that survives that surface", () => {
+    expect(src("components/IcyInput.tsx")).toMatch(/focus-visible:outline-ink/);
+    expect(src("components/SearchPill.tsx")).toMatch(/focus-visible:outline-ink/);
+    expect(src("components/IconBtn.tsx")).toMatch(/focus-visible:outline-ink/);
+    expect(src("components/Modal.tsx")).toMatch(/focus-visible:outline-white/);
+    expect(src("components/Tile.tsx")).toMatch(/focus-visible:outline-white/);
+    // The opposite pairing is invisible, and the CTA yellow never qualifies:
+    expect(ratio("#FFFFFF", colors.icy)).toBeLessThan(3);
+    expect(ratio(colors.ink, colors.stage)).toBeLessThan(3);
+    expect(ratio(colors.cta, colors.icy)).toBeLessThan(3);
+    expect(ratio("#FFFFFF", colors.stage)).toBeGreaterThanOrEqual(3);
+    expect(ratio(colors.ink, "#FFFFFF")).toBeGreaterThanOrEqual(3);
+    expect(ratio(colors.ink, colors.icy)).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("R05-3 bypass block and landmarks (static)", () => {
+  it("the skip link is the first focusable thing, outside the inerted shell", () => {
+    const layout = src("app/layout.tsx");
+    const skip = layout.indexOf('href="#main"');
+    expect(skip).toBeGreaterThan(-1);
+    expect(skip).toBeLessThan(layout.indexOf("{children}"));
+    expect(layout).toMatch(/sr-only focus:not-sr-only/);
+    expect(layout).toMatch(/focus:z-\[var\(--z-skip\)\]/);
+    // Modal inerts #app-root; a link rendered inside it would be inert too.
+    expect(layout).not.toMatch(/app-root/);
+  });
+  it("it sits above the preview layer and below the modal it must not cover", () => {
+    const css = src("app/globals.css");
+    const z = (k: string) => Number(new RegExp("--z-" + k + ":\\s*(\\d+)").exec(css)![1]);
+    expect(z("skip")).toBeGreaterThan(z("preview"));
+    expect(z("skip")).toBeLessThan(z("modal"));
+  });
+  it("every page has exactly one main landmark for the link to reach", () => {
+    const once = [
+      "app/page.tsx",
+      "app/s/[domain]/page.tsx",
+      "app/legal/[slug]/page.tsx",
+      "app/pay/[paymentId]/PaySimulator.tsx",
+      "lib/boundaryChrome.tsx",
+    ];
+    for (const p of once) expect((src(p).match(/id="main"/g) ?? []).length, p).toBe(1);
+    // The signed-out and signed-in element shells are separate branches, so
+    // both carry the landmark and only one is ever rendered.
+    expect((src("app/elements/[sym]/page.tsx").match(/id="main"/g) ?? []).length).toBe(2);
+  });
+  it("the profile page opens with a heading rather than unlabelled content", () => {
+    const profile = src("app/s/[domain]/page.tsx");
+    expect(profile).toMatch(/<h1 /);
+    expect(profile).toMatch(/<h2 /);
+  });
+});
+
+describe("R05-4 error ids are unique (static)", () => {
+  const modals = src("components/Modals.tsx");
+  it("each described-by target exists once, with both messages inside it", () => {
+    for (const field of ["url", "title", "pitch"]) {
+      const id = 'id="co-' + field + '-error"';
+      expect((modals.match(new RegExp(id, "g")) ?? []).length, field).toBe(1);
+      expect(modals).toMatch(new RegExp('aria-describedby=("|\\{)[^\\n]*co-' + field + '-error'));
+    }
+    // The server reason and the client hint share one node, so the id is not
+    // duplicated when both are true and describedby keeps one referent.
+    expect(modals).toMatch(/serverField\?\.field === "url"[\s\S]{0,120}font-bold/);
+  });
+});
+
+describe("R05-5 background polling pauses (static)", () => {
+  it("no surface overrides the visibility gate", () => {
+    for (const p of uiFiles()) expect(src(p), p).not.toMatch(/refreshWhenHidden/);
+  });
+  it("the four polling surfaces still refresh, and say so when they cannot", () => {
+    for (const p of ["app/page.tsx", "components/ActivityCard.tsx", "components/TerritoryView.tsx", "components/WorldOrder.tsx"]) {
+      expect(src(p), p).toMatch(/refreshInterval: 30000/);
+    }
+    expect(src("lib/liveState.ts")).toMatch(/live updates are paused/);
+  });
+});
+
+describe("R05-8 the pay simulator is dev-only (static)", () => {
+  const page = src("app/pay/[paymentId]/page.tsx");
+  it("the route gates on the provider mode and 404s everything else", () => {
+    expect(page).not.toMatch(/"use client"/);
+    expect(page).toMatch(/getProviderMode\(\) !== "dev"/);
+    expect(page).toMatch(/notFound\(\)/);
+    expect(page).toMatch(/export const dynamic = "force-dynamic"/);
+  });
+  it("the simulator keeps its light card, its amber surface and the landmark", () => {
+    const sim = src("app/pay/[paymentId]/PaySimulator.tsx");
+    expect(sim).toMatch(/"use client"/);
+    expect(sim).toMatch(/<main[\s\S]{0,60}id="main"/);
+    expect(sim).toMatch(/background:\s*"#FFCE4B"/);
+    // The amber is a *surface* with dark text on it, never a text colour:
+    // #FFCE4B is 1.15:1 against white and could not carry 15px copy.
+    expect(sim).not.toMatch(/color:\s*"#FFCE4B"/);
+    expect(ratio("#FFCE4B", "#FFFFFF")).toBeLessThan(3);
   });
 });

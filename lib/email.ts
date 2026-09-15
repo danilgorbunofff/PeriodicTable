@@ -7,6 +7,8 @@ import { prisma } from "./prisma";
 import { outbidHtml, outbidSubject } from "../emails/outbid";
 import { outbidReclaimUrl } from "./links";
 import { receiptHtml, receiptSubject } from "../emails/receipt";
+import { reportHtml, reportSubject } from "../emails/report";
+import { waitlistHtml, waitlistSubject } from "../emails/waitlist";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -135,4 +137,43 @@ export async function sendReceiptEmail(p: ReceiptEmailParams) {
     status,
     detail: subject,
   });
+}
+
+export type ReportEmailParams = {
+  to: string;
+  id: string;
+  domain: string | null;
+  stakeId: string | null;
+  reason: string;
+  createdAt: Date;
+};
+
+/** Operator notification for a new report (R05-7). No unsubscribe header: this
+ *  is a one-off operational message to the moderation inbox, not a list. */
+export async function sendReportEmail(p: ReportEmailParams) {
+  const subject = reportSubject({ domain: p.domain });
+  const html = reportHtml({
+    id: p.id,
+    domain: p.domain,
+    stakeId: p.stakeId,
+    reason: p.reason,
+    createdAt: `${p.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC`,
+    queueUrl: `${APP_URL}/api/admin/reports`,
+  });
+  const status = await deliver(p.to, subject, html);
+  await logEmail({ to: p.to, template: "report", status, detail: subject });
+}
+
+export type WaitlistEmailParams = {
+  to: string;
+  domain: string | null;
+  source: string;
+};
+
+/** Confirmation to the address that joined the waitlist (R05-7). */
+export async function sendWaitlistEmail(p: WaitlistEmailParams) {
+  const subject = waitlistSubject();
+  const html = waitlistHtml({ domain: p.domain, tableUrl: APP_URL });
+  const status = await deliver(p.to, subject, html);
+  await logEmail({ to: p.to, template: "waitlist", status, detail: `${subject} (${p.source})` });
 }

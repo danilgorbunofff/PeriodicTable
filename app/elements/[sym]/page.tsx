@@ -78,7 +78,7 @@ export default async function ElementPage({ params }: { params: { sym: string } 
     // Build-time fallback without DATABASE_URL: SEO shell from static ELEMENTS.
     if (!el) return notFound();
     return (
-      <main className="min-h-screen bg-profilebg text-ink">
+      <main id="main" className="min-h-screen bg-profilebg text-ink">
         <div className="max-w-3xl mx-auto px-4 py-8">
           <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
           <h1 className="font-display text-3xl font-bold mt-3">
@@ -113,7 +113,7 @@ export default async function ElementPage({ params }: { params: { sym: string } 
     })),
   };
   return (
-    <main className="min-h-screen bg-profilebg text-ink">
+    <main id="main" className="min-h-screen bg-profilebg text-ink">
       <div className="max-w-3xl mx-auto px-4 py-8">
         <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
         <h1 className="font-display text-3xl font-bold mt-3">

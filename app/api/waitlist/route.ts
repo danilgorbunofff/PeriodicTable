@@ -6,6 +6,7 @@ import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { hashIp } from "@/lib/clicks";
 import { audit } from "@/lib/audit";
+import { enqueueOutbox, drainDueWithin } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
 
@@ -42,5 +43,26 @@ export async function POST(req: NextRequest) {
     update: { domain, source, consentAt: new Date() },
   });
   await audit({ action: "WAITLIST_JOINED", detail: email, actorRef: hashIp(ip) });
+  await confirmWaitlist({ email, domain, source });
   return NextResponse.json({ ok: true, id: entry.id });
+}
+
+/**
+ * Confirmation mail for the paused-checkout path (R05-7), where the UI says
+ * "we'll be in touch". Deduped per address per hour so a re-submit cannot
+ * become a mail loop; a genuinely later re-join still gets its own message.
+ * Bounded like the report notice; the outbox row survives for the cron.
+ */
+async function confirmWaitlist(entry: { email: string; domain: string | null; source: string }) {
+  try {
+    await enqueueOutbox(prisma, {
+      type: "WAITLIST_EMAIL",
+      payload: { to: entry.email, domain: entry.domain, source: entry.source },
+      dedupeKey: `waitlist-mail:${entry.email}:${Math.floor(Date.now() / 3_600_000)}`,
+    });
+    await drainDueWithin(3_000, 5, ["WAITLIST_EMAIL"]);
+  } catch (err) {
+    // The join is already stored; a failed confirmation must not fail intake.
+    console.warn("waitlist confirm failed", err);
+  }
 }
