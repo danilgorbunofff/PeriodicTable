@@ -25,14 +25,25 @@ export function requestId(): string {
  *
  * The live probe (2026-09-14, production): three requests 2 s apart to
  * `/api/elements` came back `x-vercel-cache: MISS` then `HIT`, `age: 0/2/4`,
- * with `date` frozen — the edge does honour the 10 s window. It also rewrites
- * the browser-facing directive to `public, max-age=0, must-revalidate`, so no
- * browser is ever promised a stale copy. Mirroring the same policy in
- * `Vercel-CDN-Cache-Control` states the CDN half explicitly, so editing the
- * client directive later cannot silently drop the edge window.
+ * with `date` frozen — the edge does honour the 10 s window. Mirroring the same
+ * policy in `Vercel-CDN-Cache-Control` states the CDN half explicitly, so
+ * editing the client directive later cannot silently drop the edge window.
+ *
+ * R15-1 (2026-09-16): the browser-facing directive used to be whatever the
+ * edge rewrote it to (`public, max-age=0, must-revalidate`), so a repeat view
+ * or a remount always cost a round trip. It now carries a window of its own —
+ * `max-age=5`, deliberately *below* the 30 s `refreshInterval` every consumer
+ * of these routes polls at (`app/page.tsx`, `components/TerritoryView.tsx`,
+ * `components/WorldOrder.tsx`, `components/ActivityCard.tsx`). That is the
+ * whole safety argument: a cache entry can never outlive the poll that would
+ * have replaced it, so the live numbers keep their cadence while a burst of
+ * mounts (modal open + territory view, a reload, a back-navigation) is
+ * answered without a request. `lib/readCache.test.ts` asserts the inequality
+ * against the client's own literal, so raising this number past the poll
+ * interval fails the suite rather than the board.
  */
 export const READ_CACHE = {
-  "Cache-Control": "s-maxage=10, stale-while-revalidate=30",
+  "Cache-Control": "public, max-age=5, s-maxage=10, stale-while-revalidate=30",
   "Vercel-CDN-Cache-Control": "s-maxage=10, stale-while-revalidate=30",
 } as const;
 
@@ -184,6 +195,50 @@ async function enforceContract(res: Response, id: string): Promise<Response> {
 }
 
 /**
+ * The path a request was for, without the query string. Query strings on this
+ * site carry secrets (`?token=`, `?me=`), and the path is the part that pairs
+ * with a route file in a grep (R15-11).
+ */
+function requestPath(req: unknown): string {
+  const url = (req as { url?: unknown } | undefined)?.url;
+  if (typeof url !== "string") return "-";
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return "-";
+  }
+}
+
+/**
+ * One line per origin invocation (R15-11). Before this, nothing in the product
+ * measured itself: no route reported its own duration, and the log for a total
+ * database outage had no request id and no path (doc 15 §5.10), so an operator
+ * could not tell a slow route from a fast one or attribute a spike to a path.
+ * The CDN absorbs most reads, so these lines are the origin's own traffic — the
+ * cheapest honest version of "invocations, and how long each took". Deliberately
+ * `console.log` and not a counter store: a counter table would put write load on
+ * every read to answer a question the log already answers.
+ */
+function logInvocation(
+  id: string,
+  req: unknown,
+  status: number,
+  startedAt: number
+): void {
+  const method = (req as { method?: unknown } | undefined)?.method;
+  console.log(
+    JSON.stringify({
+      scope: "api",
+      id,
+      method: typeof method === "string" ? method : "-",
+      path: requestPath(req),
+      status,
+      ms: Date.now() - startedAt,
+    })
+  );
+}
+
+/**
  * Wrap a handler in the boundary contract: reuse the platform's request id when
  * one arrived, answer an uncaught throw as a JSON 500 (or a 503 when the throw
  * is the database being unreachable — "our dependency is down" and "we have a
@@ -196,8 +251,11 @@ async function enforceContract(res: Response, id: string): Promise<Response> {
 export function withContract(handler: ApiHandler): ApiHandler {
   const wrapped = async (...args: unknown[]): Promise<Response> => {
     const id = inboundRequestId(args[0]) ?? requestId();
+    const startedAt = Date.now();
     try {
-      return await enforceContract(await handler(...args), id);
+      const res = await enforceContract(await handler(...args), id);
+      logInvocation(id, args[0], res.status, startedAt);
+      return res;
     } catch (err) {
       const connectivity = isConnectivityFailure(err);
       const status = connectivity ? 503 : 500;
@@ -205,6 +263,7 @@ export function withContract(handler: ApiHandler): ApiHandler {
       // The log line pairs with the header a caller sees — the whole point of
       // the request id is that support can find this line from either end.
       console.error(`[api] ${id} ${status} ${code}:`, err instanceof Error ? `${err.name}: ${err.message}` : err);
+      logInvocation(id, args[0], status, startedAt);
       return NextResponse.json(
         { error: messageForStatus(status), code },
         { status, headers: { "x-request-id": id } }

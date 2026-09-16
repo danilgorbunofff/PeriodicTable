@@ -7,6 +7,16 @@ import { OG_CARD } from "@/lib/ogCard";
 import { siteOrigin } from "@/lib/siteUrl";
 
 export const dynamicParams = true;
+// The data window, and therefore the document's: Next derives
+// `Cache-Control: s-maxage=60, stale-while-revalidate` for this route from it,
+// so a visitor can be served a 60 s old page — and, for the `revalidate` window
+// after a failure, the fallback shell below as if it were the page. R15-10: the
+// shell is now distinguishable and logged (see the catch), and the window itself
+// is left at 60 s on purpose: it is 5x *tighter* than the homepage's
+// `s-maxage=31536000`, so widening the difference here is the wrong direction,
+// and choosing a per-surface window is the platform decision doc 15 §9 Q4
+// records (owner: 12). A crawler that lands in the window is told the standings
+// are unavailable rather than being shown an element with no bidders.
 export const revalidate = 60;
 
 export async function generateStaticParams() {
@@ -47,11 +57,16 @@ export default async function ElementPage({ params }: { params: { sym: string } 
   // so send `/elements/au` to `/elements/Au` instead of rendering a duplicate
   // that claims its own canonical URL and ranks against it.
   if (el && el.symbol !== symbol) redirect(`/elements/${encodeURIComponent(el.symbol)}`);
+  // A symbol the inventory does not author is a 404 in every deployment,
+  // database or not — resolved before any query so a typo'd URL can never be
+  // answered with a page about a real element (R15-10).
+  if (!el) notFound();
   let element = null;
   let hiddenStakes = 0;
+  let dbFailed = false;
   try {
     element = await prisma.element.findUnique({
-      where: { symbol: el?.symbol ?? symbol },
+      where: { symbol: el.symbol },
       include: {
         // Same visibility contract as /api/elements/[sym]: hidden listings
         // never reach the ranked list, so the CTA price and JSON-LD derived
@@ -75,12 +90,27 @@ export default async function ElementPage({ params }: { params: { sym: string } 
         where: { elementId: element.id, startup: { moderationState: "HIDDEN" } },
       });
     }
-  } catch {
+  } catch (err) {
+    // R15-10: this used to be `catch {}` — the page silently rendered the
+    // build-time shell while the log said nothing, so a total database outage
+    // was indistinguishable from a quiet element, from the outside *and* from
+    // the inside. The failure is now recorded (page + symbol, never a value from
+    // the request) and the shell says which of the two states it is showing.
     element = null;
+    dbFailed = true;
+    console.error(
+      JSON.stringify({
+        scope: "page",
+        page: "element",
+        symbol: el.symbol,
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    );
   }
   if (!element) {
-    // Build-time fallback without DATABASE_URL: SEO shell from static ELEMENTS.
-    if (!el) return notFound();
+    // Build-time fallback without DATABASE_URL, or a failed read at request
+    // time. `el` is known to exist here (checked above), so this is never a
+    // masquerade of a missing element.
     return (
       <main id="main" className="min-h-screen bg-profilebg text-ink">
         <div className="max-w-3xl mx-auto px-4 py-8">
@@ -88,7 +118,11 @@ export default async function ElementPage({ params }: { params: { sym: string } 
           <h1 className="font-display text-3xl font-bold mt-3">
             {el.name} ({el.symbol}) — startups on the table
           </h1>
-          <p className="text-sm text-mutedink mt-1">Live standings load with a database connection.</p>
+          <p className="text-sm text-mutedink mt-1">
+            {dbFailed
+              ? "Live standings are temporarily unavailable. Reload in a moment — the table itself is still up."
+              : "Live standings load with a database connection."}
+          </p>
           <Link
             href={`/?el=${encodeURIComponent(el.symbol)}&stake=5`}
             className="mt-4 inline-block bg-cta font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm"

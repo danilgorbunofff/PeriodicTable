@@ -14,7 +14,8 @@ import {
   type CredentialHealth,
 } from "@/lib/env";
 import { probeStripeKey } from "@/lib/stripe";
-import { failedMailHealth } from "@/lib/outbox";
+import { dueOutboxCount, failedMailHealth } from "@/lib/outbox";
+import { prisma } from "@/lib/prisma";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
@@ -114,9 +115,48 @@ async function getConfig(req: NextRequest) {
     configFindingsOk(findings) ? null : "report not ok",
   );
 
+  // R15-11/R15-13: the numbers that make spend and backlog attributable, in the
+  // one place an operator already polls (see R13-3 above — this route is the
+  // external pinger's only in-app surface). Before this, nothing in the product
+  // measured itself: doc 15 could only count invocations and ISR writes from the
+  // platform's dashboards, and the row volume the review enumerated per
+  // settlement (11 rows across 8 tables, nothing that trims them) was invisible
+  // from inside. What is reportable *here* is what the database knows:
+  // settlements actually applied, the outbox depth the worker is behind on, and
+  // the size of the analytics trail nothing prunes (`STAKE_ANALYTICS` rows are
+  // written per settlement and never read — their handler is a deliberate no-op,
+  // lib/outbox.ts). Two numbers deliberately absent, because the product cannot
+  // see them and must not pretend to: platform invocations and ISR writes are
+  // the host's to count (Vercel's logs and ISR-write metric; the per-request
+  // `{"scope":"api"}` line from withContract is the origin's own half).
+  //
+  // Cost of asking: the counts are index-backed (`Payment(status)`, the
+  // `(type, completedAt)` outbox index, and the partial claim index behind
+  // `dueOutboxCount`), this route is authenticated, and it runs on the job
+  // tick — not on a visitor path. Best-effort like `mail` and `heartbeats`: a
+  // database that cannot answer leaves it null rather than turning the report
+  // into a 500.
+  let cost: {
+    settlements: { day: number; week: number };
+    outboxDue: number;
+    analyticsRows: number;
+  } | null = null;
+  try {
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const [day, week, outboxDue, analyticsRows] = await Promise.all([
+      prisma.payment.count({ where: { status: "PAID", appliedAt: { gte: hoursAgo(24) } } }),
+      prisma.payment.count({ where: { status: "PAID", appliedAt: { gte: hoursAgo(24 * 7) } } }),
+      dueOutboxCount(),
+      prisma.outboxEvent.count({ where: { type: "STAKE_ANALYTICS", completedAt: { not: null } } }),
+    ]);
+    cost = { settlements: { day, week }, outboxDue, analyticsRows };
+  } catch {
+    cost = null;
+  }
+
   const ok = configFindingsOk(findings);
   return NextResponse.json(
-    { ok, env: getAppEnv(), findings, stripeKey, mail, heartbeats },
+    { ok, env: getAppEnv(), findings, stripeKey, mail, heartbeats, cost },
     { status: ok ? 200 : 503 },
   );
 }

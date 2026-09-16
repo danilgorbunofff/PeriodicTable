@@ -338,6 +338,188 @@ Stated as a number with its evidence, and separated from the load the plan forbi
 - **The three soft ceilings that will announce themselves first**: a 15-minute abandoned hold freezing competing buyers on that element (R15-9, measured 12/12 refusals), a body-less 500 for any database hiccup (R15-3, measured across 14 surfaces), and element pages serving the no-database shell out of the CDN for up to a year (R15-10, measured `s-maxage=31536000` on `/` and `x-nextjs-cache: STALE` on `/elements/Ts`).
 - **What would falsify this ceiling**: a staging deployment with production-shaped data and a load generator (the settling command in the probe table), plus a Lighthouse/CrUX read for the other half of the question.
 
+### 5.14 The fix pass (2026-09-16)
+
+The fix pass closed the findings below, against the same review container and with the phase-11
+route contract and the phase-12 data layer already in place. Every claim in this section is
+either source-level (a directive, a query, a guard) or the suite's own output: **nothing in this
+pass was deployed**, so R15-1's live header re-read and R15-10's `x-nextjs-cache` re-read belong
+to the next deploy. The verification commands and their results are at the end of the section.
+
+**R15-1 — the browser gets a window, sized under the poll.** `READ_CACHE` (`lib/route.ts:45-49`)
+now answers `Cache-Control: public, max-age=5, s-maxage=10, stale-while-revalidate=30` instead of
+the CDN-only pair whose browser half the edge rewrote to `max-age=0, must-revalidate` (§5.3). The
+safety argument is an inequality rather than a judgement call: **5 s sits below the 30 s
+`refreshInterval` every consumer of these routes polls at** (`app/page.tsx`,
+`components/TerritoryView.tsx`, `components/WorldOrder.tsx`, `components/ActivityCard.tsx`), so a
+cached copy can never outlive the poll that would have replaced it and the live numbers keep the
+cadence `05` §9 Q2 accepted. What the reader gains is the burst case — a modal opening, a reload,
+a back-navigation, the board and the activity card mounting together — which is now answered
+without a request instead of four. `lib/readCache.test.ts` asserts the inequality against the
+client's own literal (`max-age × 1000 < 30_000`) and fails on any three-digit `max-age`, so
+raising the window past the poll interval breaks the suite rather than the board. The doc-comment
+paragraph that described the edge rewriting the browser directive was **deleted**, because it no
+longer describes the behaviour it sits above. The two card routes were audited and deliberately
+left alone: `app/og/[sym]/route.tsx:9` and `app/og/home/route.tsx:14,18` are CDN-only windows for
+images nothing polls.
+
+**R15-2 — corrected, not fixed.** The premise was wrong in two places and the correction is the
+deliverable; the size itself is the inventory-scaling subject of §9 Q1. See the table below.
+
+**R15-3 — the last unguarded data path.** `app/s/[domain]/page.tsx` was it: `generateMetadata`
+ran its own unguarded `prisma.startup.findUnique` *before* the page, so with the database
+unreachable the throw came from the metadata pass and the visitor got Next's error document
+(§5.10's 6,560 B body). Both reads now sit in one `loadProfile()` helper, `generateMetadata`
+catches and answers a generic title, and the page distinguishes the two nulls it can see: a
+missing, empty or hidden profile is still a 404 (`if (!dbFailed) return notFound()`), while a read
+that *threw* renders the product's own shell — "… — profile temporarily unavailable", with the
+table link and the 44 px CTA — and logs
+`{"scope":"page","page":"profile","where":…,"domain":…,"reason":…}`. The API half of this finding
+was already closed by phase 11 (`withContract` on all 28 routes), so what remained was exactly the
+page paths, and the element page's half is R15-10.
+
+**R15-4 — the index was real, the rest of the evidence was not.** The finding's quoted plan
+(`Seq Scan on "Element" … Filter: "isLeader"`) describes a query `/api/board` never issues:
+`isLeader` is a `Stake` column (`prisma/schema.prisma:159`), not an `Element` one, and the route
+never reads `Element` at all; `?tab=by-element` has carried `take: 20`
+(`app/api/board/route.ts:54`) since it was written. What survived is real: **no index covered
+`Stake."isLeader"`** for the two tabs that filter on it. `prisma/migrations/0011_leader_index`
+adds `Stake_isLeader_amountUsd_idx` — partial (`WHERE "isLeader" = true`) and ordered
+`("amountUsd" DESC)` so it serves both `crowns` and `by-element` — hand-written and read back
+from `pg_indexes` by `lib/schema.test.ts`, the same idiom `0001_phase1_ownership`'s
+`ClaimReservation_elementId_active_key` uses and for the same reason (`migrate diff` cannot
+express a partial index). No `take` was added to `crowns` or `early`: both aggregate over *all*
+rows and rank after aggregating, so a `take` would truncate the input and silently undercount
+crowns and medals — a wrong answer instead of a shorter one. Both routes now say that in place.
+The honest limit of the fix is that it changes no plan at today's size: with the planner free,
+122 rows still resolve by seq scan, and `enable_seqscan=off` is what shows the index is usable
+(`Index Scan using "Stake_isLeader_amountUsd_idx"`); the `by-element` ordering already resolves
+through the pre-existing `Stake_elementId_amountUsd_idx` with `Filter: "isLeader"`. The index is
+the growth path for the one dimension the product plans to grow, not a change to any measured
+number in §5.6.
+
+**R15-5 — five statements become one.** `app/api/activity/route.ts` now issues a single
+`prisma.$queryRaw` instead of five round trips. The visibility rule moved *inside* the query as
+`WHERE NOT EXISTS (SELECT 1 FROM "Startup" h WHERE h.domain = a.domain AND
+h."moderationState"::text = 'hidden')` — before `LIMIT`, so the page size stays exactly what the
+caller asked for, where the previous shape materialised an unbounded array of hidden domains and
+filtered in memory. The stake lookup is bounded by the unique `(domain, symbol)` pair (one join
+against a `Stake` row that is unique on `(elementId, startupId)`), so the inner lookups are
+bounded by the joined row, not by a `.take()` the caller could not see. `$queryRaw` is the
+established instrument here (`lib/outbox.ts:305,405`, `lib/erasure.ts:157,257`), and it is what
+keeps the route safe under transaction-mode PgBouncer (`12` R12-5). The response shape is
+unchanged by construction: `lib/routes.test.ts` and `lib/moderation.test.ts` drive the route
+against the container and assert the same rows, including that a hidden domain's activity stays
+out of the feed. One honest note on the numbers: the fix's own timings on the test container
+(`ms: 1` in the invocation log below) are a fixture-sized database and are **not** comparable to
+§5.5's 27/77 ms production readings.
+
+**R15-6 — nothing structural, now instrumented.** The doc's own proposed fix was "nothing
+structural", and none was made. What changed is that the number is no longer an inference: every
+origin invocation logs its duration (R15-11), so the next cold start is a line in the log rather
+than a timing exercise.
+
+**R15-7 — the retry budget is now a wall-clock budget.** `lib/txn.ts` gained
+`TXN_BUDGET_MS = 40_000` and a refusal in `withTxnRetry`: before another attempt starts, the loop
+checks `elapsed + ATTEMPT_RESERVE_MS > budgetMs` (`ATTEMPT_RESERVE_MS = MONEY_TX.timeout`, so a
+retry starts only if a whole attempt still fits) and, when it does not, rethrows the retryable
+error it already has after logging `{"scope":"txn","msg":"budget-exhausted",…}`. The bound is the
+budget rather than the budget plus one attempt on purpose: with a 25 s statement timeout inside a
+40 s budget, retries start only during the first 15 s — and since the backoff is sub-second, the
+eight or nine attempts the loop exists for still fit, while §5.11's 250 s arithmetic tail cannot.
+Rethrowing needs no new handling anywhere: checkout already answers `502` with a code and Stripe
+redelivers the webhook, whose `ProviderEvent` and payment guard make the re-run idempotent. 40 s
+of the 60 s `maxDuration` leaves 20 s for the surrounding work (quote, audit, outbox, receipt).
+The signature accepts `number | TxnRetryOptions` so the two existing numeric call sites are
+untouched (`lib/phase7.test.ts:229` still pins the ordering inside `checkout`), and `now` is
+injectable so the two new tests in `lib/ledger.test.ts` prove the refusal without sleeping 40 s:
+one clock advanced 20 s per read refuses the retry and rethrows the serialization error, the other
+advanced 100 ms keeps retrying and succeeds on the third attempt.
+
+**R15-8, R15-9, R15-12 — closed elsewhere, verified here.** The three findings this doc produced
+but never owned are fixed in the docs that own them: the receipt derives its claim from the
+settled stake's rank rather than from the act of paying (`emails/receipt.tsx:29-46`,
+`receiptSubject` taking `rank`, `10` §7 R10-3 with `04` R04-1/R04-2), the hold has
+`09` §7 R09-1/R09-2 behind it, and the orphaned `pending` payments have `06` §7 R06-7, `08` §7
+R08-5 and `12` §7 R12-5 behind them. §6's after-fix table records the same three as unchanged by
+this pass. R15-9's remaining question is a product decision about the TTL, not an
+implementation one, and stays §9 Q2.
+
+**R15-10 — the shell says what it is, and an unknown symbol stops pretending.** Two changes in
+`app/elements/[sym]/page.tsx`. First, `if (!el) notFound()` immediately after the canonicalising
+redirect: an unknown symbol used to fall through to a shell that rendered *a real element's*
+name and symbol (the build-time SEO shell exists for valid symbols only), so a typo could be
+answered with a page about an element, and — with a stale ISR copy — keep being answered that way.
+Second, the fallback shell is now honest and logged: the read's `catch {}` became
+`catch (err)` setting `dbFailed`, logging `{"scope":"page","page":"element","symbol":…,"reason":…}`,
+and rendering "Live standings are temporarily unavailable. Reload in a moment — the table itself
+is still up." A stale copy of the shell now *says* it is a stale copy of the shell instead of
+rendering as a page. What this pass deliberately did not do is give the route an explicit
+`s-maxage`: the window is 60 s and the homepage's is `s-maxage=31536000`, so the direction of
+travel is settled and the *policy* is §9 Q4's, owned by `12`. The rationale is now a comment
+above `export const revalidate = 60` rather than tribal knowledge.
+
+**R15-11 — the product measures itself now, in two places.** (1) `lib/route.ts` logs one line per
+**origin** invocation from inside `withContract`:
+`{"scope":"api","id":…,"method":…,"path":…,"status":…,"ms":…}` — on the success path and on the
+error path, so the 503s of §5.10 are measured too, and with the *path only*: query strings on this
+site carry secrets (`?token=`, `?me=`), and the path is the half that pairs with a route file in a
+grep. It is deliberately `console.log` and not a counter store: a counter table would put write
+load on every read to answer a question the log already answers. The log lines are visible in the
+suite output, which is the evidence they fire for real requests:
+`{"scope":"api","id":"d5d23a78-…","method":"GET","path":"/api/activity","status":200,"ms":1}`.
+(2) `/api/jobs/config` — the route `13` built as the one dependency-free surface an operator
+already polls — now carries a `cost` block: `settlements: { day, week }` (PAID payments by
+`appliedAt`), `outboxDue` (the depth the worker is behind on), and `analyticsRows` (the
+`STAKE_ANALYTICS` trail nothing prunes). Best-effort like its `mail` and `heartbeats` neighbours —
+a database that cannot answer leaves it `null` rather than turning the report into a 500 — and
+database-only by construction: the production arm of `lib/ops.test.ts` stubs `fetch` to throw, so
+nothing network-facing was added to a route whose point is to answer when other dependencies are
+down. Two numbers are deliberately absent, because the product cannot see them: platform
+invocations and ISR writes are the host's to count (`U15-8`), and pretending otherwise would be a
+worse failure than the one this finding describes. The cost of the instrumentation is one log line
+per origin invocation — the minority of traffic, since the CDN absorbs the rest — and the escape
+hatch, if that volume ever matters, is sampling by request id, not removing the measurement.
+
+**R15-13 — fixed in part: the growth is now visible, the retention is still `12`'s.** The
+per-settlement arithmetic was confirmed, not disputed (11 rows across 8 tables is what the
+transaction writes, and `OutboxEvent` is the largest single object at 256 kB / ~280 rows, §5.9).
+What this pass adds is the count: `analyticsRows` on `/api/jobs/config` is the exact size of the
+one trail that is neither money nor mail — `STAKE_ANALYTICS` rows are written per settlement and
+never read, because their handler is a deliberate no-op that marks them complete (`lib/outbox.ts`).
+The retention statement itself is untouched and stays where the finding's own owner column puts it,
+`12`; and the "three outbox rows where one would do" suggestion is not safe to take here: that row
+is a deliberate roadmap placeholder for a sink that does not exist yet, while `Payment`,
+`AuditLog`, `ActivityLog` and `ProviderEvent` are the financial and audit history the product's
+own erasure path (`14`) treats as non-deletable. So the honest status is *fixed in part*:
+observable now, trimmed when `12` states a window.
+
+**Evidence corrected by this pass.**
+
+| # | What §5/§7 recorded on 2026-09-15 | What the source and this pass's reads show |
+| --- | --- | --- |
+| R15-2 | "the emitted `index.html` contains exactly one `<link rel="preload">` — the webpack runtime", hence "never preloads its own font" | **Two font preloads**, emitted by `next/font/google` in `app/layout.tsx`: `<link rel="preload" href="/_next/static/media/bca7023bf625e650-s.p.woff2" as="font" crossorigin="" type="font/woff2"/>` and the same for `ee40bb094c99a29a-s.p.woff2`, plus the webpack runtime's `fetchPriority="low"` script preload — three `rel="preload"` tags, not one |
+| R15-2 | "152 kB document" (read as the wire cost) | 152,028 B is the **uncompressed** document; the same emitted file is **11,620 B** at brotli quality 11. The remaining size claim is about inventory-scaled markup, and it is §9 Q1's subject |
+| R15-4 | "`EXPLAIN … Seq Scan on "Element" … Filter: "isLeader"`"; "neither tab bounds its read with `take`" | `isLeader` is a `Stake` boolean (`prisma/schema.prisma:159`); `/api/board` issues no query against `Element`, and `by-element` has had `take: 20` since it was written (`app/api/board/route.ts:54`). The real part of the finding — no index on the predicate — is fixed by `0011_leader_index` |
+| R15-13 | "nothing trims them" (all five tables) | True as a statement, and unchanged by this pass; the tables are not equivalent — only `OutboxEvent` is trim-able without deciding against a money/audit record the product already treats as permanent, which is why this closes as *fixed in part* |
+
+**Verification** (2026-09-16, this pass): `npx tsc --noEmit` clean · `npx eslint lib app emails
+scripts` clean · `npx prisma format --check` "All files are formatted correctly" and `npx prisma
+validate` "valid" · `npm run audit:prod` "no unaccepted high/critical runtime advisories" · the
+database suite `53 files / 799 passed / 0 skipped` (791 before this pass) against the review
+container, now carrying all twelve migrations including `0011_leader_index` · the database-less arm
+`46 files / 669 passed / 130 skipped` · the production-config gate in both arms (complete config →
+`production config OK.`, exit 0; `EMAIL_FROM` removed → exit 1; non-production →
+`env=development, not production — skipping.`, exit 0) · `0011_leader_index` verified directly:
+`pg_indexes` reports `Stake_isLeader_amountUsd_idx` as `("amountUsd" DESC) WHERE ("isLeader" =
+true)`, and with `enable_seqscan=off` the planner chooses it for the `isLeader` predicate. Two
+files of the existing suite moved with the code they pin: `lib/a11y.test.ts` re-lists
+`/s/[domain]` as a page with two `id="main"` branches, and `lib/detailFace.test.ts`'s R04-4
+assertions follow the element page's `if (!el) notFound()`. One new describe block with four tests
+was added (`lib/boundaries.test.ts`), and the two routes this pass touched that carry a
+contract — `/api/activity` (R15-5) and `/api/board` (R15-4) — are asserted by the phase-11 and
+phase-12 suites unchanged.
+
 ## 6. Failure and edge matrix
 
 Rows are situations; "distinguishable" asks whether the *customer* can tell this from the intended behaviour, and "who finds out" asks whether the product tells anyone.
@@ -362,6 +544,23 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 | Every symbol revalidated every minute | up to 175,680 ISR writes/day = 5.27 M/month, ≈ \$20 over the included 200 k (§5.12) | no | the invoice |
 | A slow device on the 122-tile grid with camera animations | **UNKNOWN** — needs a device profiler (U15-7) | — | — |
 
+**After the fix pass (§5.14).** Four rows of the table above changed shape, and the "who finds out"
+column changed for the rows that used to answer *nobody*. What deliberately did **not** change: the
+launch-state `403`, Stripe's `502` and its three orphaned `pending` rows, the Resend `logged`
+branch, the failing-open rate limits, the 13-buyer latency tail, and the unset-Upstash behaviour —
+this pass adds no caching to a write path and no queue to a read path.
+
+| Situation | What happens now | Distinguishable from intent? | Who finds out |
+| --- | --- | --- | --- |
+| Database unreachable, payments **on** | every API route answers `503 {"error":"Service unavailable."}` — the `CONNECTIVITY` classifier in `lib/route.ts` turns a dead pool or unreachable host into a JSON body, where §5.10 recorded 0-byte bodies on the ten API surfaces it drove. `/s/[domain]` answers the product's own profile shell and `/elements/[sym]` its labelled standings shell. *Not re-read live: nothing was deployed, so §5.10's readings stand as the last measurement of a real outage* | yes — but it is now a sentence the product wrote, not a blank | **yes:** one `{"scope":"api",…,"status":503,"ms":…}` line per origin request (R15-11) |
+| Database *slow* rather than gone | the settlement transaction still waits `maxWait` 15 s and runs to 25 s, but the retry loop now stops at a 40 s wall-clock budget (`TXN_BUDGET_MS`) instead of grinding through the ceiling | yes, and sooner: `502` with a code rather than a blank `500` after ~250 s | **yes:** the `budget-exhausted` warn line names the scope and the elapsed attempt |
+| Element page prerendered while the database was down | the shell still serves, but it now says "Live standings are temporarily unavailable. Reload in a moment — the table itself is still up." and logs the reason; an unknown symbol is a real `404` instead of a page about an element | **yes** — the page tells you it is a degraded copy, where §5.7 read a bare "no live data yet" | **yes:** `{"scope":"page","page":"element","symbol":…,"reason":…}` |
+| Any read burst on the three read surfaces | unchanged for the CDN origin (§5.13's ≤ 18 reads/minute), but a repeat within 5 s is answered from the browser cache instead of a request, and any origin request that does arrive is logged with its path, status and duration | no | **yes**, for the origin half |
+
+The rows still marked **UNKNOWN** in §5.10 (U15-4's slow Stripe, U15-5's slow Resend) and §5.1
+(U15-7's animation profile) stay UNKNOWN: none of them can be closed without a deploy, a live
+credential, or a device profiler, and inventing a number for them would be worse than the gap.
+
 ## 7. Findings
 
 ### R15-1 — The browser is never allowed to cache anything; the CDN's 10 s window is the only absorber
@@ -371,6 +570,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** `curl.exe -sS -D - -o NUL https://www.periodictable.lol/`; compare with the same request for `/api/stats`.
 **Proposed fix** Either raise the browser window for the *static* parts of a document (they carry no live numbers) or use `stale-while-revalidate` on the client's SWR revalidation so a reader's re-poll is answered from the edge without an origin round trip. Not a correctness change: the live numbers keep their 30 s cadence.
 **Status** open
+- **Fix.** `READ_CACHE` (`lib/route.ts:45-49`) now answers `public, max-age=5, s-maxage=10, stale-while-revalidate=30` — a browser window sized *under* the 30 s poll interval every consumer of these routes uses — and the doc-comment paragraph claiming the edge rewrites the browser directive was deleted, because it no longer described the code beneath it. `lib/readCache.test.ts` asserts the inequality against the client's own literal and fails on any three-digit `max-age`. The two OG card routes were audited and left CDN-only.
+- **Status.** fixed — the browser no longer asks the origin for a copy the next poll is about to replace (§5.14).
 
 ### R15-2 — `/` ships 152 kB of uncompressed document and never preloads its own font
 
@@ -379,6 +580,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** Byte-budget script over `.next/` (raw + `zlib.gzip`/`brotliCompressSync` of each referenced file); `grep -c '<link rel="preload"' .next/server/app/index.html`.
 **Proposed fix** Preload the one display-face woff2 the LCP block actually uses (or `font-display: swap` on it alone), and consider a smaller above-the-fold document: the table markup is 151 kB for 122 cells today and scales with the inventory.
 **Status** open
+- **Fix.** None, and the two premises were re-read rather than accepted: `app/layout.tsx` is `next/font/google` (Fredoka + Nunito), so the build emits **two** `<link rel="preload" as="font" crossorigin type="font/woff2">` tags for the self-hosted faces — not "exactly one preload, the webpack runtime" — and `content-length: 152029` is the **uncompressed** document, which is 11,620 B at brotli quality 11. Both corrections are in §5.14 with the bytes they came from.
+- **Status.** wontfix — the preload already happens (framework-emitted), and the size that remains is inventory-scaled markup, which is §9 Q1's product decision rather than a source change (§5.14).
 
 ### R15-3 — A database outage is a blank screen, and with payments off it is indistinguishable from the launch pause
 
@@ -387,6 +590,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** Serve the production build with `DATABASE_URL` pointed at a closed port and issue the requests in §5.10's table; `curl.exe -sS -o NUL -w "%{http_code} %{size_download}"`.
 **Proposed fix** A minimal error node on every JSON route (`11` R11-4 owns the shape) with a distinguishable status/`code`, and — for the checkout specifically — never a blank answer to "did I pay": `14` R14-1's fail-closed answer is already correct, it just needs to be reachable when the database, not the flag, is what failed.
 **Status** open
+- **Fix.** The page half, which was the remaining half: `app/s/[domain]/page.tsx` routes both reads through one `loadProfile()` helper, `generateMetadata` catches and answers a generic title instead of throwing through the metadata pass, a missing/empty/hidden profile is still a real `404` (`if (!dbFailed) return notFound()`), and a read that *threw* renders the product's own shell while logging `{"scope":"page","page":"profile","where":…,"domain":…,"reason":…}`. The API and checkout halves were already closed by phase 11's route boundary (`11` R11-3, all 28 routes), which classifies a connectivity throw as `503 {"error":"Service unavailable."}` and logs the request with an id and a path.
+- **Status.** fixed — every surface in the evidence now answers a JSON body with a code or renders a page that says what happened, and the outage log names the path (§5.14).
 
 ### R15-4 — Two of three board tabs scan `Element` for a flag with no index and no `take`
 
@@ -395,6 +600,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** `EXPLAIN (ANALYZE, BUFFERS) SELECT … FROM "Element" WHERE "isLeader" LIMIT …` against the review container.
 **Proposed fix** A partial index mirroring the one that exists (`12` R12-6), and a `take` on the element scan in both tabs. Cheap now, and the inventory is the one dimension the product plans to grow.
 **Status** open
+- **Fix.** `prisma/migrations/0011_leader_index` adds the partial index `Stake_isLeader_amountUsd_idx` — `("amountUsd" DESC) WHERE "isLeader" = true`, so it serves both `crowns` and `by-element` — hand-written because `migrate diff` cannot express a partial index, applied to the review container and read back from `pg_indexes` by `lib/schema.test.ts`. The `take` half is **refused in place**: `crowns` and `early` aggregate over *all* rows and rank after aggregating, so a `take` would truncate the input and silently undercount crowns and medals. §5.14 also corrects the evidence — `isLeader` is a `Stake` column (`prisma/schema.prisma:159`), `/api/board` never reads `Element`, and `by-element` has had `take: 20` (`app/api/board/route.ts:54`) since it was written.
+- **Status.** fixed — the unindexed predicate is indexed and asserted by the suite; the `take` suggestion is declined with its reason in the code and in §5.14.
 
 ### R15-5 — `/api/activity` is five round trips and its inner lookups are unbounded by the caller's `limit`
 
@@ -403,6 +610,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** Statement counters and the two timings in §5.5; `EXPLAIN` on the extracted query.
 **Proposed fix** Add explicit `take` ceilings on the inner lookups (the outer `limit` is not one) or denormalize the feed the way `12` §5.8 denormalizes the board.
 **Status** open
+- **Fix.** `app/api/activity/route.ts` is now a single `prisma.$queryRaw` instead of five statements. The hidden-domain exclusion moved inside the query as `WHERE NOT EXISTS (…)` — before `LIMIT`, so the page size the caller asked for is the page size it gets, where the old shape materialised an unbounded domain array and filtered in memory — and the stake lookup rides the join, bounded by the unique `(domain, symbol)` pair rather than by an invisible `.take()`. `$queryRaw` is the established instrument here (`lib/outbox.ts`, `lib/erasure.ts`) and keeps the route safe under transaction-mode PgBouncer (`12` R12-5). The response shape is unchanged: `lib/routes.test.ts` and `lib/moderation.test.ts` assert the same rows, including that a hidden domain's activity stays out of the feed.
+- **Status.** fixed — one round trip, no unbounded inner read, same contract (§5.14).
 
 ### R15-6 — The money path is the one route a paying reader can cold-start
 
@@ -411,6 +620,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** `next start` with a fabricated Stripe pair, then time the first `POST /api/checkout`.
 **Proposed fix** Nothing structural: this is a fraction of the 6.3%-of-ceiling tail already measured, and Vercel keeps functions warm under traffic. Recorded so that the *first* paying reader's experience is a known number rather than a surprise, and so a launch-day warm-up request is an available lever.
 **Status** open
+- **Fix.** Nothing structural, exactly as the proposed fix said. What changed is that the number no longer rests on a hand-timed probe: every origin invocation logs its duration, status and path (`15` R15-11), so the next cold start is a log line rather than a measurement exercise.
+- **Status.** accepted-risk — 805 ms on the first request after a start, against 56–128 ms warm; recorded as a known number with a known lever, not as a defect (§5.14).
 
 ### R15-7 — Thirteen simultaneous settlements on one element all succeed, with a 3.8 s tail; the retry budget exceeds the function ceiling by 4×
 
@@ -419,6 +630,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** Node script firing 13 distinct checkout+settle pairs at one symbol; wall-clock per pair.
 **Proposed fix** The measured case is 6.3% of the ceiling and needs nothing; the arithmetic case is safe but wasteful (a platform kill costs mail, not money, because the settlement commits first and `ProviderEvent` makes the retry idempotent). A deadline check between attempts would make the *stated* worst case honest.
 **Status** open
+- **Fix.** `lib/txn.ts` gained `TXN_BUDGET_MS = 40_000` and a check inside `withTxnRetry` that refuses another attempt when `elapsed + ATTEMPT_RESERVE_MS > budgetMs` (`ATTEMPT_RESERVE_MS = MONEY_TX.timeout`, so a retry starts only if a whole attempt still fits), rethrowing the retryable error it already holds after logging `{"scope":"txn","msg":"budget-exhausted",…}`. 40 s of the 60 s ceiling leaves 20 s for the surrounding work, and checkout needs no new handling — it answers `502` with a code, Stripe redelivers, and `ProviderEvent` plus the payment guard keep the re-run idempotent. Two tests in `lib/ledger.test.ts` prove the refusal and the still-retries case with an injected clock, so neither sleeps.
+- **Status.** fixed — the *stated* worst case is bounded by the function's own ceiling instead of 4× it; the measured case (p95 3,773 ms) needed nothing and is unchanged (§5.14).
 
 ### R15-8 — Eight equal-amount winners on one element are all told they are #1
 
@@ -427,6 +640,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** §5.9 row 3.
 **Proposed fix** Derive the receipt's claim from the settled `Stake` position (or the `FirstClaim` row) rather than from the act of paying. This is batch 2's, not new behaviour: `04` §7 R04-1/R04-2 owns quote derivation and `10` owns mail content.
 **Status** open
+- **Fix.** Landed in the docs that own it: `emails/receipt.tsx` now takes a `rank` prop derived from the settled `Stake` and `receiptSubject` reads `p.rank ?? 1`, so the claim follows the buyer's position rather than the act of paying (`10` §7 R10-3, `04` §7 R04-1/R04-2). The second half of the evidence — that displaced leaders are told — is `10`'s notice question, not this doc's.
+- **Status.** fixed (`10`, `04`) — verified in the file during this pass; no change was needed or made here (§5.14).
 
 ### R15-9 — One abandoned checkout freezes every competitor on that element for fifteen minutes
 
@@ -435,6 +650,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** §5.9 rows 1–2.
 **Proposed fix** Batch 2's territory (`09`): shorten the hold, extend it only on evidence of an in-flight payment, or let a competitor join a queue for the element instead of being refused. The performance-relevant fact is that a single customer's inaction is a full-product outage *for that element*, at the product's most interesting moment.
 **Status** open
+- **Fix.** None here, and none claimed: the hold's existence and duration are `09`'s ownership decision (`09` §7 R09-1/R09-2), which this doc's own proposed fix acknowledges. Nothing in the pass shortens, extends or queues around `RESERVATION_TTL_MS`.
+- **Status.** open (`09`) — the performance fact stands: one customer's inaction is a full-product outage for that element for up to fifteen minutes (§5.14).
 
 ### R15-10 — The element page served by the CDN can be the no-database shell
 
@@ -443,6 +660,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** Compare `.next/server/app/elements/Ts.html` with the served body and its `x-nextjs-cache` header (§5.1).
 **Proposed fix** Make the fallback shell say so (or fail the route) rather than render as a page, and give the element route an explicit `s-maxage` so its document lifetime matches its data lifetime. `12` §5.x settles what the contract should be.
 **Status** open
+- **Fix.** `app/elements/[sym]/page.tsx`: `if (!el) notFound()` immediately after the canonicalising redirect, so an unknown symbol can never be answered by a shell describing a real element; the read's `catch {}` became `catch (err)` setting `dbFailed` and logging `{"scope":"page","page":"element","symbol":…,"reason":…}`; and the fallback shell now says "Live standings are temporarily unavailable. Reload in a moment — the table itself is still up." A stale copy of the shell now *says* it is a stale copy of the shell. No explicit `s-maxage` was added to the route: the document/data lifetime policy is §9 Q4's, owned by `12`, and the rationale for the existing 60 s window is now a comment above the directive.
+- **Status.** fixed in part — the shell identifies itself and unknown symbols `404`; the window mismatch stays §9 Q4's (§5.14).
 
 ### R15-11 — Nothing in the product measures itself, so nothing about cost or degradation is visible until an invoice or a customer
 
@@ -451,6 +670,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** `grep` for `performance.now|Date.now()` around response construction in `app/api/**/route.ts` — none; `13` §5.9's `/api/jobs/config` reports configuration, not cost.
 **Proposed fix** A single `/api/jobs/config`-style operator surface extended with the four numbers that matter (invocations, settlements, outbox depth, ISR writes) or the cheapest alternative: a Vercel/Neon alert on spend and on 5xx rate, which needs no code change at all.
 **Status** open
+- **Fix.** Both halves of the proposed fix that live in this repo. (1) `withContract` (`lib/route.ts`) logs one line per origin invocation — `{"scope":"api","id":…,"method":…,"path":…,"status":…,"ms":…}` — on the success path *and* the error path, with the **path only**, because query strings on this site carry secrets (`?token=`, `?me=`). The line renders in the suite's own output, which is the evidence it fires for real requests. (2) `/api/jobs/config` carries a best-effort `cost` block — `settlements.day` / `.week`, `outboxDue`, `analyticsRows` — that stays `null` when the database cannot answer, so the operator surface does not become a 500 during the outage it exists to report. Two numbers are deliberately absent because the product cannot see them: platform invocations and ISR writes are the host's (U15-8), which the code says rather than implies. The escape hatch if log volume ever matters is sampling by request id, not removing the measurement.
+- **Status.** fixed — duration, status and the main cost drivers are visible in operation, without a dashboard and without a new dependency in the outage path (§5.14).
 
 ### R15-12 — A provider rejection leaves orphaned `pending` payment rows that no poller can see
 
@@ -459,6 +680,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** §5.8: checkout with `PAYMENTS_LIVE=true` and a fabricated `STRIPE_SECRET_KEY`, then inspect `Payment` and `ProviderEvent`.
 **Proposed fix** `07`'s ledger decision: either write a compensating terminal status on provider rejection, or emit the `ProviderEvent` that makes the attempt visible to the existing pollers instead of introducing a new one.
 **Status** open
+- **Fix.** Landed in the docs that own the ledger: `06` §7 R06-7 (the buyer-side half of orphaned `pending` payments), `08` §7 R08-5 (the unreachable `CANCELED` status) and `12` §7 R12-5 (the reconciliation that closes them).
+- **Status.** fixed (`06`, `08`, `12`) — no change here; the three rows this doc's failure injection produced are closed by the same transaction decision (§5.14).
 
 ### R15-13 — Every settled dollar writes eleven rows across eight tables, and nothing trims them
 
@@ -467,6 +690,8 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 **Reproduction** Snapshot-diff `pg_stat_user_tables` around one settle pair (§5.9).
 **Proposed fix** At 1,000 checkouts/day this is 168 MB/month and 330,000 rows/month, so it is not urgent — but the growth is permanent and the read surfaces that touch these tables (`/api/activity`) already cost five round trips. A retention statement belongs with `12`'s PII work; a cheaper item is not writing three outbox rows where one would do.
 **Status** open
+- **Fix.** The growth is now countable, and nothing was trimmed: `analyticsRows` in `/api/jobs/config`'s `cost` block is the exact size of the one trail that is neither money nor mail — `STAKE_ANALYTICS` rows, written per settlement and never read, because their handler is a deliberate no-op that marks them complete (`lib/outbox.ts`). No retention window was invented here, because the tables are not equivalent: `OutboxEvent`'s analytics row is a roadmap placeholder for a sink that does not exist yet, while `Payment`, `AuditLog`, `ActivityLog` and `ProviderEvent` are the financial and audit history the erasure path (`14`) already treats as non-deletable.
+- **Status.** fixed in part — observable now, trimmed when `12` states a retention window (§5.14).
 
 ## 8. Acceptance criteria
 
@@ -490,15 +715,63 @@ Rows are situations; "distinguishable" asks whether the *customer* can tell this
 
 Budget: **13 of 18 met at `9681bdc`**; the five open rows are the five UNKNOWN log entries, each with a settling command.
 
+**After the fix pass (§5.14).** No box changed state, and the reason is structural rather than a
+missed item: all five open boxes are *measurements*, and §5.14 adds no measurement — it adds the
+instrument that makes three of them cheaper to take. The per-invocation log answers "what was the
+production 5xx rate" from the application side (U15-9), the `cost` block narrows U15-8 from
+"invisible" to "countable from the app plus the host's own dashboard", and `TXN_BUDGET_MS` gives
+U15-2's 5xx rate a stated ceiling to be measured against. The thirteen ticked boxes stay ticked:
+nothing in the pass invalidated a reading, and the two evidence corrections in §5.14 (R15-2's
+preload and brotli size, R15-4's `isLeader` column) re-read material this doc had recorded as a
+reading rather than as an acceptance box. Of the eleven findings: six are fixed here (R15-1,
+R15-3, R15-4, R15-5, R15-7, R15-11), two fixed in part (R15-10, R15-13), two closed by the docs
+that own them (R15-8 → `10`/`04`, R15-12 → `06`/`08`/`12`), one declined with its premises
+corrected (R15-2), one accepted-risk (R15-6), and one left open for `09` (R15-9).
+
 ## 9. Open questions
 
 **Q1 — Should the prerendered `/` carry any live number at all?** Its document is 152 kB, cached for a year at the edge, and every number a reader actually reads arrives from three client fetches 157 kB later. If the numbers were server-rendered with a 60 s window, the reader would get one document and the JS bundle could shrink; if they stay client-side, `R15-1` is the wrong fix and the bundle is the real target. Owner: whichever doc owns the board's contract (`12`).
 
+*Answered in part by the fix pass — in the negative, and that is worth stating plainly.* §5.14's
+R15-1 fix sizes the browser window **under** the 30 s poll, which only makes sense if the numbers
+stay client-side: the fix presumes the answer "no live number in the prerendered document" and
+makes that choice cheaper to live with rather than moving it. The size half of the question is
+untouched — §5.14's R15-2 correction shows the wire cost of the document is 11.6 kB brotli today,
+so the "152 kB" figure is an uncompressed markup fact about an inventory that is 122 cells wide
+and is the dimension the product plans to grow. Deciding between one server-rendered document and
+a smaller client bundle remains `12`'s, and this pass did not make that decision harder.
+
 **Q2 — Is the 15-minute hold a product decision or an implementation detail?** Measured, one abandoned checkout blocks every competitor on that element for the full TTL (`R15-9`). If the hold is meant to protect a buyer mid-payment, it should expire on evidence; if it is meant to be a soft lock, 15 minutes on the product's most interesting element is a long time. Owner: `09` (batch 2).
+
+*Not this pass's, and it stays `09`'s.* Nothing in §5.14 touches `RESERVATION_TTL_MS`, and §5.14's
+R15-9 entry deliberately declines to: the hold's existence and its duration are an ownership
+decision, not a performance knob, and shortening it here would trade a measured refusal for an
+unmeasured double-sale risk. The measured fact stands as the input that decision needs — one
+customer's inaction is a full-product outage for that element — and the fix pass turned it into a
+line in the log rather than a fact only this document knows.
 
 **Q3 — What is the target for a *blank* answer?** Nine surfaces answer 500 with zero bytes (`R15-3`). The cheapest correct fix is one shared error helper (`11` R11-4); the question this doc cannot answer is which of those surfaces should instead answer *something useful* — a cached stale board is better than nothing for a reader, and nothing at all is worse than anything for a buyer. Owner: `11`, with `06` for the checkout specifically.
 
+*Answered in part, and the part that was answerable is done.* The blank answer no longer exists on
+any surface this doc measured it on: §5.14's R15-3 gave `/s/[domain]` a product-authored shell and
+turned the API half over to `11`'s existing boundary (`503 {"error":"Service unavailable."}`, with
+the request logged by path and status), and R15-10 gave the element page a shell that says it is
+degraded plus a real `404` for an unknown symbol. What is *not* answered is the choice the question
+actually asks — whether a reader is better served by a stale board than by an honest refusal, and
+whether a buyer is owed a different answer than a reader. That is `11`'s, with `06` for checkout,
+and the reason it is not settled here is that it is a product judgement about which wrong answer
+is least misleading, not a defect to remove.
+
 **Q4 — Should the ISR window be per-surface?** `s-maxage=31536000` on `/` and `revalidate = 60` on element routes mean two documents of the same product live for a year and a minute respectively, and the element one is the surface that must be fresh (§5.3, §5.7). One number, three surfaces, is worth a decision before launch because it is also the only line in §5.12 that can surprise on cost.
+
+*Answered in part by the fix pass.* The direction of travel is now written down rather than
+inferred: §5.14's R15-10 replaced the bare `revalidate = 60` with the rationale above it, and the
+element route's degraded shell now says it is degraded, so a stale copy can no longer render as a
+page about a live number — which was the half of this question that was a correctness problem.
+The policy half stays `12`'s, and this pass adds one input to it: with `0011_leader_index` the two
+leader tabs no longer scan, so the pressure to lengthen the window in order to protect the read
+path is gone. Lengthening it to cut U15-8's ISR writes is a real trade against staleness, and it
+is `12`'s to make with the invocation log's timings in front of them.
 
 ## 10. Cross-references
 
@@ -513,6 +786,13 @@ Budget: **13 of 18 met at `9681bdc`**; the five open rows are the five UNKNOWN l
 - `doc/PROD-READINESS-CHECKLIST.md` — cited by section for secret inventory and environment expectations (including the empty `DATABASE_URL` read at `:196,436`), never restated.
 - `doc/review/FINDINGS.md` — R15-1…R15-13 and U15-1…U15-9 are registered there in id order.
 
+Added by the fix pass (2026-09-16, §5.14):
+
+- `prisma/migrations/0011_leader_index/migration.sql` — the second hand-written partial index in the schema, alongside the one `12` R12-6 records (`ClaimReservation_elementId_active_key`), and asserted from `pg_indexes` by `lib/schema.test.ts` for the same reason that one is: `migrate diff` cannot express a partial index, so nothing else would notice its removal.
+- `lib/txn.ts` **`TXN_BUDGET_MS`** — the repository's second budget-shaped control; the first is `14` R14-11's advisory expiry, and this doc's §3 noted its absence as the reason §5.11's worst case was arithmetic rather than bounded.
+- The five test assertions this doc's findings produced: `lib/readCache.test.ts` (the cache window against the poll literal), `lib/ledger.test.ts` (the retry budget, both directions), `lib/schema.test.ts` (the index), `lib/boundaries.test.ts` (the two outage answers and their log lines), `lib/ops.test.ts` (the `cost` block's presence or `null`).
+- The docs that took deferred items back rather than this one stretching to hold them: `10` §7 R10-3 (R15-8's receipt copy — now `rank`-derived in `emails/receipt.tsx`), `06` §7 R06-7 with `08` §7 R08-5 and `12` §7 R12-5 (R15-12's orphaned `pending` rows), `09` §7 R09-1/R09-2 (R15-9's hold, which §5.14 leaves untouched on purpose).
+
 ## 11. Change log
 
 | Date | Change |
@@ -523,18 +803,33 @@ Budget: **13 of 18 met at `9681bdc`**; the five open rows are the five UNKNOWN l
 | 2026-09-15 | §5.10 rewritten as a full outage matrix against a dead `DATABASE_URL`, because stopping the container also stops the server under test |
 | 2026-09-15 | §2, §4 and the probe table corrected where the fresh measurements superseded earlier claims (contention losers, the operator row, "no Stripe call can be made", the failure-recipe row) |
 | 2026-09-15 | §4 port-attribution paragraph added: an earlier pass took figures from `:3212`, a sibling session's server; no figure in `11`–`15` comes from it |
+| 2026-09-16 | §5.14 written — the fix pass for R15-1/R15-3/R15-4/R15-5/R15-7/R15-10/R15-11/R15-13, the refusal behind R15-4's `take` half, and two evidence corrections (R15-2's preloads and brotli size, R15-4's `isLeader` column); §6 gained the after-fix rows, §7 the `Fix.`/`Status.` pairs, §8 the budget note, §9 the four partial answers, §10 the "Added by the fix pass" block and §12 the in-cell annotations. Verification: `tsc` and `eslint` clean, `prisma validate` valid, 53 files / 799 passed / 0 skipped with the database, 46 / 669 / 130 without it, prod-config gate green in both arms |
 
 ## 12. UNKNOWN log
 
 | Id | Unknown | What settles it |
 | --- | --- | --- |
 | U15-1 | Field LCP / INP / CLS for `/` and one element page on a cold 4G handset — the plan's own first line for this doc | CrUX dashboard or the PageSpeed Insights API for `https://www.periodictable.lol/`; `npx lighthouse https://www.periodictable.lol/ --preset=desktop --output=json --output-path=./lh.json` for a lab score. Needs no load I would have to generate |
-| U15-2 | The real concurrency ceiling, i.e. how many simultaneous settlements one element tolerates on production infrastructure | A staging deployment with production-shaped data plus `k6`/`artillery` at 25, 50 and 100 virtual users on one symbol, recording p95 and the 5xx rate — **not** runnable against the live origin and not runnable meaningfully from this host |
+| U15-2 | The real concurrency ceiling, i.e. how many simultaneous settlements one element tolerates on production infrastructure | A staging deployment with production-shaped data plus `k6`/`artillery` at 25, 50 and 100 virtual users on one symbol, recording p95 and the 5xx rate — **not** runnable against the live origin and not runnable meaningfully from this host. **§5.14:** the measurement itself is still owed, but the two numbers it has to be read against now exist inside the product — every origin invocation logs `status` and `ms` (R15-11), and `TXN_BUDGET_MS` states the ceiling the 5xx rate would be measuring against |
 | U15-3 | Neon's contribution to cold start, its pooled-connection ceiling and its region latency — `12` §5.14 owns the pooling facts and the restore drill; §5.13's ceiling depends on them | The production `DATABASE_URL` (`doc/PROD-READINESS-CHECKLIST.md:196,436` shows the read pulls back empty) plus a `pg_stat_activity` count during a synthetic burst; `12`'s PITR drill settles the restore half |
-| U15-4 | What a *slow* or briefly-5xx Stripe does to a checkout and to the webhook — the branch §5.10 could not produce without a real account | A Stripe test-mode key plus a fault-injecting proxy in front of `api.stripe.com`, or Stripe's own dashboard "failed payments" view after any real incident. Never the live key from a workstation |
+| U15-4 | What a *slow* or briefly-5xx Stripe does to a checkout and to the webhook — the branch §5.10 could not produce without a real account | A Stripe test-mode key plus a fault-injecting proxy in front of `api.stripe.com`, or Stripe's own dashboard "failed payments" view after any real incident. Never the live key from a workstation. **§5.14:** unchanged, and deliberately so — the pass added no network call to the money path and no provider credential to a developer machine, so this row is exactly as open as it was |
 | U15-5 | What a slow Resend does to a 30 s job invocation and to the 15 s inline drain | A Resend test key plus artificial delay (proxy or `RESEND` sandbox) on one settle; observe `OutboxEvent` depth afterwards, which is the number `13`'s cron depends on |
-| U15-6 | Real spend: the Vercel, Neon, Resend and Upstash lines for a launch month, Stripe's own fee schedule, and which of them the accounts actually bill at the tiers assumed in §5.12 | Provider consoles and the first invoice, read next to §5.12's model inputs (5.6 kB and 11 rows per settlement, 6 invocations per checkout). Every rate in §5.12 is a third-party summary until this row closes |
+| U15-6 | Real spend: the Vercel, Neon, Resend and Upstash lines for a launch month, Stripe's own fee schedule, and which of them the accounts actually bill at the tiers assumed in §5.12 | Provider consoles and the first invoice, read next to §5.12's model inputs (5.6 kB and 11 rows per settlement, 6 invocations per checkout). Every rate in §5.12 is a third-party summary until this row closes. **§5.14:** the pass gives the model one app-side input it lacked — `cost.settlements.day` / `.week` on `/api/jobs/config` — so the next invoice can be compared against a number the product produced rather than one this document counted by hand. The providers' lines themselves remain console-only |
 | U15-7 | The animation cost of `components/TableCamera.tsx` on the 122-tile grid, on a mid-range phone | A device profiler (Chrome DevTools performance trace throttled 4× CPU) on `/`, recording long tasks during a camera move; `components/TableCamera.tsx` is read, never profiled, in this review |
-| U15-8 | How many ISR writes the element routes actually incur, i.e. whether §5.12's largest cost line is real | Vercel's "ISR writes" usage metric over a week, compared with `symbols_reached_each_minute × 1440 × 30`; if it is anywhere near 5 M/month, that is a product decision about the 60 s window, not an invoice surprise |
-| U15-9 | Whether any real request has ever hit the body-less 500s of R15-3, and what the production 5xx rate is | Vercel → Logs filtered on status ≥ 500 over a week, plus an alert on 5xx rate; the log lines will name the Prisma model (as in §5.10) but no request id |
+| U15-8 | How many ISR writes the element routes actually incur, i.e. whether §5.12's largest cost line is real | Vercel's "ISR writes" usage metric over a week, compared with `symbols_reached_each_minute × 1440 × 30`; if it is anywhere near 5 M/month, that is a product decision about the 60 s window, not an invoice surprise. **§5.14:** half of this row is now answerable without the dashboard — the application side of every invocation is in the log, and `cost.analyticsRows` counts the one trail growth this doc could not see before — but **ISR writes themselves remain host-only**, and this row stays open until Vercel's metric is read |
+| U15-9 | Whether any real request has ever hit the body-less 500s of R15-3, and what the production 5xx rate is | Vercel → Logs filtered on status ≥ 500 over a week, plus an alert on 5xx rate; the log lines will name the Prisma model (as in §5.10) but no request id. **§5.14:** the second half of that sentence is no longer true — every origin invocation now logs an id, a method, a path, a status and a duration, so "has a real request ever hit one of these" is answerable from the application's own log after the next deploy. What the log cannot see is an invocation the platform kills before the code runs, and an *alert* on 5xx rate is still not configured, which is why this row stays open |
+
+**What the fix pass did not settle.** Nine rows above are untouched by it, and each for a reason
+the pass could not manufacture: U15-1 needs a field measurement on a real handset, U15-3 a
+production-database reading, U15-4 and U15-5 a live provider branch, U15-7 a device profiler. Two
+rows were *narrowed* rather than closed (U15-8, U15-9 — the application half is now in the log,
+the host half is not), and two gained an app-side input the model can be checked against (U15-2,
+U15-6). What remains structurally outside this document's reach is the same list §5.13 flagged:
+platform invocations, ISR write volume, provider invoices, field CWV, and animation cost — five
+things only the host, four consoles, and one real phone can report. Three decisions also stay
+where their owners put them, and the pass says so rather than absorbing them: the hold
+(R15-9 → `09`), retention for the tables that grow without a window (R15-13 → `12`), and whether
+the prerendered `/` should carry a live number at all (§9 Q1 → `12`). The one thing the pass
+changed about the unknowns themselves is that four of them are now cheaper to close than they
+were when this document was authored.
 

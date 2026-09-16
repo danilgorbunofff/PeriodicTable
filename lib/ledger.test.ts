@@ -66,6 +66,39 @@ describe("withTxnRetry", () => {
     ).rejects.toThrow(/boom/);
     expect(calls).toBe(1);
   });
+  // R15-7: the attempts cap alone allowed a ~250 s worst case inside routes
+  // that declare maxDuration = 60. The budget refuses the retry instead of
+  // letting the platform kill the function mid-transaction.
+  it("refuses a retry that no longer fits the wall-clock budget", async () => {
+    let calls = 0;
+    // 20 s per read: the first attempt alone consumes half the budget, so the
+    // 25 s attempt reserve no longer fits.
+    let clock = 0;
+    await expect(
+      withTxnRetry(
+        async () => {
+          calls++;
+          throw Object.assign(new Error("serialization"), { code: "P2034" });
+        },
+        { budgetMs: 40_000, now: () => (clock += 20_000) }
+      )
+    ).rejects.toThrow(/serialization/);
+    expect(calls).toBe(1);
+  });
+  it("keeps retrying while the budget holds", async () => {
+    let calls = 0;
+    let clock = 0;
+    const out = await withTxnRetry(
+      async () => {
+        calls++;
+        if (calls < 3) throw Object.assign(new Error("serialization"), { code: "P2034" });
+        return "ok";
+      },
+      { budgetMs: 40_000, now: () => (clock += 100) }
+    );
+    expect(out).toBe("ok");
+    expect(calls).toBe(3);
+  });
 });
 
 // ---- integration ----

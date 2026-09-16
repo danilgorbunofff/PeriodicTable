@@ -58,6 +58,18 @@ describe.skipIf(!hasTestDb)("migrated database shape (R12-6)", () => {
     expect(rows[0].indexdef).toMatch(/WHERE .*active/);
   });
 
+  it("keeps the hand-written partial index the board's leader tabs depend on", async () => {
+    // R15-4: `prisma migrate diff` cannot express a partial index, so this is
+    // the assertion that keeps it from being rewritten away.
+    const rows = await prisma.$queryRaw<{ tablename: string; indexdef: string }[]>`
+      SELECT tablename, indexdef FROM pg_indexes
+      WHERE indexname = 'Stake_isLeader_amountUsd_idx'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tablename).toBe("Stake");
+    expect(rows[0].indexdef).toMatch(/"amountUsd" DESC/);
+    expect(rows[0].indexdef).toMatch(/WHERE .*isLeader/);
+  });
+
   it("keeps every 0009 CHECK constraint, validated", async () => {
     const rows = await prisma.$queryRaw<{ conname: string; relname: string; definition: string }[]>`
       SELECT c.conname, t.relname, pg_get_constraintdef(c.oid) AS definition

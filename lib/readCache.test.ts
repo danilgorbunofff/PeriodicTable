@@ -1,4 +1,5 @@
-/* Review 03 / R03-3 — one home for the read-cache declaration.
+/* Review 03 / R03-3 — one home for the read-cache declaration. Review 15 /
+   R15-1 — that declaration's browser window.
 
    The finding claimed the declared `s-maxage=10` never reached the wire. The
    probe that re-tested it (2026-09-14, production, three requests 2 s apart on
@@ -6,7 +7,17 @@
    0/2/4`, `date` frozen — the edge honours the window and rewrites the
    browser-facing directive to `public, max-age=0, must-revalidate`, which is
    the conservative half, not a lost one. The residue worth testing is that the
-   string lived in two route files and nowhere else. */
+   string lived in two route files and nowhere else.
+
+   R15-1 (2026-09-16) revisited the other half: `max-age=0` means a repeat view,
+   a remount or a back-navigation always pays a round trip, and the board's own
+   pollers re-ask every 30 s anyway. The declaration now carries `max-age=5`,
+   and the test below asserts the inequality that makes that safe rather than
+   the string itself: the browser window must stay under the shortest interval
+   any consumer polls at, so an entry can never outlive the request that would
+   have replaced it. The `30_000` here is the client's own literal (`app/page.tsx`
+   and the three components that poll these routes), read from the source, so
+   changing the poll cadence moves this test with it. */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -14,6 +25,8 @@ import { READ_CACHE } from "./route";
 
 const root = join(__dirname, "..");
 const src = (p: string) => readFileSync(join(root, p), "utf8");
+/** The poll cadence every consumer of READ_CACHE shares (R15-1). */
+const POLL_INTERVAL_MS = 30_000;
 
 function apiRoutes(dir = join(root, "app/api"), acc: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -25,12 +38,24 @@ function apiRoutes(dir = join(root, "app/api"), acc: string[] = []): string[] {
 }
 
 describe("R03-3 the declared read cache", () => {
-  it("promises a short shared window, never a stale browser copy", () => {
-    expect(READ_CACHE["Cache-Control"]).toBe("s-maxage=10, stale-while-revalidate=30");
+  it("promises a short shared window and a shorter browser one", () => {
+    expect(READ_CACHE["Cache-Control"]).toBe("public, max-age=5, s-maxage=10, stale-while-revalidate=30");
     expect(READ_CACHE["Vercel-CDN-Cache-Control"]).toBe("s-maxage=10, stale-while-revalidate=30");
-    // `s-maxage` is a shared-cache directive; a browser ignores it, so the
-    // declaration cannot strand a visitor on a 10 s old board.
-    expect(READ_CACHE["Cache-Control"]).not.toMatch(/max-age=\d/);
+  });
+
+  it("keeps the browser window under every consumer's poll interval (R15-1)", () => {
+    const declared = Number(/max-age=(\d+)/.exec(READ_CACHE["Cache-Control"])?.[1]);
+    expect(declared).toBeGreaterThan(0);
+    // Safe because an entry expires long before the next poll would replace it.
+    expect(declared * 1000).toBeLessThan(POLL_INTERVAL_MS);
+    // And the pollers are the only thing that refreshes the board, so the
+    // inequality is only meaningful while that cadence is what they use.
+    for (const f of ["app/page.tsx", "components/WorldOrder.tsx", "components/TerritoryView.tsx", "components/ActivityCard.tsx"]) {
+      expect(src(f)).toMatch(/refreshInterval:\s*30_?000/);
+    }
+    // Still no three-digit window hiding in the string: a browser promise long
+    // enough to outlive a user's session is the failure this guards.
+    expect(READ_CACHE["Cache-Control"]).not.toMatch(/max-age=\d\d\d/);
   });
 
   it("is the only place in app/api that names Cache-Control", () => {

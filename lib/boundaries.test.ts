@@ -125,3 +125,47 @@ describe("the error screens (R02-3)", () => {
     expect(s).toMatch(/from "\.\/boundaries"/);
   });
 });
+
+/* Doc 15 §5.14 (R15-3, R15-10): a *database* outage used to be the one failure
+   with no answer — every API route went through withContract and both ISR pages
+   had a fallback, but the two pages that read through the cache directly threw
+   out of the render and the visitor got Next's error document. What a page says
+   when a read fails is source-level (the throw happens inside Next's render
+   pass), so these lock the shape rather than a served body. */
+describe("the data-outage answers (R15-3, R15-10)", () => {
+  it("keeps every profile read guarded, in both the metadata and the page", () => {
+    const s = src("app/s/[domain]/page.tsx");
+    // generateMetadata runs before the page and its own read had no guard, so an
+    // outage threw there first — the page below never got to answer.
+    expect((s.match(/logProfileRead\(/g) ?? []).length).toBe(3);
+    expect(s).toMatch(/title: "Startup profile — periodictable\.lol"/);
+  });
+
+  it("tells a missing profile (404) apart from an outage (200 shell)", () => {
+    const s = src("app/s/[domain]/page.tsx");
+    // Only a read that *threw* is the outage; a hidden or empty profile is a
+    // 404 in every deployment, exactly as before this pass.
+    expect(s).toMatch(/if \(!dbFailed\) return notFound\(\);/);
+    expect(s).toMatch(/profile temporarily unavailable/);
+    expect(s).toMatch(/The table itself is still up/);
+  });
+
+  it("never answers an unknown element symbol with a real element's shell", () => {
+    const s = src("app/elements/[sym]/page.tsx");
+    // The redirect above only fires when a row was found, so without this an
+    // unknown symbol fell through to the populated shell (ISR kept a copy).
+    expect(s).toMatch(/if \(!el\) notFound\(\)/);
+    expect(s).toMatch(/Live standings are temporarily unavailable/);
+    expect(s).toMatch(/scope: "page"/);
+  });
+
+  it("logs the failing read with the page and the reason, never silently", () => {
+    for (const p of ["app/s/[domain]/page.tsx", "app/elements/[sym]/page.tsx"]) {
+      const s = src(p);
+      // console.error with a structured payload: the pass's whole point is that
+      // an outage leaves evidence, not just a different picture.
+      expect(s, p).toMatch(/console\.error\(\s*JSON\.stringify\(\{/);
+      expect(s, p).toMatch(/reason:/);
+    }
+  });
+});

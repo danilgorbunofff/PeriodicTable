@@ -15,29 +15,14 @@ function rankTitle(n: number) {
   return "Claimer";
 }
 
-export async function generateMetadata({ params }: { params: { domain: string } }): Promise<Metadata> {
-  const domain = decodeURIComponent(params.domain);
-  const startup = await prisma.startup.findUnique({
-    where: { domain },
-    select: { title: true, pitch: true, logoUrl: true },
-  });
-  if (!startup) return { title: "Startup not found — periodictable.lol" };
-  return {
-    title: `${domain} is on the table | periodictable.lol`,
-    description: startup.pitch || `${startup.title} is on the periodic table.`,
-    // Set explicitly: the root layout canonicalises `/`, and a profile that
-    // inherited it would tell crawlers it is a copy of the board.
-    alternates: { canonical: `/s/${encodeURIComponent(domain)}` },
-    openGraph: {
-      title: `${domain} is on the table`,
-      description: startup.pitch || undefined,
-      images: [startup.logoUrl],
-    },
-  };
-}
-
-export default async function Profile({ params }: { params: { domain: string } }) {
-  const domain = decodeURIComponent(params.domain);
+/**
+ * One read of everything the profile renders, or null when the answer is a 404
+ * (missing, empty, or hidden). Split out so the client-error rules stay outside
+ * the outage path — `notFound()` throws, and calling it inside the caller's
+ * try/catch would answer a missing profile with the outage shell instead of a
+ * 404 (R15-3).
+ */
+async function loadProfile(domain: string) {
   const startup = await prisma.startup.findUnique({
     where: { domain },
     include: {
@@ -47,18 +32,10 @@ export default async function Profile({ params }: { params: { domain: string } }
       },
     },
   });
-  if (!startup || startup.stakes.length === 0) return notFound();
-  if (startup.moderationState === "HIDDEN") return notFound(); // takedown brake (UNLISTED stays link-accessible)
+  if (!startup || startup.stakes.length === 0) return null;
+  if (startup.moderationState === "HIDDEN") return null; // takedown brake (UNLISTED stays link-accessible)
 
-  const stakes = startup.stakes;
-  const heldIds = [...new Set(stakes.map((s) => s.element.id))];
-  const heldSymbols = new Set(stakes.map((s) => s.element.symbol));
-  const held = heldIds.length;
-  const crowns = stakes.filter((s) => s.isLeader).length;
-  const total = stakes.reduce((a, s) => a + s.amountUsd, 0);
-  const clicks = stakes.reduce((a, s) => a + s.clicksDelivered, 0);
-  const title = rankTitle(held);
-
+  const heldIds = [...new Set(startup.stakes.map((s) => s.element.id))];
   // Bounded boards (P1-13): ONE query for every held element's stakes, grouped
   // in memory — never one query per element.
   const boardRows = await prisma.stake.findMany({
@@ -70,6 +47,107 @@ export default async function Profile({ params }: { params: { domain: string } }
       startup: { select: { domain: true } },
     },
   });
+  return { startup, boardRows };
+}
+
+/** R15-3: one line naming the page and the subject, never a request value. */
+function logProfileRead(where: string, domain: string, err: unknown) {
+  console.error(
+    JSON.stringify({
+      scope: "page",
+      page: "profile",
+      where,
+      domain,
+      reason: err instanceof Error ? err.message : String(err),
+    })
+  );
+}
+
+export async function generateMetadata({ params }: { params: { domain: string } }): Promise<Metadata> {
+  const domain = decodeURIComponent(params.domain);
+  let startup: { title: string; pitch: string | null; logoUrl: string | null } | null = null;
+  try {
+    startup = await prisma.startup.findUnique({
+      where: { domain },
+      select: { title: true, pitch: true, logoUrl: true },
+    });
+  } catch (err) {
+    // R15-3: this read had no guard, so a database outage threw out of
+    // `generateMetadata` and took the whole route with it — the visitor got
+    // Next's error document, no status anyone can act on, and no log line. A
+    // generic title keeps the page answering, and deliberately does not claim
+    // the profile exists.
+    logProfileRead("metadata", domain, err);
+    return { title: "Startup profile — periodictable.lol" };
+  }
+  if (!startup) return { title: "Startup not found — periodictable.lol" };
+  return {
+    title: `${domain} is on the table | periodictable.lol`,
+    description: startup.pitch || `${startup.title} is on the periodic table.`,
+    // Set explicitly: the root layout canonicalises `/`, and a profile that
+    // inherited it would tell crawlers it is a copy of the board.
+    alternates: { canonical: `/s/${encodeURIComponent(domain)}` },
+    openGraph: {
+      title: `${domain} is on the table`,
+      description: startup.pitch || undefined,
+      // R15-3: only a real logo becomes an OG image — the explicit annotation on
+      // `startup` above no longer lets a bare null through as an image entry.
+      images: startup.logoUrl ? [startup.logoUrl] : undefined,
+    },
+  };
+}
+
+export default async function Profile({ params }: { params: { domain: string } }) {
+  const domain = decodeURIComponent(params.domain);
+  let loaded: Awaited<ReturnType<typeof loadProfile>> = null;
+  let dbFailed = false;
+  try {
+    loaded = await loadProfile(domain);
+  } catch (err) {
+    dbFailed = true;
+    logProfileRead("page", domain, err);
+  }
+  if (!loaded) {
+    // A missing/empty/hidden profile is a 404 in every deployment. Only a read
+    // that *threw* is the outage, and the shell says which one it is (R15-3):
+    // this was the last unguarded data path in the app — all 28 API routes go
+    // through withContract and both ISR pages had a fallback, so an outage here
+    // alone produced a blank error document.
+    if (!dbFailed) return notFound();
+    return (
+      <main id="main" className="min-h-screen bg-profilebg text-ink">
+        <div className="max-w-3xl mx-auto px-4 py-8">
+          <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
+          <h1 className="font-display text-2xl font-bold mt-3">
+            {domain} — profile temporarily unavailable
+          </h1>
+          <p className="text-sm text-mutedink mt-1">
+            This page needs a live database connection. The table itself is still up — try again in a moment.
+          </p>
+          <Link
+            href="/"
+            className="mt-4 inline-block bg-cta font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm"
+          >
+            Back to the table
+          </Link>
+        </div>
+      </main>
+    );
+  }
+  const { startup, boardRows } = loaded;
+
+  const stakes = startup.stakes;
+  const heldIds = [...new Set(stakes.map((s) => s.element.id))];
+  const heldSymbols = new Set(stakes.map((s) => s.element.symbol));
+  const held = heldIds.length;
+  const crowns = stakes.filter((s) => s.isLeader).length;
+  const total = stakes.reduce((a, s) => a + s.amountUsd, 0);
+  const clicks = stakes.reduce((a, s) => a + s.clicksDelivered, 0);
+  const title = rankTitle(held);
+
+  // Bounded boards (P1-13): ONE query for every held element's stakes, grouped
+  // in memory — never one query per element. Read with the profile in
+  // `loadProfile` so both rows come from the same successful read (R15-3).
   const boards = heldIds.map((elementId) => {
     const first = stakes.find((s) => s.element.id === elementId)!;
     return {

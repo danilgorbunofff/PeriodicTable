@@ -348,12 +348,14 @@ describe("R05-3 bypass block and landmarks (static)", () => {
   it("every page has exactly one main landmark for the link to reach", () => {
     const once = [
       "app/page.tsx",
-      "app/s/[domain]/page.tsx",
       "app/legal/[slug]/page.tsx",
       "app/pay/[paymentId]/PaySimulator.tsx",
       "lib/boundaryChrome.tsx",
     ];
     for (const p of once) expect((src(p).match(/id="main"/g) ?? []).length, p).toBe(1);
+    // Two branches, same as the element shells: an outage answer is a different
+    // document from a profile, and only one of them is ever rendered (R15-3).
+    expect((src("app/s/[domain]/page.tsx").match(/id="main"/g) ?? []).length).toBe(2);
     // The signed-out and signed-in element shells are separate branches, so
     // both carry the landmark and only one is ever rendered.
     expect((src("app/elements/[sym]/page.tsx").match(/id="main"/g) ?? []).length).toBe(2);

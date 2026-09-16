@@ -278,6 +278,7 @@ describe("config report route", () => {
       env: string;
       stripeKey: string;
       heartbeats: unknown;
+      cost: unknown;
       findings: { key: string; severity: string; detail: string }[];
     };
     expect(body.env).toBe("test");
@@ -300,6 +301,11 @@ describe("config report route", () => {
     expect(body.heartbeats === null || Array.isArray(body.heartbeats)).toBe(
       true,
     );
+    // R15-11/R15-13: the spend/backlog numbers, or null when the database could
+    // not answer. Same best-effort contract as `heartbeats` — this is the
+    // operator surface, and a report that turns into a 500 because a count
+    // failed is a report nobody can read.
+    expect(body.cost === null || typeof body.cost === "object").toBe(true);
     // Findings describe configuration shape, never the configured values.
     expect(JSON.stringify(body.findings)).not.toContain("s3cr3t");
     // R07-4: the live key check is a production-only probe — a rehearsal must

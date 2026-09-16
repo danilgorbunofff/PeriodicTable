@@ -1,0 +1,19 @@
+-- R15-4: the board's leader tabs filter `Stake."isLeader"`, a predicate no index
+-- covered. `0000_baseline` indexed the seat lookup ([elementId, amountUsd] on
+-- Stake, from @@unique([elementId, startupId]) and @@index([elementId,
+-- amountUsd(sort: Desc)])), and nothing indexed the flag, so `/api/board?tab=
+-- crowns` and `?tab=by-element` both resolved it by scanning every stake row.
+--
+-- Partial, and hand-written for the same reason 0001's
+-- "ClaimReservation_elementId_active_key" is: Prisma's schema language has no
+-- partial index, so `prisma migrate diff` would silently drop this and the next
+-- `migrate dev` would rewrite it away. lib/schema.test.ts asserts the predicate
+-- survives by reading it back from pg_indexes.
+--
+-- `amountUsd DESC` is the second column because `by-element` orders by it with a
+-- `take` (the top-20 list), so the same index serves both tabs: one answers the
+-- predicate alone, the other walks the index and stops after 20 rows. The leader
+-- set is at most one row per element (a seat has one holder), which is why an
+-- index — not a `take` — is the right bound for the aggregate tabs that rank
+-- every leader.
+CREATE INDEX "Stake_isLeader_amountUsd_idx" ON "Stake" ("amountUsd" DESC) WHERE "isLeader" = true;

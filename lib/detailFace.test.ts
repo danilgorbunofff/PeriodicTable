@@ -147,8 +147,11 @@ describe("R04-4 one symbol names one element everywhere", () => {
     const page = src(DETAIL_PAGE);
     expect(page).toMatch(/import \{ notFound, redirect \} from "next\/navigation"/);
     expect(page).toMatch(/if \(el && el\.symbol !== symbol\) redirect\(`\/elements\/\$\{encodeURIComponent\(el\.symbol\)\}`\)/);
-    // The row it reads is the canonical element, and the heading is too.
-    expect(page).toMatch(/where: \{ symbol: el\?\.symbol \?\? symbol \}/);
+    // The row it reads is the canonical element, and the heading is too. `el` is
+    // non-null by this point (`notFound()` when the symbol has no row — R15-10),
+    // so the query can no longer fall back to the raw URL segment.
+    expect(page).toMatch(/if \(!el\) notFound\(\)/);
+    expect(page).toMatch(/where: \{ symbol: el\.symbol \}/);
   });
 
   it("canonicalises on every server surface that takes a symbol", () => {
