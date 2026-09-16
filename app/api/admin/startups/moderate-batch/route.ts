@@ -2,20 +2,12 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { adminGate, operatorIdentity } from "@/lib/jobs";
 import { apiJson, apiError, apiRoute } from "@/lib/route";
-import { applyModeration, MODERATION_STATES } from "@/lib/moderation";
+import { applyModeration, MODERATION_STATES, MAX_BATCH_DOMAINS } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: moderateBatch });
 
-/** How many listings one call may move. A wave of abuse arrives as tens of
- *  domains, not thousands, and the cap is what stops a single authenticated
- *  call from re-rendering the whole front page at once — an operator who
- *  genuinely has more than this should be reading the incident notes anyway,
- *  and looping the call is how they pace it. */
-export const MAX_BATCH_DOMAINS = 50;
-
-/**
- * Hide / unlist / restore several listings at once (R17-14).
+/** Hide / unlist / restore several listings at once (R17-14).
  *
  * The single-listing route is the right lever for one report; an abuse wave is
  * dozens of listings in an hour, and doing that one URL at a time is how the

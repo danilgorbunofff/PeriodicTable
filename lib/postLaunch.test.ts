@@ -34,7 +34,8 @@ import { SERVICE_TERM, SERVICE_TERM_SENTENCE, LEGAL_REVISION_LOG, LEGAL_REVISION
 import { legalCanonicalText } from "./legalDocs";
 import { FAQ_ITEMS } from "./faqDocs";
 
-const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
+const src = (p: string) =>
+  readFileSync(join(__dirname, "..", p), "utf8").replace(/\r\n/g, "\n");
 const ops = (p: string) => src(join("ops", p));
 
 describe("R20-1 the accepted advisory is re-checked, not remembered", () => {

@@ -367,12 +367,12 @@ describe("reportProdEnvAtStartup", () => {
     expect(reportProdEnvAtStartup()).toEqual([]);
     expect(spy).not.toHaveBeenCalled();
 
-    // In production it is exactly one line, and it never throws: a throw at
-    // import time takes down /api/jobs/config as well, which is the surface
-    // that explains what is missing.
+    // In production it never throws, and the emit itself lives in lib/prisma.ts
+    // (server-only): a throw at import time takes down /api/jobs/config as
+    // well, which is the surface that explains what is missing.
     set("NEXT_PHASE", undefined);
     expect(() => reportProdEnvAtStartup()).not.toThrow();
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 
@@ -381,16 +381,17 @@ describe("reportProdEnvAtStartup", () => {
     const { reportProdEnvAtStartup } = await import("./env");
     set("DATABASE_URL", "postgresql://sentinel:sentinel@host/db");
     set("STRIPE_SECRET_KEY", "sk_live_sentinel");
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The emit is a module-scope side effect in lib/prisma.ts (server-only ?
+    // env.ts is reachable from the client bundle), so the line's shape is
+    // pinned statically the same way the call site is pinned below.
     const missing = reportProdEnvAtStartup();
-    expect(spy).toHaveBeenCalledTimes(1);
-    const line = String(spy.mock.calls[0]?.[0] ?? "");
-    expect(line).toContain('"msg":"production-incomplete"');
-    expect(line).toContain("STRIPE_WEBHOOK_SECRET"); // half a pair is named
-    expect(line).toContain(`"missing":${missing.length}`);
-    expect(line).not.toContain("sentinel");
+    expect(missing.length).toBeGreaterThan(0);
+    expect(missing.join(" ")).toContain("STRIPE_WEBHOOK_SECRET"); // half a pair is named
     expect(missing.join(" ")).not.toContain("sentinel");
-    spy.mockRestore();
+    const src = readFileSync(join(__dirname, "..", "lib", "prisma.ts"), "utf8");
+    expect(src).toContain('logError("env", "production-incomplete"');
+    expect(src).toMatch(/missing: missingProdEnv\.length/);
+    expect(src).toMatch(/vars: missingProdEnv/);
   });
 
   it("is called from the module every data path imports", () => {

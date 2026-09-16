@@ -19,7 +19,7 @@ import { ChemicalFamily, PrestigeTier, ReportStatus } from "@prisma/client";
 import { FAMILY_FILL } from "./familyFill";
 import { aggregateEarlyAdopters, aggregateTableOrder, rankByElement, rankCrowns, rankEarlyAdopters } from "./boards";
 import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, sep } from "path";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -139,7 +139,8 @@ function routeSources(): [string, string][] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name === "route.ts") out.push([full.slice(root.length + 1), readFileSync(full, "utf8")]);
+      else if (entry.name === "route.ts")
+        out.push([full.slice(root.length + 1).split(sep).join("/"), readFileSync(full, "utf8")]);
     }
   };
   walk(root);

@@ -1,0 +1,24 @@
+# Normalize line endings: text files are LF everywhere, on every platform.
+# Without this, a Windows checkout (core.autocrlf=true) materializes CRLF and
+# any tool that parses repo files byte-wise (the test suite among them) sees
+# different bytes than the index holds.
+* text=auto eol=lf
+
+# Windows scripts keep CRLF so PowerShell/cmd parsers never see a bare \n.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary

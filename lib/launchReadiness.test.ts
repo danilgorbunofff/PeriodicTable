@@ -25,7 +25,8 @@ import { NO_STAKES_YET } from "./activityFace";
 import { SUPPORT } from "./legal";
 import { REQUIRED_PROD_ENV } from "./env";
 
-const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
+const src = (p: string) =>
+  readFileSync(join(__dirname, "..", p), "utf8").replace(/\r\n/g, "\n");
 
 describe("R19-3 the board says something when nobody has staked", () => {
   it("has one empty-state sentence, exported where the panel can import it", () => {
