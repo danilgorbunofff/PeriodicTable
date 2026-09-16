@@ -119,7 +119,7 @@ export type ReceiptLegal = {
  * `CONSENT_LINK_TEXT` words linked — and hashed into `lib/consent.ts`, so the
  * words shown and the words recorded cannot drift (R16-6, R16-7). */
 export const CONSENT_STATEMENT =
-  "I am 18+ and I own or may promote this URL. I accept the rules & terms — including that a top-up is final (no refunds or withdrawals) and that I am buying advertising, not a bet or an investment.";
+  "I am 18+ and I own or may promote this URL. I accept the rules & terms — including that a stake is final (no refunds or withdrawals) and that I am buying advertising, not a bet or an investment.";
 
 /** The linked words inside `CONSENT_STATEMENT`, and where they point. */
 export const CONSENT_LINK_TEXT = "rules & terms";
