@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { faviconFor, isUpstreamFaviconUrl } from "../lib/screenshots";
 
 /** Favicon/logo with graceful fallback — an icy initial chip when the image
  *  is missing or fails to load (flaky favicon services, dead domains). */
@@ -19,7 +20,13 @@ export function Avatar({
   const [failed, setFailed] = useState(false);
   const dims = { width: size, height: size };
 
-  if (!src || failed) {
+  // R16-3: rows written before the icon proxy existed hold the icon service's
+  // own URL, and rendering one would send the visitor's IP to Google from a page
+  // the privacy policy says does not. They are served through our proxy instead,
+  // so both generations of data behave the same way.
+  const href = isUpstreamFaviconUrl(src) ? faviconFor(domain, size) : src;
+
+  if (!href || failed) {
     return (
       <div
         style={dims}
@@ -35,7 +42,7 @@ export function Avatar({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src}
+      src={href}
       alt=""
       style={dims}
       onError={() => setFailed(true)}

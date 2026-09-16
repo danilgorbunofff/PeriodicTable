@@ -23,6 +23,11 @@ const KEYS = [
   "CRON_SECRET",
   "RESEND_API_KEY",
   "EMAIL_FROM",
+  "OPERATOR_NAME",
+  "OPERATOR_ADDRESS",
+  "OPERATOR_COUNTRY",
+  "OPERATOR_LAW",
+  "OPERATOR_DESCRIPTOR",
 ];
 const saved: Env = {};
 function set(k: string, v: string | undefined) {
@@ -181,6 +186,15 @@ describe("getProdConfigReport", () => {
     UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
     UPSTASH_REDIS_REST_TOKEN: "x",
     RESEND_WEBHOOK_SECRET: "whsec_VGVzdFNlY3JldA==",
+    // R16-5: a *fully configured* production deployment names its operator. The
+    // identity variables are advisory (they never fail `ok`), so this fixture
+    // states the whole environment rather than only the variables the site
+    // cannot serve without.
+    OPERATOR_NAME: "Example Media Ltd",
+    OPERATOR_ADDRESS: "1 Example Street, London",
+    OPERATOR_COUNTRY: "England and Wales",
+    OPERATOR_LAW: "England and Wales",
+    OPERATOR_DESCRIPTOR: "PERIODICTABLE.LOL",
   };
 
   it("reports exactly REQUIRED_PROD_ENV when nothing is set (drift guard)", async () => {
@@ -247,6 +261,35 @@ describe("getProdConfigReport", () => {
    * keep mailing an address that refused us. It is not `required`: the site
    * serves fine, and setting it takes a dashboard visit. It must therefore not
    * fail `ok` (that would page on every tick) but must be visible in findings. */
+  it("lists the operator's own gaps, without failing a deployment that serves and takes money (R16-11, R16-12b)", async () => {
+    const { getProdConfigReport, requireProdEnv } = await import("./env");
+    const anonymous: Env = { ...FULL };
+    for (const key of ["OPERATOR_NAME", "OPERATOR_ADDRESS", "OPERATOR_COUNTRY", "OPERATOR_LAW", "OPERATOR_DESCRIPTOR"]) {
+      delete anonymous[key as keyof Env];
+    }
+
+    const report = getProdConfigReport(fakeEnv(anonymous));
+    expect(report.findings.map((f) => [f.key, f.severity])).toEqual([
+      ["OPERATOR_NAME", "operator"],
+      ["OPERATOR_ADDRESS", "operator"],
+      ["OPERATOR_COUNTRY", "operator"],
+      ["OPERATOR_LAW", "operator"],
+      ["OPERATOR_DESCRIPTOR", "operator"],
+    ]);
+    // The site is anonymous, not broken: it still serves pages and still takes
+    // money, so the report stays `ok` and the pinger stays quiet.
+    expect(report.ok).toBe(true);
+    prodEnv();
+    expect(() => requireProdEnv(fakeEnv(anonymous))).not.toThrow();
+
+    // A descriptor Stripe would rewrite is the one operator gap that is a
+    // payment problem, and it still reads as an advisory — the value is the
+    // operator's to set, and the finding names what Stripe accepts.
+    const bad = getProdConfigReport(fakeEnv({ ...FULL, OPERATOR_DESCRIPTOR: "ptl" }));
+    expect(bad.findings.map((f) => f.key)).toEqual(["OPERATOR_DESCRIPTOR"]);
+    expect(bad.findings[0].detail).toContain("5–22 characters");
+  });
+
   it("reports a missing RESEND_WEBHOOK_SECRET as an operator finding, not a failure", async () => {
     const { getProdConfigReport, requireProdEnv } = await import("./env");
     const noWebhook: Env = { ...FULL };

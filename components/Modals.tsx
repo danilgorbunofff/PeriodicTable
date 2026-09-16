@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Modal } from "./Modal";
@@ -8,6 +8,8 @@ import { ChunkyButton } from "./ChunkyButton";
 import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
+import { CONSENT_LINK_HREF, CONSENT_LINK_TEXT, CONSENT_STATEMENT, CONSENT_VERSION } from "../lib/legal";
+import { DEMO_LABEL, DEMO_NOTE } from "../lib/demoLabels";
 import { classifyAndValidate } from "../lib/pricing";
 import { stakeQuote, crownCopy } from "../lib/stakeQuote";
 import { domainFromUrl, domainFromSocial, isEmail } from "../lib/validate";
@@ -332,6 +334,10 @@ export function CheckoutPreview({
           path: isNewHere ? "join" : "stake",
           honeypot: honeypot || undefined,
           attest,
+          // The revision the checkbox's words belong to (R16-7). The server
+          // refuses a mismatch, so a tab open across a rules change cannot buy
+          // under a version it never displayed.
+          consentVersion: CONSENT_VERSION,
           turnstileToken,
           idempotencyKey,
           startup: {
@@ -548,7 +554,22 @@ export function CheckoutPreview({
       />
       <label className="mt-2 flex items-start gap-2 text-xs text-mutedink">
         <input type="checkbox" checked={attest} onChange={(e) => setAttest(e.target.checked)} className="mt-0.5" />
-        <span>I am 18+ and I own or may promote this URL. No refunds/withdrawals — stake = ad inventory.</span>
+        {/* The attested words are `CONSENT_STATEMENT`, rendered whole with the
+            linked phrase spliced in — not a paraphrase. The server records a
+            digest of that exact string (R16-6), so the evidence matches what was
+            on screen, character for character. */}
+        <span>
+          {CONSENT_STATEMENT.split(CONSENT_LINK_TEXT).map((part, i) => (
+            <Fragment key={i}>
+              {i > 0 && (
+                <Link href={CONSENT_LINK_HREF} className="text-moneyink font-bold hover:underline">
+                  {CONSENT_LINK_TEXT}
+                </Link>
+              )}
+              {part}
+            </Fragment>
+          ))}
+        </span>
       </label>
       {process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ? (
         <TurnstileWidget
@@ -570,7 +591,14 @@ export function CheckoutPreview({
         {submitting ? "Starting checkout…" : "Continue to checkout →"}
       </ChunkyButton>
       </form>
-      <div className="text-xs text-mutedink mt-2 text-center">🔒 Secure payment via Stripe · it&apos;s an ad buy, not a bet · by continuing you agree to the <Link href="/legal/rules" className="text-moneyink font-bold hover:underline">rules &amp; terms</Link></div>
+      {/* The agreement moved into the label above, where the checkbox that
+          affirms it lives; printing "by continuing you agree to the rules" here
+          as well would be a second, unversioned agreement (R16-6). What is left
+          is the payment-security line and the version of the rules the box
+          quotes (R16-7). */}
+      <div className="text-xs text-mutedink mt-2 text-center">
+        🔒 Secure payment via Stripe · it&apos;s an ad buy, not a bet · rules version {CONSENT_VERSION}
+      </div>
       <button onClick={onClose} className="block mx-auto text-xs text-mutedink mt-2">maybe later</button>
     </Modal>
   );
@@ -604,6 +632,18 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
     ) : (
       <span className="w-6 text-sm">#{i + 1}</span>
     );
+  // R16-9: "the board" ranks money. Seeded placeholder rows appear in it with
+  // amounts nobody paid, so they say so on every tab.
+  const demoTag = (row: BoardRow) =>
+    row.demo ? (
+      <span
+        title={DEMO_NOTE}
+        className="shrink-0 rounded-[4px] bg-icy px-1 py-[1px] text-[10px] font-bold uppercase tracking-wide text-mutedink"
+      >
+        {DEMO_LABEL}
+      </span>
+    ) : null;
+
   return (
     <Modal open={open} onClose={onClose} label="The board">
       <h2 className="font-display text-xl font-bold">The <span className="text-money">board</span> 🏆</h2>
@@ -629,6 +669,7 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
+            {demoTag(row)}
             <span className="text-xs text-mutedink">{row.elementSym} {row.elementName}</span>
             <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">${row.total}</span>
           </a>
@@ -638,6 +679,7 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
+            {demoTag(row)}
             <span className="text-xs text-mutedink whitespace-nowrap">👑 {row.total} {row.total === 1 ? "crown" : "crowns"} · ${row.totalSpent ?? 0}</span>
             <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">👑 {row.total}</span>
           </a>
@@ -647,6 +689,7 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
+            {demoTag(row)}
             <span className="text-xs text-mutedink">first on {row.elementSym} {row.elementName}</span>
             <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">🏅 {row.total}</span>
           </a>

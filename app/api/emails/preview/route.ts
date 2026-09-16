@@ -7,6 +7,7 @@ import { receiptHtml, receiptSubject } from "@/emails/receipt";
 import { refundHtml, refundSubject } from "@/emails/refund";
 import { reportHtml, reportSubject } from "@/emails/report";
 import { waitlistHtml, waitlistSubject } from "@/emails/waitlist";
+import { receiptLegal } from "@/lib/operator";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +63,14 @@ async function getEmailPreview(req: NextRequest) {
         domain: "b.com",
         viewUrl: "http://localhost:3000/s/b.com",
         unsubUrl,
+        // R16-4/R16-5/R16-7: preview the receipt as a payer receives it, legal
+        // block included — the preview is the only place the document can be
+        // read end to end without buying a stake.
+        legal: receiptLegal({
+          rulesUrl: "http://localhost:3000/legal/rules",
+          reference: "pi_preview",
+          consentAt: new Date(),
+        }),
       });
       break;
     case "refund":

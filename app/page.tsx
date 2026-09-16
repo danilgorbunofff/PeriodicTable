@@ -30,7 +30,7 @@ type Tile = {
   tier: string;
   pool: number;
   count: number;
-  leader: { domain: string; logoUrl: string; amount: number } | null;
+  leader: { domain: string; logoUrl: string; amount: number; demo?: boolean } | null;
 };
 
 /** The FAB pulse makes the same claim as the activity footer, so it may beat
@@ -104,6 +104,9 @@ function HomeInner() {
       claims[t.symbol] = {
         price: t.leader.amount,
         logoUrl: t.leader.logoUrl,
+        // R16-9: the leader is a seeded placeholder when the API says so; the
+        // tile then labels itself instead of asserting a purchase.
+        ...(t.leader.demo ? { demo: true } : {}),
       };
     }
   }

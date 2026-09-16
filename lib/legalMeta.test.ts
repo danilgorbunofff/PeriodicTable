@@ -14,17 +14,19 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { legalMetadata } from "./legalMeta";
 import type { LegalPageCopy } from "./legalMeta";
+import { LEGAL_PAGES } from "./legalDocs";
+import { LEGAL_SLUGS } from "./legal";
 
 const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 const ORIGIN = "https://www.periodictable.lol";
 const PAGE = "app/legal/[slug]/page.tsx";
 
-/** The three documents, as the page declares them. */
-const SLUGS = ["about", "rules", "contact"] as const;
+/** The documents, as the corpus declares them. The copy moved out of the route
+ * in the phase-16 fix pass, so it is imported rather than parsed out of source. */
+const SLUGS = LEGAL_SLUGS;
 const copy = (slug: (typeof SLUGS)[number]): LegalPageCopy => {
-  const m = src(PAGE).match(new RegExp(`\\n  ${slug}: \\{[\\s\\S]*?\\n    title: "([^"]+)",\\n    desc: "([^"]+)"`));
-  if (!m) throw new Error(`no declared copy for /legal/${slug}`);
-  return { title: m[1], desc: m[2] };
+  const page = LEGAL_PAGES[slug];
+  return { title: page.title, desc: page.desc };
 };
 
 describe("legal metadata (R02-7)", () => {
@@ -81,17 +83,20 @@ describe("the route is wired to it (R02-7)", () => {
   it("keeps the metadata and the body reading the same copy", () => {
     const s = src(PAGE);
     // Both the title and the description handed to legalMetadata come from the
-    // PAGES entry the page body renders, so they cannot drift apart.
-    expect(s).toMatch(/const page = PAGES\[params\.slug\];/);
+    // LEGAL_PAGES entry the page body renders, so they cannot drift apart.
+    expect(s).toMatch(/const page = LEGAL_PAGES\[params\.slug as LegalSlug\];/);
     expect(s).toMatch(/if \(!page\) return \{\};/);
   });
 
-  it("declares a description for every slug it can generate", () => {
+  it("generates a route for every document the corpus declares", () => {
     const s = src(PAGE);
-    const slugs = s.match(/^  [a-z-]+: \{$/gm) ?? [];
-    const descs = s.match(/^    desc: "/gm) ?? [];
-    expect(slugs.length).toBe(SLUGS.length);
-    expect(descs.length).toBe(slugs.length);
+    expect(s).toMatch(/Object\.keys\(LEGAL_PAGES\) as LegalSlug\[\]/);
+    for (const slug of SLUGS) {
+      const page = LEGAL_PAGES[slug];
+      expect(page.desc.length).toBeGreaterThan(60);
+      expect(page.sections.length).toBeGreaterThan(0);
+      expect(page.sections.every((sec) => sec.ps.length > 0 || sec.h === "Operator")).toBe(true);
+    }
   });
 
   it("still 404s an unknown slug through the app's own boundary", () => {

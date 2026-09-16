@@ -6,6 +6,24 @@ import { fetchJson, isActivityRows, type ActivityRow } from "../lib/api";
 import { relTime } from "../lib/relTime";
 import { liveState, type LiveState } from "../lib/liveState";
 import { activityFace, kindLabel } from "../lib/activityFace";
+import { DEMO_LABEL, DEMO_NOTE } from "../lib/demoLabels";
+import { faviconFor } from "../lib/screenshots";
+
+/**
+ * R16-9: the label for a seeded placeholder row, used in the header and on the
+ * row itself. It carries the reason as its `title` because "demo" alone reads
+ * like a product tier — the point is that no money moved.
+ */
+function demoTag() {
+  return (
+    <span
+      title={DEMO_NOTE}
+      className="rounded-[4px] bg-icy px-1 py-[1px] text-[10px] font-bold uppercase tracking-wide text-mutedink"
+    >
+      {DEMO_LABEL}
+    </span>
+  );
+}
 
 /** First negative delta in the system: a reversal must read as a debit, not a gain. */
 function deltaText(delta: number): string {
@@ -77,6 +95,7 @@ export function ActivityCard({
           <>
             <span className="text-ink">{face.header.symbol}</span> {face.header.verb} ·{" "}
             <span className="text-ink">{face.header.city}</span>
+            {face.header.demo ? <> · {demoTag()}</> : null}
           </>
         ) : (
           <span className={face.header.kind === "loading" ? "animate-pulse" : undefined}>{face.header.text}</span>
@@ -94,12 +113,18 @@ export function ActivityCard({
                 className="block rounded-lg p-[6px] text-left no-underline transition-colors hover:bg-icy"
               >
                 <div className="flex items-center gap-[9px]">
-                  <Avatar src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=64`} domain={s.domain} size={22} rounded="rounded-[5px]" />
+                  <Avatar src={faviconFor(s.domain, 64)} domain={s.domain} size={22} rounded="rounded-[5px]" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-extrabold text-ink">{s.domain}</div>
                     <div className="truncate text-[11.5px] font-bold text-mutedink">
                       {kindLabel(s.kind)} in {s.elementSymbol} {s.elementName}
                       {s.total !== s.delta ? ` · total $${s.total}` : ""}
+                      {s.demo ? (
+                        <>
+                          {" · "}
+                          {demoTag()}
+                        </>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-end">

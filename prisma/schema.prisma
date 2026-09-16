@@ -188,6 +188,13 @@ model Payment {
   requestFingerprint  String? // sha256 of canonical request (Phase 2 binds retries)
   status              PaymentStatus      @default(PENDING)
   email               String? // payer email captured at checkout
+  // The consent act, recorded (R16-6, R16-7): the revision of the rules the
+  // payer ticked the box against, a digest of the exact words shown, and when.
+  // All three are nullable only because rows written before the phase-16 pass
+  // have no record — every payment created since carries all three.
+  consentVersion      String? // rules revision attested to, as printed next to the checkbox
+  consentTextHash     String? // sha256 of the statement shown (lib/consent.ts) — checkable against the copy, not stored per payment
+  consentAt           DateTime? // server clock at the moment the checkbox was accepted
   createdAt           DateTime           @default(now())
   paidAt              DateTime?
   appliedAt           DateTime? // stake durably applied (Phase 2 sets atomically with paid)

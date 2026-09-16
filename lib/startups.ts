@@ -12,6 +12,7 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { audit } from "./audit";
+import { faviconFor } from "./screenshots";
 
 export type CheckoutProfile = {
   domain: string;
@@ -40,7 +41,7 @@ export async function findOrCreateCheckoutStartup(
       pitch: p.pitch.slice(0, 140),
       url: p.url,
       linkType: p.linkType,
-      logoUrl: `https://www.google.com/s2/favicons?domain=${p.domain}&sz=64`,
+      logoUrl: faviconFor(p.domain, 64),
       ...(p.email ? { email: p.email } : {}),
     },
   });

@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { GET } from "../app/api/jobs/reconcile/route";
 import { aggregateDrift } from "./recompute";
 import { recordProviderEvent } from "./settle";
+import { TRIAGE_PROMISE_HOURS } from "./moderation";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -35,6 +36,7 @@ type Report = {
     samples: { id: string; amountUsd: number; provider: string }[];
     note: string;
   };
+  triage: { open: number; overdue: number; oldestHours: number | null; breached: boolean; promiseHours: number };
 };
 
 async function call(): Promise<Report> {
@@ -275,6 +277,34 @@ describe.skipIf(!hasDb)("money reconciliation report", () => {
   // a drift that arrived from outside the app (a hand-run UPDATE, a half-applied
   // deploy). Nothing else in the product notices, and the element renders wrong
   // (leader tile, pool total, bid count) until someone repairs it by hand.
+  /* R16-12: the triage promise lives beside the other things a monitor reads, so
+     a breach is visible on the same 503-or-200 decision the cron pings. */
+  it("reports the triage queue as an advisory block, and pages only on a breach", async () => {
+    const stake = await prisma.stake.findFirst({ select: { id: true } });
+    const report0 = await GET(new NextRequest("http://localhost/api/jobs/reconcile") as never);
+    const before = (await report0.json()) as Report;
+    expect(before.triage.open).toBeGreaterThanOrEqual(0);
+    expect(before.triage.promiseHours).toBe(TRIAGE_PROMISE_HOURS);
+    // A queue inside the window is not a fault.
+    expect(before.ok).toBe(true);
+
+    const backlog = await prisma.report.create({
+      data: {
+        ...(stake ? { stakeId: stake.id } : {}),
+        domain: "reconcile-t.dev",
+        reason: "reconcile triage probe",
+        createdAt: new Date(Date.now() - (TRIAGE_PROMISE_HOURS + 1) * 3_600_000),
+      },
+    });
+    const report = await call();
+    expect(report.triage.open).toBeGreaterThanOrEqual(1);
+    expect(report.triage.overdue).toBeGreaterThanOrEqual(1);
+    expect(report.triage.breached).toBe(true);
+
+    await prisma.report.deleteMany({ where: { reason: "reconcile triage probe" } });
+    expect(await prisma.report.count({ where: { id: backlog.id } })).toBe(0);
+  });
+
   it("fails ok when an element's aggregates disagree with its stake rows", async () => {
     const baseline = (await call()).aggregate.count;
 

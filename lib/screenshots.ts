@@ -7,8 +7,26 @@
  * preview job in production. Everything below now uses `api.microlink.io`.
  */
 
-export function faviconFor(domain: string, size = 64): string {
+/** The icon service's own URL. **Server-side only** — it names Google, and a
+ *  browser that fetches it hands Google the visitor's IP together with the
+ *  listing being viewed (R16-3). The only intended caller is the proxy route
+ *  that fetches it on the visitor's behalf, `app/api/favicon/route.ts`. */
+export function upstreamFaviconUrl(domain: string, size = 64): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
+}
+
+/** What a page puts in an `<img src>` for a listing's icon: this site's own
+ *  proxy, never the icon service (R16-3). Relative on purpose — the same string
+ *  works for a browser, for `next/og` and for a stored `Startup.logoUrl`. */
+export function faviconFor(domain: string, size = 64): string {
+  return `/api/favicon?domain=${encodeURIComponent(domain)}&sz=${size}`;
+}
+
+/** The icon service's URL, as stored on rows written before the proxy existed
+ *  (R16-3). Every such row is rendered through the proxy instead, so old
+ *  listings stop calling Google from the browser too. */
+export function isUpstreamFaviconUrl(src: string | null | undefined): boolean {
+  return typeof src === "string" && /^https?:\/\/(www\.)?google\.com\/s2\/favicons\?/.test(src);
 }
 
 /**
@@ -19,22 +37,18 @@ export function jsonShotUrlFor(url: string): string {
   return `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&viewport.width=1200&viewport.height=675`;
 }
 
-/**
- * On-demand homepage shot (16:9) for an `<img src>`. `embed=screenshot.url`
- * makes Microlink stream the PNG itself, so the browser can consume it
- * directly; the first render of an uncached site takes ~10s and ~1.8MB, which
- * is acceptable for a lazy image but far too slow to sit in a worker request —
- * the worker probes with `probeShot` below instead. Lazy + onError→favicon.
- */
-export function shotUrlFor(url: string): string {
-  return `${jsonShotUrlFor(url)}&embed=screenshot.url`;
-}
-
-/** Preferred hover preview: stored shot when present, else live shot, else favicon (caller onError). */
-export function previewFor(params: { previewImgUrl?: string | null; url?: string | null; domain: string }): string {
+/** The listing's preview image: the shot our worker stored, else its icon.
+ *
+ *  R16-3 removed the `embed=screenshot.url` branch that let a browser stream
+ *  Microlink's PNG directly. Hovering a tile therefore loaded a third party's
+ *  renderer inside the visitor's session, from a host the privacy page had not
+ *  named, before any screenshot had been stored — and the stored-shot path
+ *  (§5.5: "our servers call it, once per listing, never your browser") is the
+ *  only one the privacy page describes. A listing without a stored shot now
+ *  shows its icon until the worker has one. */
+export function previewFor(params: { previewImgUrl?: string | null; domain: string; size?: number }): string {
   if (params.previewImgUrl) return params.previewImgUrl;
-  if (params.url) return shotUrlFor(params.url);
-  return faviconFor(params.domain, 128);
+  return faviconFor(params.domain, params.size ?? 128);
 }
 
 /**

@@ -6,6 +6,8 @@ import { ELEMENTS } from "../../../lib/elements";
 import { FAMILY_FILL } from "../../../lib/familyFill";
 import { Avatar } from "../../../components/Avatar";
 import { ReportListingButton } from "../../../components/ReportListingButton";
+import { faviconFor } from "../../../lib/screenshots";
+import { siteOrigin } from "../../../lib/siteUrl";
 
 export const dynamic = "force-dynamic";
 
@@ -92,7 +94,10 @@ export async function generateMetadata({ params }: { params: { domain: string } 
       description: startup.pitch || undefined,
       // R15-3: only a real logo becomes an OG image — the explicit annotation on
       // `startup` above no longer lets a bare null through as an image entry.
-      images: startup.logoUrl ? [startup.logoUrl] : undefined,
+      // R16-3: and it is our proxy, absolute, because a crawler has no origin to
+      // resolve a relative path against (and because the icon service must not
+      // be asked directly by anyone unbidden).
+      images: startup.logoUrl ? [`${siteOrigin()}${faviconFor(domain, 128)}`] : undefined,
     },
   };
 }

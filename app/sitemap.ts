@@ -5,11 +5,16 @@ import { siteOriginStrict } from "@/lib/siteUrl";
 import { buildSitemapEntries, type ElementStamp } from "@/lib/sitemapData";
 
 /**
- * Sitemap policy (Phase 4, P2-13; lastmod R01-5): static routes + all 122
- * element pages. Startup profiles (/s/[domain]) are intentionally EXCLUDED —
- * unbounded, user-generated, and frequently churned; they stay discoverable via
- * element pages and the board. Internal surfaces (/pay/*, /api/*) are
- * disallowed in robots.ts. Revisit if profiles need indexation post-launch.
+ * Sitemap policy (Phase 4, P2-13; lastmod R01-5; legal pages R16-13): the
+ * board, all 122 element pages, and the four legal documents. Startup profiles
+ * (/s/[domain]) are intentionally EXCLUDED — unbounded, user-generated, and
+ * frequently churned; they stay discoverable via element pages and the board.
+ * Internal surfaces (/pay/*, /api/*) are disallowed in robots.ts. Revisit if
+ * profiles need indexation post-launch.
+ *
+ * Legal documents are included because they were the one page type with no
+ * crawlable surface at all: a revision was announced nowhere (R16-12c), and the
+ * document's own revision date is the honest `lastModified` for them.
  *
  * `lastModified` is the newest write to a face (Stake.updatedAt), never the
  * render time: a crawler that sees a fresh timestamp on every fetch learns to

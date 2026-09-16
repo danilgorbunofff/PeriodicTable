@@ -9,6 +9,7 @@ import tailwindConfig from "../tailwind.config";
 import { cellMap, stepCell, rowEnd } from "./gridNav";
 import { ELEMENTS } from "./elements";
 import { FAMILY_FILL } from "./familyFill";
+import { CONSENT_LINK_HREF, LEGAL_SLUGS } from "./legal";
 
 const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 
@@ -194,7 +195,12 @@ describe("form + status contracts (static)", () => {
     expect(modals).toMatch(/aria-live="polite"/);
   });
   it("checkout terms are a real link", () => {
-    expect(modals).toMatch(/href="\/legal\/rules"/);
+    // Rendered from the constant the server records the consent against, so the
+    // linked words, the document they open and the version stamped beside them
+    // cannot drift apart (R16-6, R16-7).
+    expect(modals).toMatch(/href=\{CONSENT_LINK_HREF\}/);
+    expect(CONSENT_LINK_HREF).toBe("/legal/rules");
+    expect(LEGAL_SLUGS as readonly string[]).toContain(CONSENT_LINK_HREF.replace("/legal/", ""));
   });
   it("toasts announce through a live region", () => {
     expect(src("components/Toast.tsx")).toMatch(/aria-live="polite"/);

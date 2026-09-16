@@ -27,6 +27,7 @@ import { outbidReclaimUrl } from "./links";
 import { receiptHtml, receiptSubject } from "../emails/receipt";
 import { refundHtml, refundSubject } from "../emails/refund";
 import { reportHtml, reportSubject } from "../emails/report";
+import { receiptLegal } from "./operator";
 import { waitlistHtml, waitlistSubject } from "../emails/waitlist";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -634,7 +635,11 @@ export type ReceiptEmailParams = {
    *  the whole holding rather than the increment that was charged; both are
    *  stated, because "$7" for a $2 charge and "$2" for a $7 holding are each
    *  wrong in the same way. */
-  topUpUsd?: number | null;
+  topUpUsd?: number | null;  /** R16-5: the provider reference the receipt prints for dispute handling. */
+  reference?: string | null;
+  /** R16-7: when the checkout recorded the payer's consent (ISO day). */
+  consentAt?: string | null;
+
   /** The outbox row this send belongs to (R10-11). */
   dedupeKey?: string | null;
 };
@@ -658,6 +663,15 @@ export async function sendReceiptEmail(
     topUpUsd: p.topUpUsd ?? null,
     viewUrl: `${APP_URL}/s/${encodeURIComponent(p.domain)}`,
     unsubUrl,
+    // R16-4/R16-5/R16-7: every receipt carries the seller, the descriptor the
+    // charge appears under, the tax position, the rules revision that was
+    // accepted and where to write. Assembled here rather than in the template
+    // because it reads the deployment's configuration.
+    legal: receiptLegal({
+      rulesUrl: `${APP_URL}/legal/rules`,
+      reference: p.reference ?? null,
+      consentAt: p.consentAt ? new Date(p.consentAt) : null,
+    }),
   });
   return sendMessage({
     to: p.to,

@@ -1,8 +1,11 @@
 "use client";
+import { Fragment } from "react";
 import Link from "next/link";
+import { LEGAL_LINKS } from "../lib/legal";
 
 /**
- * Legal links (Phase 5): always rendered — desktop bottom-center pill; mobile
+ * Legal links (Phase 5, completed in the phase-16 pass): all four documents,
+ * always rendered — desktop bottom-center pill; mobile
  * above the rail FAB (bottom-right), clear of the wordmark, hero, table, and
  * zoom controls. The open bottom-sheet covers it (lower z-order) by design.
  */
@@ -13,12 +16,15 @@ export function FooterBar() {
         {/* The min-h-[44px] targets make the pill 44px tall on touch and no
             taller: the py is dropped under the same media query so the pill's
             top edge lands at 64px from the bottom, still clear of the stale
-            marker parked at 72px. */}
-        <Link href="/legal/about" className="hover:text-ink [@media(pointer:coarse)]:inline-flex [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center">About & disclaimer</Link>
-        <span aria-hidden="true">·</span>
-        <Link href="/legal/rules" className="hover:text-ink [@media(pointer:coarse)]:inline-flex [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center">Rules & payments</Link>
-        <span aria-hidden="true">·</span>
-        <Link href="/legal/contact" className="hover:text-ink [@media(pointer:coarse)]:inline-flex [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center">Contact</Link>
+            marker parked at 72px. The one-word labels keep the four documents
+            on one line at 320px, so the pill never grows upward into the board
+            the way a wrapped second row would. */}
+        {LEGAL_LINKS.map((link, i) => (
+          <Fragment key={link.href}>
+            {i > 0 && <span aria-hidden="true">·</span>}
+            <Link href={link.href} className="hover:text-ink [@media(pointer:coarse)]:inline-flex [@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:min-w-[44px] [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:justify-center">{link.short}</Link>
+          </Fragment>
+        ))}
       </nav>
     </div>
   );

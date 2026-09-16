@@ -8,6 +8,7 @@ import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
+import { consentRecord, attestVersionRefusal } from "@/lib/consent";
 import { devSimulatorEnabled, paymentsLiveServer } from "@/lib/flags";
 import { findOrCreateCheckoutStartup, fingerprintCheckout } from "@/lib/startups";
 import {
@@ -40,6 +41,8 @@ type Body = {
   idempotencyKey: string;
   honeypot?: string;
   attest?: boolean | string;
+  /** The rules revision the modal displayed next to the checkbox (R16-7). */
+  consentVersion?: string;
   turnstileToken?: string;
 };
 
@@ -211,6 +214,19 @@ async function postCheckout(req: NextRequest) {
   }
   if (!attestValid(body.attest)) {
     return NextResponse.json({ error: "Please confirm you own or may promote this URL.", field: "attest" }, { status: 400 });
+  }
+  // R16-7: the checkbox's words are versioned. A tab left open across a rules
+  // change would otherwise attest to a revision it never showed, and the record
+  // would be a lie about what the payer read — so a mismatch is refused with a
+  // message that says how to proceed. An absent version (older client, or the
+  // acceptance tests that post a bare `attest: true`) is accepted and recorded
+  // as the version in force at that moment.
+  const staleRules = attestVersionRefusal(body.consentVersion);
+  if (staleRules) {
+    // `code` makes the refusal self-describing: the modal renders `error` under
+    // the button, and a client that wants to distinguish "reload" from "you
+    // forgot to tick it" does not have to match on prose.
+    return NextResponse.json({ error: staleRules, code: "RULES_UPDATED", field: "attest" }, { status: 409 });
   }
   if (!(await verifyTurnstile(body.turnstileToken, ip))) {
     return NextResponse.json({ error: "Bot check failed. Try again." }, { status: 400 });
@@ -407,6 +423,10 @@ async function postCheckout(req: NextRequest) {
         idempotencyKey,
         requestFingerprint: fingerprint,
         ...(email ? { email } : {}),
+        // R16-6: the evidence the old flow threw away. `consentRecord` takes the
+        // clock here rather than defaulting inside the insert, so the recorded
+        // moment is the one the gate accepted, not whenever the row flushed.
+        ...consentRecord(),
       },
     });
 

@@ -23,6 +23,7 @@ import { POST as shotPOST } from "../app/api/jobs/screenshot/route";
 import { POST as checkoutPOST } from "../app/api/checkout/route";
 import { GET as unsubGET, POST as unsubPOST } from "../app/api/unsubscribe/route";
 import { suppressionFor } from "./email";
+import { TRIAGE_PROMISE_HOURS } from "./moderation";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -275,6 +276,62 @@ describe.skipIf(!hasDb)("report intake contract (R11-5) and the operator queue (
     expect((await reportsGET(req("/api/admin/reports?status=open", { headers: adminHeaders }))).status).toBe(400);
     expect((await reportsGET(req("/api/admin/reports?status=OPEN", { headers: adminHeaders }))).status).toBe(200);
     expect((await reportsGET(req("/api/admin/reports", { headers: adminHeaders }))).status).toBe(200);
+  });
+
+  /* R16-12: `/legal/contact` promises a reporter their report is "actioned within
+     72 hours", and nothing counted the wait — the queue answered 50 rows by
+     `createdAt desc`, so the report that had waited longest was the least likely
+     to be read. The metric is the fix; these are the two surfaces that publish it
+     (the other is the reconcile `triage` block, asserted in lib/reconcile.test.ts). */
+  it("publishes the age of the queue the promise is made against", async () => {
+    const stake = await prisma.stake.findFirstOrThrow({ where: { elementId: T7, startup: { domain: "modvis-t.dev" } } });
+    // Backdated on purpose: the cursor test above needs `createdAt desc` to keep
+    // the row it creates at the head of the queue, and a backlog is exactly what
+    // this metric exists to reveal.
+    const backlog = await prisma.report.create({
+      data: {
+        stakeId: stake.id,
+        domain: "modvis-t.dev",
+        reason: "queue age probe",
+        createdAt: new Date(Date.now() - 250 * 3_600_000),
+      },
+    });
+    await prisma.report.create({
+      data: {
+        stakeId: stake.id,
+        domain: "modvis-t.dev",
+        reason: "queue age probe",
+        createdAt: new Date(Date.now() - 2 * 3_600_000),
+      },
+    });
+
+    const res = await reportsGET(req("/api/admin/reports", { headers: adminHeaders }));
+    expect(res.status).toBe(200);
+    // The body is unchanged — an `<table>`-less operator tool reads the array, and
+    // the metric rides in headers so adding it broke no reader (R11-6).
+    expect(Array.isArray(await res.json())).toBe(true);
+
+    // Counted, not sampled: the header is the database's answer, so a page size
+    // cannot understate a backlog.
+    const open = await prisma.report.count({ where: { status: "OPEN" } });
+    const overdue = await prisma.report.count({
+      where: { status: "OPEN", createdAt: { lt: new Date(Date.now() - TRIAGE_PROMISE_HOURS * 3_600_000) } },
+    });
+    const oldest = await prisma.report.findFirst({
+      where: { status: "OPEN" },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    });
+    expect(res.headers.get("X-Report-Queue-Open")).toBe(String(open));
+    expect(res.headers.get("X-Report-Queue-Overdue")).toBe(String(overdue));
+    expect(res.headers.get("X-Report-Queue-Promise-Hours")).toBe(String(TRIAGE_PROMISE_HOURS));
+    expect(res.headers.get("X-Report-Queue-Oldest-At")).toBe(oldest?.createdAt.toISOString());
+    // The 250-hour backlog is in it, and the promise is breached while it waits.
+    expect(Number(res.headers.get("X-Report-Queue-Oldest-Hours"))).toBeGreaterThanOrEqual(249);
+    expect(overdue).toBeGreaterThanOrEqual(1);
+
+    await prisma.report.deleteMany({ where: { reason: "queue age probe" } });
+    expect(await prisma.report.count({ where: { id: backlog.id } })).toBe(0);
   });
 
   it("walks the queue with ?before=, and an unknown cursor is empty rather than a fault", async () => {

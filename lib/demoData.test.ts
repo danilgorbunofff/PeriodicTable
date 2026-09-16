@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { DEMO_STARTUP_DOMAINS, assessDemoStartups, blockReasons, type DemoStartupRow } from "./demoData";
+import { isDemoListing } from "./demoLabels";
 
 const read = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 const domainsIn = (src: string) => new Set([...src.matchAll(/domain:\s*"([^"]+)"/g)].map((m) => m[1]));
@@ -89,5 +90,47 @@ describe("clear-demo-data CLI contract", () => {
   it("ranks through the shared invariant path, never ad hoc", () => {
     expect(src).toMatch(/rankStakes/);
     expect(src).toMatch(/assertLedgerInvariants/);
+  });
+});
+
+/**
+ * The direction of the R16-9 rule (regression, fixed in the phase-16 fix pass).
+ *
+ * `isDemoListing(domain, set)` and `demoListingDomains()` are two halves of one
+ * rule, and the set they exchange has no type-level direction: an inverted arm
+ * (`!paid.has(d)` against a set that already means "unpaid") compiles, passes
+ * every unit test that only checks the negative case, and silently labels
+ * nothing anywhere in the product. These cases pin the direction.
+ */
+describe("the provenance label and the set it is handed agree (R16-9)", () => {
+  const eligible = new Set<string>(DEMO_STARTUP_DOMAINS);
+
+  it("marks every inventory domain while none of them has paid", () => {
+    for (const d of DEMO_STARTUP_DOMAINS) expect([d, isDemoListing(d, eligible)]).toEqual([d, true]);
+  });
+
+  it("marks none of them once every one has paid", () => {
+    for (const d of DEMO_STARTUP_DOMAINS) expect([d, isDemoListing(d, new Set<string>())]).toEqual([d, false]);
+  });
+
+  it("is case-insensitive, and the inventory arm backstops a bad set", () => {
+    expect(isDemoListing("Stripe.COM", eligible)).toBe(true);
+    // A set that wrongly contains a customer's domain must not be able to call
+    // that customer a placeholder: the inventory arm is not redundant.
+    const tainted = new Set([...DEMO_STARTUP_DOMAINS, "customer.example"]);
+    expect(isDemoListing("customer.example", tainted)).toBe(false);
+  });
+
+  it("builds the set from the unpaid side of the predicate", () => {
+    expect(read("lib/demoData.ts")).toContain("DEMO_STARTUP_DOMAINS.filter((d) => !paidDomains.has(d))");
+  });
+
+  it("marks the ranked board rows, not the rows the rankers discard", () => {
+    // `rankCrowns`/`rankByElement`/`rankEarlyAdopters` rebuild every row, so
+    // marking before the sort leaves the response unlabelled. The route must
+    // map over the ranker's output.
+    const src = read("app/api/board/route.ts");
+    expect(src).toContain(").map(mark)");
+    expect(src).not.toMatch(/map\(\(\[domain, r\]\) => mark\(/);
   });
 });

@@ -9,14 +9,13 @@
  * links and the retry label are assertable in lib/boundaries.test.ts.
  */
 
-/** The same three documents the legal pages link to each other, and the same
- *  ones components/FooterBar.tsx lists. Kept as data so the 404 and the error
- *  boundaries cannot drift from each other. */
-export const LEGAL_LINKS = [
-  { href: "/legal/about", label: "About & disclaimer" },
-  { href: "/legal/rules", label: "Rules & payments" },
-  { href: "/legal/contact", label: "Contact" },
-] as const;
+import { LEGAL_LINKS } from "./legal";
+
+/** The same four documents the legal pages link to each other, and the same
+ *  ones components/FooterBar.tsx lists. Defined in lib/legal.ts and re-exported
+ *  here so the 404 and the error boundaries cannot drift from the footer — or
+ *  omit a document, which is how `/legal/privacy` used to be unreachable. */
+export { LEGAL_LINKS };
 
 export const HOME_LINK = "← Back to the table";
 

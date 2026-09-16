@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { stampHeartbeat } from "@/lib/jobHeartbeat";
 import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/money";
 import { aggregateDrift } from "@/lib/recompute";
+import { reportQueueAge, TRIAGE_PROMISE_HOURS } from "@/lib/moderation";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,14 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  *  - `unverified` (advisory): a PAID payment carrying no provider figure at
  *    all. Not a defect — providers may omit it — but the money was accepted on
  *    our own checkout figure alone, and this is the only place that is visible.
+ *  - `triage` (advisory, R16-12): the oldest OPEN report in the queue and how
+ *    long it has waited, against the 72 hours `/legal/contact` promises. The
+ *    promise was normative from the day it was written and unmeasurable until
+ *    now: the queue route had no age in it, so nobody could tell a quiet week
+ *    from a backlog. Advisory rather than failing, and deliberately so — an
+ *    unanswered report costs a promise, not money, and a monitor that 503s on
+ *    it is muted before `divergent` ever fires. `breached: true` is the signal
+ *    a script can escalate on without paging the ledger's monitor.
  *  - `stale` (advisory, R08-3/R08-5): a PENDING payment older than the provider
  *    session's own lifetime. Its outcome will never arrive, so either the
  *    delivery was lost or the checkout never reached the provider. Rows that
@@ -185,6 +194,8 @@ async function getReconcileStatus(req: NextRequest) {
   // "is the database telling the truth" instead of "is the money".
   const aggregateRows = await aggregateDrift();
 
+  const triage = await reportQueueAge();
+
   const staleWhere = {
     status: "PENDING" as const,
     createdAt: { lt: new Date(Date.now() - STALE_PENDING_MS) },
@@ -246,6 +257,11 @@ async function getReconcileStatus(req: NextRequest) {
         })),
         samples: unverifiedSamples,
         note: "Paid on our own checkout figure alone: the provider's delivery stated no amount, so nothing could be cross-checked.",
+      },
+      triage: {
+        ...triage,
+        promiseHours: TRIAGE_PROMISE_HOURS,
+        note: "Open reports in the moderation queue, oldest first. /legal/contact promises reports are actioned within 72 hours, so `overdue` counts the reports that promise has already been broken for and `breached` is true whenever it is non-zero. Advisory on purpose: this is a promise at risk, not a contradiction in the money.",
       },
       stale: {
         count: staleCount,

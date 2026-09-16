@@ -320,6 +320,12 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
             domain: payer.domain,
             ...(result.stake.amountUsd !== payment.amountUsd ? { topUpUsd: payment.amountUsd } : {}),
             ...(lapsedTakeTotal != null ? { lapsedTakeTotal } : {}),
+            // R16-5/R16-7: the two facts the receipt has to state about the
+            // transaction itself — the reference that identifies the charge and
+            // the day the rules revision was accepted. Both are read from the
+            // payment row here, so the mail cannot disagree with the record.
+            reference: payment.providerRef ?? null,
+            consentAt: payment.consentAt ? payment.consentAt.toISOString() : null,
           },
         });
       }

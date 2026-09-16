@@ -154,7 +154,10 @@ describe("route wiring (R11-3, R11-4)", () => {
   const routes = routeSources();
 
   it("puts every route file behind the shared boundary", () => {
-    expect(routes).toHaveLength(28);
+    // 28 at R11-3; +1 for the icon proxy (R16-3). The count is a tripwire, not
+    // bookkeeping: a new route file has to be added here on purpose, so it
+    // cannot arrive outside the boundary unnoticed.
+    expect(routes).toHaveLength(29);
     for (const [path, src] of routes) {
       expect(src, `${path} must use apiRoute`).toContain("apiRoute(");
       expect(src, `${path} must not export a raw verb handler`).not.toMatch(

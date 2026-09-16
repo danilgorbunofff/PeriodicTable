@@ -3,6 +3,7 @@
    not pass it, which is exactly why crawlers discount `lastmod`. */
 import { describe, it, expect } from "vitest";
 import { ELEMENTS } from "./elements";
+import { LEGAL_REVISIONS, LEGAL_SLUGS } from "./legal";
 import { buildSitemapEntries, type ElementStamp } from "./sitemapData";
 
 const at = (iso: string) => new Date(iso);
@@ -37,7 +38,9 @@ describe("buildSitemapEntries", () => {
       { symbol: "H", updatedAt: null },
       { symbol: "He", updatedAt: null },
     ]);
-    expect(cold.some((e) => "lastModified" in e)).toBe(false);
+    // Stakes and elements only: legal entries always carry their revision date,
+    // which is a real write to that URL rather than a render-time stamp.
+    expect(cold.slice(0, 3).some((e) => "lastModified" in e)).toBe(false);
   });
 
   it("is byte-identical across two generations over unchanged data", () => {
@@ -46,17 +49,30 @@ describe("buildSitemapEntries", () => {
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   });
 
-  it("covers the board and every element under the origin it is handed", () => {
+  it("covers the board, every element and every legal document under the origin it is handed", () => {
     const entries = buildSitemapEntries(
       "https://ptl-git-main.vercel.app",
       ELEMENTS.map((e) => ({ symbol: e.symbol, updatedAt: null }))
     );
-    expect(entries).toHaveLength(ELEMENTS.length + 1);
+    expect(entries).toHaveLength(ELEMENTS.length + 1 + LEGAL_SLUGS.length);
     const urls = entries.map((e) => e.url);
     expect(urls[0]).toBe("https://ptl-git-main.vercel.app/");
     expect(new Set(urls).size).toBe(urls.length);
     for (const e of ELEMENTS) {
       expect(urls).toContain(`https://ptl-git-main.vercel.app/elements/${encodeURIComponent(e.symbol)}`);
     }
+  });
+
+  it("lists every legal document, dated by its own revision (R16-13)", () => {
+    const base = "https://www.periodictable.lol";
+    const entries = buildSitemapEntries(base, []);
+    expect(entries).toHaveLength(1 + LEGAL_SLUGS.length);
+    for (const slug of LEGAL_SLUGS) {
+      const entry = entries.find((e) => e.url === `${base}/legal/${slug}`);
+      expect(entry, `/legal/${slug} missing from the sitemap`).toBeDefined();
+      expect(entry?.lastModified).toEqual(new Date(`${LEGAL_REVISIONS[slug]}T00:00:00.000Z`));
+    }
+    expect(entries[0].url).toBe(`${base}/`);
+    expect(entries[1].url).toBe(`${base}/legal/about`);
   });
 });

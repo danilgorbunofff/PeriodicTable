@@ -59,8 +59,21 @@ describe("R03-3 the declared read cache", () => {
   });
 
   it("is the only place in app/api that names Cache-Control", () => {
-    const inlined = apiRoutes().filter((f) => src(rel(f)).includes("Cache-Control"));
-    expect(inlined.map(rel)).toEqual([]);
+    // One deliberate exception, and it is not a copy of the window above: the
+    // icon proxy (R16-3) serves bytes rather than a JSON read, and it must
+    // cache them for a day or it would ask the icon service once per visitor.
+    // Every JSON route still goes through READ_CACHE — that is what this
+    // asserts, and why the allowed list is spelled out rather than filtered.
+    const inlined = apiRoutes().map(rel).filter((f) => src(f).includes("Cache-Control"));
+    expect(inlined).toEqual(["app/api/favicon/route.ts"]);
+  });
+
+  it("keeps the icon proxy's window long, and its fallback short (R16-3)", () => {
+    const proxy = src("app/api/favicon/route.ts");
+    // A day for a cached icon, minutes for a miss, so a transient upstream
+    // failure is retried rather than pinned for a day.
+    expect(proxy).toContain('"public, max-age=86400, s-maxage=86400, immutable"');
+    expect(proxy).toContain('"public, max-age=600"');
   });
 
   it("is what the two cacheable read APIs send", () => {

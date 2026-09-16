@@ -18,7 +18,7 @@ export type ActivityHeader =
   | { kind: "error"; text: string }
   | { kind: "loading"; text: string }
   | { kind: "empty"; text: string }
-  | { kind: "lead"; symbol: string; verb: string; city: string };
+  | { kind: "lead"; symbol: string; verb: string; city: string; demo: boolean };
 
 export type ActivityFace = {
   header: ActivityHeader;
@@ -50,6 +50,10 @@ export function activityFace(state: LiveState, rows: ActivityRow[] | undefined):
               symbol: first.elementSymbol.toUpperCase(),
               verb: kindVerb(first.kind),
               city: first.city ?? "somewhere",
+              // R16-9: the header publishes the newest row's city as a fact.
+              // For a seeded row that city was invented by the seeder, so the
+              // card says what the row is rather than who did it.
+              demo: !!first.demo,
             };
 
   if (state === "ok") {

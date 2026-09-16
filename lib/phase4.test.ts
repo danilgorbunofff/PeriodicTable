@@ -1,25 +1,40 @@
 /* Phase 4 pure unit tests (no DB): previews, abuse guards, tile captions. */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { faviconFor, shotUrlFor, previewFor, jsonShotUrlFor, probeShot } from "./screenshots";
+import { faviconFor, upstreamFaviconUrl, isUpstreamFaviconUrl, previewFor, jsonShotUrlFor, probeShot } from "./screenshots";
 import { honeypotCaught, attestValid, turnstileEnabled } from "./abuse";
 import { createStripeCheckoutSession } from "./stripe";
 
 describe("previews", () => {
-  it("prefers stored shot, then live shot, then favicon", () => {
-    expect(previewFor({ previewImgUrl: "https://stored/shot.png", url: "https://a.com", domain: "a.com" })).toBe(
-      "https://stored/shot.png"
-    );
-    expect(previewFor({ url: "https://a.com", domain: "a.com" })).toContain("api.microlink.io");
-    expect(previewFor({ domain: "a.com" })).toContain("s2/favicons");
+  it("prefers stored shot, then the proxied icon", () => {
+    expect(previewFor({ previewImgUrl: "https://stored/shot.png", domain: "a.com" })).toBe("https://stored/shot.png");
+    expect(previewFor({ domain: "a.com" })).toBe("/api/favicon?domain=a.com&sz=128");
   });
-  it("favicon helper encodes domain", () => {
-    expect(faviconFor("acme.com")).toContain("acme.com");
+
+  it("never hands a browser a third-party host (R16-3)", () => {
+    // The two browser-facing strings. Google used to be asked directly by every
+    // page with a listing, and Microlink's PNG used to be streamed into the
+    // visitor's session on hover — neither is a request the visitor agreed to,
+    // and neither was disclosed. Both now come from our own origin.
+    expect(faviconFor("acme.com")).toBe("/api/favicon?domain=acme.com&sz=64");
+    expect(previewFor({ domain: "acme.com" })).not.toMatch(/google|microlink/);
+    expect(faviconFor("acme.com")).not.toMatch(/google|microlink/);
   });
-  it("shot helper encodes url", () => {
-    expect(shotUrlFor("https://acme.com")).toContain(encodeURIComponent("https://acme.com"));
+
+  it("favicon helper encodes domain and keeps the size", () => {
+    expect(faviconFor("acme.com", 20)).toBe("/api/favicon?domain=acme.com&sz=20");
+    expect(faviconFor("weird domain.com")).toContain(encodeURIComponent("weird domain.com"));
   });
-  it("live shot embeds bytes, worker probe asks for JSON", () => {
-    expect(shotUrlFor("https://acme.com")).toContain("embed=screenshot.url");
+
+  it("names the upstream only on the server side", () => {
+    // The proxy route needs the real URL; nothing else may use it.
+    expect(upstreamFaviconUrl("acme.com", 64)).toBe("https://www.google.com/s2/favicons?domain=acme.com&sz=64");
+    expect(isUpstreamFaviconUrl("https://www.google.com/s2/favicons?domain=acme.com&sz=64")).toBe(true);
+    expect(isUpstreamFaviconUrl("/api/favicon?domain=acme.com&sz=64")).toBe(false);
+    expect(isUpstreamFaviconUrl(null)).toBe(false);
+  });
+
+  it("the worker probe still asks for JSON, never for bytes", () => {
+    expect(jsonShotUrlFor("https://acme.com")).toContain(encodeURIComponent("https://acme.com"));
     expect(jsonShotUrlFor("https://acme.com")).not.toContain("embed=");
   });
 });

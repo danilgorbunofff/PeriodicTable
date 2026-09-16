@@ -45,6 +45,12 @@ export type ReceiptPayload = {
    * already held (reclaim), so the charge and the resulting total are stated
    * as the two different facts they are. */
   topUpUsd?: number | null;
+  /** R16-5: the provider reference the receipt prints so a payer can quote it
+   * instead of their card. */
+  reference?: string | null;
+  /** R16-7: when the checkout recorded the consent this payment rests on, so
+   * the receipt can name the revision that was actually accepted. */
+  consentAt?: string | null;
 };
 
 /** R08-2: the buyer's notice that their payment was reversed. Separate type

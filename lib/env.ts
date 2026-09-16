@@ -18,6 +18,11 @@
  *   requireProdEnv() is the check that must be invoked at runtime.
  */
 
+// lib/operator.ts is dependency-free (it reads the environment and prints it),
+// so the config report can name the operator gaps alongside the rest without
+// pulling anything else into this module's import graph.
+import { operatorAdvisories } from "./operator";
+
 export type AppEnv = "development" | "test" | "preview" | "production";
 
 export function getAppEnv(): AppEnv {
@@ -288,6 +293,22 @@ export function getProdConfigReport(env: NodeJS.ProcessEnv = process.env): {
         detail: advisory.detail,
       });
     }
+  }
+  // R16-5: the operator's own identity belongs in the same report as the rest
+  // of the deployment's configuration, because the gaps it names are only
+  // visible to a reader of the legal pages — and a missing statement descriptor
+  // surfaces as a payer who does not recognise a charge, which is a billing
+  // problem long before it is a legal one. Never `required`: an unset operator
+  // name serves traffic, takes money and prints a page; it just cannot be
+  // enforced against, and a monitor that alerts on it would be muted within a
+  // week. Reported here so /api/jobs/config lists it and the checklist has a
+  // line to point at.
+  for (const gap of operatorAdvisories(env)) {
+    findings.push({
+      key: gap.key,
+      severity: "operator",
+      detail: gap.reason,
+    });
   }
   return { ok: configFindingsOk(findings), findings };
 }

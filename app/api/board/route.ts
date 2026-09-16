@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiJson, apiError, apiRoute } from "@/lib/route";
 import { aggregateEarlyAdopters, rankByElement, rankCrowns, rankEarlyAdopters } from "@/lib/boards";
+import { demoListingDomains, isDemoListing } from "@/lib/demoData";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listBoard });
@@ -14,6 +15,19 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listBo
  */
 async function listBoard(req: NextRequest) {
   const tab = req.nextUrl.searchParams.get("tab") ?? "crowns";
+  // R16-9: the seeded rows carry real domains and paid-looking amounts, so a
+  // leaderboard that publishes "total spent" for them states money nobody paid.
+  // Every tab marks them; `demo: true` is the same field the feed and the table
+  // use, so one reader rule covers all three.
+  const demoDomains = await demoListingDomains();
+  // Mark the RANKED rows, not their inputs: `rankCrowns`/`rankByElement`/
+  // `rankEarlyAdopters` each build a fresh `BoardRow` and keep nothing they were
+  // not told about, so a flag set before the sort is silently discarded and the
+  // window shows an unlabelled "total spent" for a listing nobody paid for.
+  // (That is exactly what happened; the route test that reads the flag is what
+  // caught it.)
+  const mark = <T extends { domain: string }>(row: T) =>
+    isDemoListing(row.domain, demoDomains) ? { ...row, demo: true } : row;
 
   if (tab === "crowns") {
     // R15-4: no `take` here on purpose, and the reason is not laziness. This is
@@ -43,7 +57,7 @@ async function listBoard(req: NextRequest) {
       byDomain.set(s.startup.domain, row);
     }
     return apiJson(
-      rankCrowns([...byDomain.entries()].map(([domain, r]) => ({ domain, ...r })))
+      rankCrowns([...byDomain.entries()].map(([domain, r]) => ({ domain, ...r }))).map(mark)
     );
   }
 
@@ -71,7 +85,7 @@ async function listBoard(req: NextRequest) {
           createdAt: l.createdAt,
           id: l.id,
         }))
-      )
+      ).map(mark)
     );
   }
 
@@ -101,7 +115,7 @@ async function listBoard(req: NextRequest) {
             claimedAt: c.claimedAt,
           }))
         )
-      )
+      ).map(mark)
     );
   }
 

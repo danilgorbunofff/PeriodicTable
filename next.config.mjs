@@ -7,11 +7,12 @@ const csp = [
   "script-src 'self' 'unsafe-inline' https://plausible.io https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  // s2/favicons 302-redirects to t*.gstatic.com/faviconV2 — the redirect
-  // target must also be allowlisted or Chrome blocks the image entirely.
-  // Microlink: api.microlink.io serves live shots, iad.microlink.io serves the
-  // cached ones we store, so the wildcard covers both.
-  "img-src 'self' data: https://*.microlink.io https://www.google.com https://*.gstatic.com",
+  // R16-3: the browser loads no third-party image any more. Listing icons come
+  // from our own /api/favicon (the server asks the icon service, and this
+  // allowlist is what makes the old direct path a blocked request rather than a
+  // silent regression), previews are the shots our worker stored, and the three
+  // hosts that used to be needed here are gone with them.
+  "img-src 'self' data:",
   "connect-src 'self' https://plausible.io",
   "frame-src https://challenges.cloudflare.com",
   "object-src 'none'",
