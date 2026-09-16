@@ -112,14 +112,14 @@ Per-tile answer: cached board → the last known face, labelled `stale`; nothing
 ### R03-2 — The API ships money aggregates that count stakes the tiles refuse to show
 
 - **Severity.** P3 today, P2 on the day a stake is hidden · **Category.** correctness · **Status.** fixed
-- **Fix.** Defined `FACE_STAKE_WHERE` in `lib/moderation.ts` (`{ amountUsd: { gt: 0 }, startup: { state: { in: DIRECT_STATES } } }`) as the single source of truth for visible stake faces. Updated `app/api/stats/route.ts` so `claimedElements` counts elements satisfying `{ stakes: { some: FACE_STAKE_WHERE } }`. Money aggregates (`totalStakedUsd`, `stakeCount`, tile `pool`/`count`) remain hidden-inclusive accounting metrics as documented. Tests: `lib/claimFace.test.ts` (verifying face predicate alignment, money aggregates, zero-amount reversal behavior).
+- **Fix.** Defined `FACE_STAKE_WHERE` in `lib/moderation.ts` (`{ amountUsd: { gt: 0 }, startup: { state: { in: DIRECT_STATES } } }` — the `startup` arm keys on `moderationState` today: `{ startup: { moderationState: { in: DIRECT_STATES } } }`, `lib/moderation.ts:33-36`) as the single source of truth for visible stake faces. Updated `app/api/stats/route.ts` so `claimedElements` counts elements satisfying `{ stakes: { some: FACE_STAKE_WHERE } }`. Money aggregates (`totalStakedUsd`, `stakeCount`, tile `pool`/`count`) remain hidden-inclusive accounting metrics as documented. Tests: `lib/claimFace.test.ts` (verifying face predicate alignment, money aggregates, zero-amount reversal behavior).
 - **Evidence.** §5.1, §5.8; `app/api/elements/route.ts:15-18`; `app/api/stats/route.ts:21`.
 - **Reproduction.** With a hidden stake, `/api/elements` showed it unclaimed while `/api/stats` counted it claimed.
 
 ### R03-3 — The declared cache window never reaches the wire
 
 - **Severity.** P3 · **Category.** perf · **Status.** fixed
-- **Fix.** Added exported `READ_CACHE` constant in `lib/route.ts` (`{ "Cache-Control": "s-maxage=10, stale-while-revalidate=30", "Vercel-CDN-Cache-Control": "s-maxage=10, stale-while-revalidate=30" }`). Applied to `app/api/elements/route.ts` and `app/api/elements/[sym]/route.ts`. The route documentation and tests record the difference between browser-facing headers rewritten by Vercel edge and edge-CDN caching behavior. Tests: `lib/readCache.test.ts` (auditing all `app/api/**/route.ts` handlers).
+- **Fix.** Added exported `READ_CACHE` constant in `lib/route.ts` (`{ "Cache-Control": "s-maxage=10, stale-while-revalidate=30", "Vercel-CDN-Cache-Control": "s-maxage=10, stale-while-revalidate=30" }`; `Cache-Control` reads `public, max-age=5, s-maxage=10, stale-while-revalidate=30` today, `lib/route.ts:47-50`). Applied to `app/api/elements/route.ts` and `app/api/elements/[sym]/route.ts`. The route documentation and tests record the difference between browser-facing headers rewritten by Vercel edge and edge-CDN caching behavior. Tests: `lib/readCache.test.ts` (auditing all `app/api/**/route.ts` handlers).
 - **Evidence.** §5.7; `curl -sS -D - /api/elements` showed edge HITs with `Age` incrementing, while browser-facing header was rewritten to `max-age=0`.
 - **Reproduction.** `curl -sS -D - -o /dev/null https://www.periodictable.lol/api/elements`.
 
@@ -158,6 +158,7 @@ Budget: ≤300 KB brotli, ≤150 KB decoded, LCP ≤2.5 s. Measured: 225,840 B b
 
 - 2026-09-14: first draft, from the reads and probes in §5; nothing fixed, no production write.
 - 2026-09-14: fix pass for R03-1…R03-4, each cited in §7: deleted duplicate `lib/elements.json`, derived pod geometry in `lib/gridGeometry.ts`, mapped `/api/elements` coordinates to dataset via `cellOf` (fixing seeded coordinate mismatch); unified face predicate via `FACE_STAKE_WHERE` so headline claims match board faces; added `READ_CACHE` with `Vercel-CDN-Cache-Control`; wired conditional combobox ARIA attributes in `SearchPill.tsx`. Verified on dev server (§5.11), settling U03-4. Added test suites `lib/{datasetGeometry,claimFace,readCache,searchCombobox}.test.ts`. Working tree, uncommitted.
+- 2026-09-16 (working tree, PR `26` final-verification audit) — two quote refreshes: `FACE_STAKE_WHERE`'s `startup` arm keys on `moderationState` (`lib/moderation.ts:33-36`), and `READ_CACHE`'s browser-facing `Cache-Control` now carries `public, max-age=5, …` (`lib/route.ts:47-50`).
 
 ## 12. UNKNOWN log
 

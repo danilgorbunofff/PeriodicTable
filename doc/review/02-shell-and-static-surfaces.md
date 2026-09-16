@@ -34,7 +34,7 @@ Not owned: grid, tiles, camera, search (`03`); price ladder (`04`); AA, contrast
 ## 3. Intended behaviour
 
 1. One root layout owns `html`/`body`, both variable fonts and Plausible gated on `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (`app/layout.tsx:1-33`); root metadata is a fixed title and description with no per-route override (`:17-22`).
-2. `FooterBar` renders on every route, never viewport-gated, linking exactly the three slugs `app/legal/[slug]/page.tsx:5` knows; `unavailable` is fatal to the table because the grid's default face is a price (`app/page.tsx:197-203`).
+2. `FooterBar` renders on every route, never viewport-gated, linking exactly the three slugs (`app/legal/[slug]/page.tsx:5` at authoring) `lib/legal.ts`'s `LEGAL_LINKS` feeds it — **four** today (`lib/legal.ts:91-96`; `About & disclaimer` joined later); `unavailable` is fatal to the table because the grid's default face is a price (`app/page.tsx:197-203`).
 3. Live truth is decided once: `lib/liveState.ts:24-27` maps (has data, error) to `ok`/`loading`/`stale`/`unavailable`; `liveMessage` (`:33-44`) owns both notices.
 
 ## 4. The path walked
@@ -169,6 +169,7 @@ State as reviewed (commit `579c507`); the 2026-09-14 fix pass closes R02-1…R02
 
 - 2026-09-14 — first pass; R02-1…R02-7 raised, all open; per-viewport capture deferred (U02-1).
 - 2026-09-14 — fix pass for R02-1…R02-7, each cited on its own finding in §7: one `app/not-found.tsx` for both 404 shapes and `app/error.tsx` + `app/global-error.tsx` for throws; a single tile face that states no price until the board answers; an activity face that separates empty from loading and derives every liveness claim from the feed's state; per-slug legal metadata. Verification recorded in §5.10, which also runs the two probes §5 could not (U02-2, U02-3) and answers both §9 questions. Tests `lib/{boundaries,tileFace,activityFace,legalMeta}.test.ts`. Working tree, uncommitted.
+- 2026-09-16 (working tree, PR `26` final-verification audit) — F-013-class refresh: §2's FooterBar criterion said "exactly the three slugs"; `lib/legal.ts`'s `LEGAL_LINKS` (`:91-96`) carries four today (`about`, `rules`, `privacy`, `contact`).
 
 ## 12. UNKNOWN log
 
