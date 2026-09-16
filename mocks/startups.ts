@@ -28,24 +28,24 @@ const SEAT_USD = 5;
 type MockSeat = [domain: string, title: string, pitch: string, symbol: string, elementName: string, hoursAgo: number];
 
 const SEATS: MockSeat[] = [
-  ["stripe.com", "Stripe", "Payments infrastructure for the internet.", "C", "Carbon", 1],
-  ["stripe.com", "Stripe", "Payments infrastructure for the internet.", "Ne", "Neon", 21],
-  ["stripe.com", "Stripe", "Payments infrastructure for the internet.", "Ti", "Titanium", 33],
-  ["coinbase.com", "Coinbase", "The easiest place to buy and sell crypto.", "Au", "Gold", 3],
-  ["coinbase.com", "Coinbase", "The easiest place to buy and sell crypto.", "Ag", "Silver", 13],
-  ["coinbase.com", "Coinbase", "The easiest place to buy and sell crypto.", "Cu", "Copper", 25],
-  ["nvidia.com", "NVIDIA", "Accelerated computing for the AI era.", "Si", "Silicon", 5],
-  ["nvidia.com", "NVIDIA", "Accelerated computing for the AI era.", "B", "Boron", 17],
-  ["nvidia.com", "NVIDIA", "Accelerated computing for the AI era.", "Ga", "Gallium", 29],
-  ["cloudflare.com", "Cloudflare", "The connectivity cloud for a faster internet.", "H", "Hydrogen", 7],
-  ["cloudflare.com", "Cloudflare", "The connectivity cloud for a faster internet.", "He", "Helium", 19],
-  ["cloudflare.com", "Cloudflare", "The connectivity cloud for a faster internet.", "O", "Oxygen", 27],
-  ["supabase.com", "Supabase", "Open source Postgres at the edge.", "Fe", "Iron", 9],
-  ["supabase.com", "Supabase", "Open source Postgres at the edge.", "Co", "Cobalt", 23],
-  ["supabase.com", "Supabase", "Open source Postgres at the edge.", "Ni", "Nickel", 31],
-  ["anthropic.com", "Anthropic", "AI safety and research.", "DM", "Dark Matter", 11],
-  ["anthropic.com", "Anthropic", "AI safety and research.", "U", "Uranium", 15],
-  ["anthropic.com", "Anthropic", "AI safety and research.", "Pu", "Plutonium", 35],
+  ["resend.com", "Resend", "Email API for developers.", "C", "Carbon", 1],
+  ["resend.com", "Resend", "Email API for developers.", "Ne", "Neon", 21],
+  ["resend.com", "Resend", "Email API for developers.", "Ti", "Titanium", 33],
+  ["lemonsqueezy.com", "Lemon Squeezy", "Payments and merchant of record for indie software.", "Au", "Gold", 3],
+  ["lemonsqueezy.com", "Lemon Squeezy", "Payments and merchant of record for indie software.", "Ag", "Silver", 13],
+  ["lemonsqueezy.com", "Lemon Squeezy", "Payments and merchant of record for indie software.", "Cu", "Copper", 25],
+  ["cal.com", "Cal.com", "Open-source scheduling infrastructure.", "Si", "Silicon", 5],
+  ["cal.com", "Cal.com", "Open-source scheduling infrastructure.", "B", "Boron", 17],
+  ["cal.com", "Cal.com", "Open-source scheduling infrastructure.", "Ga", "Gallium", 29],
+  ["railway.app", "Railway", "Ship apps without wiring up the infrastructure.", "H", "Hydrogen", 7],
+  ["railway.app", "Railway", "Ship apps without wiring up the infrastructure.", "He", "Helium", 19],
+  ["railway.app", "Railway", "Ship apps without wiring up the infrastructure.", "O", "Oxygen", 27],
+  ["neon.tech", "Neon", "Serverless Postgres with branching.", "Fe", "Iron", 9],
+  ["neon.tech", "Neon", "Serverless Postgres with branching.", "Co", "Cobalt", 23],
+  ["neon.tech", "Neon", "Serverless Postgres with branching.", "Ni", "Nickel", 31],
+  ["replicate.com", "Replicate", "Run open-source models behind one API.", "DM", "Dark Matter", 11],
+  ["replicate.com", "Replicate", "Run open-source models behind one API.", "U", "Uranium", 15],
+  ["replicate.com", "Replicate", "Run open-source models behind one API.", "Pu", "Plutonium", 35],
 ];
 
 export const MOCK_STAKES: MockStake[] = SEATS.map(
@@ -63,6 +63,6 @@ export const MOCK_STAKES: MockStake[] = SEATS.map(
   }),
 );
 
-export const MOCK_ORDER = ["coinbase.com", "anthropic.com", "stripe.com", "nvidia.com", "supabase.com", "cloudflare.com"];
+export const MOCK_ORDER = ["lemonsqueezy.com", "replicate.com", "resend.com", "cal.com", "neon.tech", "railway.app"];
 
 export const MOCK_ACTIVITY = MOCK_STAKES.slice(0, 6);

@@ -125,7 +125,7 @@ GROUP BY st.id, st.domain ORDER BY usd DESC NULLS LAST;"
 psql "$DATABASE_URL" -c "
 SELECT e.symbol, e.\"totalPoolUsd\" AS pool, st.domain AS leader,
        s.\"amountUsd\" AS leader_usd, s.\"isLeader\",
-       st.domain = ANY(ARRAY['stripe.com','coinbase.com','nvidia.com','cloudflare.com','supabase.com','anthropic.com']) AS seeded
+       st.domain = ANY(ARRAY['resend.com','lemonsqueezy.com','cal.com','railway.app','neon.tech','replicate.com']) AS seeded
 FROM \"Element\" e
 JOIN \"Startup\" st ON st.id = e.\"currentLeaderId\"
 JOIN \"Stake\"   s  ON s.\"elementId\" = e.id AND s.\"startupId\" = st.id

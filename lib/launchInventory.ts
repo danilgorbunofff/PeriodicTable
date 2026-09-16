@@ -9,18 +9,31 @@
 
    This module opens no database connection, so the seeder, the cleanup script
    and the readiness tests can all read the same answer without pulling Prisma —
-   and so nothing here can reach a browser bundle by accident. */
+   and so nothing here can reach a browser bundle by accident.
+
+   Which companies, and why these ones (2026-09-16): developer-tool companies a
+   software audience recognises and a general audience does not. The first set
+   was household names, and the operator's read of the launch was right — a
+   board of marquee logos nobody paid for looks like stage dressing, which is
+   the one thing this page cannot afford to look like.
+
+   The fame of the name is not what makes a seat honest, though, and swapping in
+   quieter names does not make it honest either. What does: the About page calls
+   these seats inventory the operator opened, never paid for and never approved
+   by the company named on it, and every one of them is beatable for the same $6
+   any other tile costs. A less famous name only removes the "this must be
+   fake" reflex; the sentence and the price are the actual answer to it. */
 
 /** Every domain the launch inventory may seat. One row per element, one seat
  *  per element, all at the floor (`MIN_STAKE`, lib/pricing.ts) — so a captured
  *  tile quotes exactly one dollar over its holder and carries no ladder. */
 export const LAUNCH_INVENTORY_DOMAINS = [
-  "stripe.com",
-  "coinbase.com",
-  "nvidia.com",
-  "cloudflare.com",
-  "supabase.com",
-  "anthropic.com",
+  "resend.com",
+  "lemonsqueezy.com",
+  "cal.com",
+  "railway.app",
+  "neon.tech",
+  "replicate.com",
 ] as const;
 
 /** An inventory candidate plus the signals that would prove it became real. */

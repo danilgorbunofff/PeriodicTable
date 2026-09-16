@@ -10,7 +10,7 @@ set (R19-1, U19-3): the script is consent-gated, so "Plausible live" and the fun
 dashboard are not true until then.
 
 ## Seed (dogfood before strangers)
-- [ ] 18 seats for six real companies with real domains, logos, pitches — `prisma/launch-seed.ts:45-63`; `seed-list.csv` is the same table, and a test keeps the two from drifting (`lib/launchReadiness.test.ts`)
+- [ ] 18 seats for six real companies with real domains, logos, pitches — `prisma/launch-seed.ts:50-69`; `seed-list.csv` is the same table, and a test keeps the two from drifting (`lib/launchReadiness.test.ts`). The six are deliberately developer-tool names rather than household ones (2026-09-16): marquee logos nobody paid for read as stage dressing (`lib/launchInventory.ts` carries the why, and it is the allowlist both seeds must agree with)
 - [ ] One seat per element, every one at the `$5` floor — so a captured tile quotes exactly `$6` and no tile carries a ladder too tall for that price (`lib/launchInventory.test.ts`)
 - [ ] Activity backlog: one row per seat, stamped 1–35h back, no city and no clicks on the row — the feed is non-empty because the seats are
 - [ ] Concierge reclaim test: outbid a founder friend, verify email + top-up — operator step, unrun

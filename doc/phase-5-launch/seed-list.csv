@@ -1,19 +1,19 @@
 domain,title,pitch,symbol,amount_usd
-stripe.com,Stripe,Payments infrastructure for the internet.,C,5
-stripe.com,Stripe,Payments infrastructure for the internet.,Ne,5
-stripe.com,Stripe,Payments infrastructure for the internet.,Ti,5
-coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Au,5
-coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Ag,5
-coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Cu,5
-nvidia.com,NVIDIA,Accelerated computing for the AI era.,Si,5
-nvidia.com,NVIDIA,Accelerated computing for the AI era.,B,5
-nvidia.com,NVIDIA,Accelerated computing for the AI era.,Ga,5
-cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,H,5
-cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,He,5
-cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,O,5
-supabase.com,Supabase,Open source Postgres at the edge.,Fe,5
-supabase.com,Supabase,Open source Postgres at the edge.,Co,5
-supabase.com,Supabase,Open source Postgres at the edge.,Ni,5
-anthropic.com,Anthropic,AI safety and research.,DM,5
-anthropic.com,Anthropic,AI safety and research.,U,5
-anthropic.com,Anthropic,AI safety and research.,Pu,5
+resend.com,Resend,Email API for developers.,C,5
+resend.com,Resend,Email API for developers.,Ne,5
+resend.com,Resend,Email API for developers.,Ti,5
+lemonsqueezy.com,Lemon Squeezy,Payments and merchant of record for indie software.,Au,5
+lemonsqueezy.com,Lemon Squeezy,Payments and merchant of record for indie software.,Ag,5
+lemonsqueezy.com,Lemon Squeezy,Payments and merchant of record for indie software.,Cu,5
+cal.com,Cal.com,Open-source scheduling infrastructure.,Si,5
+cal.com,Cal.com,Open-source scheduling infrastructure.,B,5
+cal.com,Cal.com,Open-source scheduling infrastructure.,Ga,5
+railway.app,Railway,Ship apps without wiring up the infrastructure.,H,5
+railway.app,Railway,Ship apps without wiring up the infrastructure.,He,5
+railway.app,Railway,Ship apps without wiring up the infrastructure.,O,5
+neon.tech,Neon,Serverless Postgres with branching.,Fe,5
+neon.tech,Neon,Serverless Postgres with branching.,Co,5
+neon.tech,Neon,Serverless Postgres with branching.,Ni,5
+replicate.com,Replicate,Run open-source models behind one API.,DM,5
+replicate.com,Replicate,Run open-source models behind one API.,U,5
+replicate.com,Replicate,Run open-source models behind one API.,Pu,5

@@ -1,7 +1,12 @@
 /* Launch seed (Phase 5, spec 01-seed-instrument.md): 18 inventory seats across
- * six recognizable real startups — one seat per element, never two, so no tile
+ * six real developer-tool companies — one seat per element, never two, so no tile
  * carries a price ladder and every captured tile quotes exactly one dollar over
  * its holder (`MIN_STAKE` + `TAKEOVER_MARGIN`, lib/pricing.ts).
+ * The six are picked to read as plausible neighbours, not as stage dressing:
+ * companies a software audience knows and a general audience does not
+ * (2026-09-16 — the household-name set made the board look fake to a fresh
+ * visitor). Fame is not what makes a seat honest; lib/launchInventory.ts carries
+ * the full note, and the About sentence is the answer a sceptic actually needs.
  * Real domains are deliberate: a tile draws its holder's icon through
  * `/api/favicon` (this site's own proxy — see faviconFor in lib/screenshots.ts),
  * so a real domain is what makes a real icon render.
@@ -43,24 +48,24 @@ type SeedSeat = {
    amounts are not restated here: a seat costs `MIN_STAKE`, and the price of
    beating it is derived the same way the checkout derives it. */
 const SEATS: SeedSeat[] = [
-  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "C", ts: NOW - 1 * H },
-  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "Ne", ts: NOW - 21 * H },
-  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "Ti", ts: NOW - 33 * H },
-  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Au", ts: NOW - 3 * H },
-  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Ag", ts: NOW - 13 * H },
-  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Cu", ts: NOW - 25 * H },
-  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "Si", ts: NOW - 5 * H },
-  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "B", ts: NOW - 17 * H },
-  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "Ga", ts: NOW - 29 * H },
-  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "H", ts: NOW - 7 * H },
-  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "He", ts: NOW - 19 * H },
-  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "O", ts: NOW - 27 * H },
-  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Fe", ts: NOW - 9 * H },
-  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Co", ts: NOW - 23 * H },
-  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Ni", ts: NOW - 31 * H },
-  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "DM", ts: NOW - 11 * H },
-  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "U", ts: NOW - 15 * H },
-  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "Pu", ts: NOW - 35 * H },
+  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "C", ts: NOW - 1 * H },
+  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "Ne", ts: NOW - 21 * H },
+  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "Ti", ts: NOW - 33 * H },
+  { domain: "lemonsqueezy.com", title: "Lemon Squeezy", pitch: "Payments and merchant of record for indie software.", symbol: "Au", ts: NOW - 3 * H },
+  { domain: "lemonsqueezy.com", title: "Lemon Squeezy", pitch: "Payments and merchant of record for indie software.", symbol: "Ag", ts: NOW - 13 * H },
+  { domain: "lemonsqueezy.com", title: "Lemon Squeezy", pitch: "Payments and merchant of record for indie software.", symbol: "Cu", ts: NOW - 25 * H },
+  { domain: "cal.com", title: "Cal.com", pitch: "Open-source scheduling infrastructure.", symbol: "Si", ts: NOW - 5 * H },
+  { domain: "cal.com", title: "Cal.com", pitch: "Open-source scheduling infrastructure.", symbol: "B", ts: NOW - 17 * H },
+  { domain: "cal.com", title: "Cal.com", pitch: "Open-source scheduling infrastructure.", symbol: "Ga", ts: NOW - 29 * H },
+  { domain: "railway.app", title: "Railway", pitch: "Ship apps without wiring up the infrastructure.", symbol: "H", ts: NOW - 7 * H },
+  { domain: "railway.app", title: "Railway", pitch: "Ship apps without wiring up the infrastructure.", symbol: "He", ts: NOW - 19 * H },
+  { domain: "railway.app", title: "Railway", pitch: "Ship apps without wiring up the infrastructure.", symbol: "O", ts: NOW - 27 * H },
+  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Fe", ts: NOW - 9 * H },
+  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Co", ts: NOW - 23 * H },
+  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Ni", ts: NOW - 31 * H },
+  { domain: "replicate.com", title: "Replicate", pitch: "Run open-source models behind one API.", symbol: "DM", ts: NOW - 11 * H },
+  { domain: "replicate.com", title: "Replicate", pitch: "Run open-source models behind one API.", symbol: "U", ts: NOW - 15 * H },
+  { domain: "replicate.com", title: "Replicate", pitch: "Run open-source models behind one API.", symbol: "Pu", ts: NOW - 35 * H },
 ];
 
 async function recompute(elementId: number) {

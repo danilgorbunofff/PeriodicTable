@@ -1,12 +1,12 @@
 # Phase 5 — Launch (Day 17–18)
 ### Seed, instrument, gate, ship
 
-**Goal:** launch with a table that already looks alive, every dollar flow proven on prod, and a one-flag rollback. **The seeding half of that goal is decided: seed before announcing** (2026-09-16, `doc/review/19-launch-and-marketing-readiness.md` §9 Q1 → D19-1), which is what makes "already looks alive" a claim the product can stand behind — the seeded rows are labelled `demo` until a real payment replaces them (R16-9).
+**Goal:** launch with a table that already looks alive, every dollar flow proven on prod, and a one-flag rollback. **The seeding half of that goal is decided: seed before announcing** (2026-09-16, `doc/review/19-launch-and-marketing-readiness.md` §9 Q1 → D19-1), which is what makes "already looks alive" a claim the product can stand behind — every seeded row is operator inventory the About page names as such, beatable for the same $6 as any other tile (the `demo` label R16-9 asked for was removed 2026-09-16: a seat nobody bought is now described, not badged).
 
 **Inputs:** all prior phases · ROADMAP §8, §14.
 
 **Outputs:**
-- 12 seeded stakes for real companies across marquee elements, labelled as placeholders (`prisma/launch-seed.ts`, `seed-list.csv`)
+- 18 seats for six real companies — one per element, all at the $5 floor (`prisma/launch-seed.ts`, `seed-list.csv`, allowlist in `lib/launchInventory.ts`)
 - Plausible + custom funnel events — consent-gated and **off** until `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` is set (R19-1, U19-3)
 - Launch gate checklist + rollback runbook + takedown playbook
 

@@ -18,7 +18,7 @@ import { MIN_STAKE, takeLeadPrice } from "./pricing";
 import { LAUNCH_INVENTORY_DOMAINS } from "./launchInventory";
 
 const seat = (over: Partial<BoardStakeRow> = {}): BoardStakeRow => ({
-  domain: "stripe.com",
+  domain: "resend.com",
   symbol: "C",
   amountUsd: MIN_STAKE,
   paid: false,
@@ -28,9 +28,9 @@ const seat = (over: Partial<BoardStakeRow> = {}): BoardStakeRow => ({
 describe("readLaunchBoard — the seeded shape", () => {
   it("reads ready and quotes the $6 takeover when every unpaid seat is inventory at the floor", () => {
     const reading = readLaunchBoard([
-      seat({ domain: "stripe.com", symbol: "C" }),
-      seat({ domain: "coinbase.com", symbol: "Au" }),
-      seat({ domain: "nvidia.com", symbol: "Si" }),
+      seat({ domain: "resend.com", symbol: "C" }),
+      seat({ domain: "lemonsqueezy.com", symbol: "Au" }),
+      seat({ domain: "cal.com", symbol: "Si" }),
     ]);
 
     expect(reading.ready).toBe(true);
@@ -46,13 +46,13 @@ describe("readLaunchBoard — the seeded shape", () => {
 
   it("counts tiles and dollars per holder, and marks inventory holders", () => {
     const reading = readLaunchBoard([
-      seat({ domain: "anthropic.com", symbol: "DM" }),
-      seat({ domain: "anthropic.com", symbol: "U" }),
-      seat({ domain: "anthropic.com", symbol: "Pu" }),
+      seat({ domain: "replicate.com", symbol: "DM" }),
+      seat({ domain: "replicate.com", symbol: "U" }),
+      seat({ domain: "replicate.com", symbol: "Pu" }),
     ]);
 
     expect(reading.domains).toEqual([
-      { domain: "anthropic.com", tiles: 3, usd: 15, paid: false, inventory: true },
+      { domain: "replicate.com", tiles: 3, usd: 15, paid: false, inventory: true },
     ]);
   });
 
@@ -76,7 +76,7 @@ describe("readLaunchBoard — what breaks the claim", () => {
 
   it("warns on a ladder of seeded seats — the takeover is no longer $6", () => {
     const reading = readLaunchBoard([
-      seat({ domain: "stripe.com", symbol: "C", amountUsd: 50 }),
+      seat({ domain: "resend.com", symbol: "C", amountUsd: 50 }),
       seat({ domain: "adyen.com", symbol: "C", amountUsd: 24 }),
       seat({ domain: "squareup.com", symbol: "C", amountUsd: 9 }),
     ]);
@@ -85,7 +85,7 @@ describe("readLaunchBoard — what breaks the claim", () => {
     const ladder = reading.issues.find((i) => i.kind === "ladder");
     expect(ladder?.severity).toBe("warn");
     expect(ladder?.message).toContain("beating it costs $51, not $6");
-    expect(reading.tiles[0]).toMatchObject({ symbol: "C", poolUsd: 83, stakeCount: 3, takeoverUsd: 51, leader: "stripe.com" });
+    expect(reading.tiles[0]).toMatchObject({ symbol: "C", poolUsd: 83, stakeCount: 3, takeoverUsd: 51, leader: "resend.com" });
   });
 
   it("flags an unpaid holder the seeders never wrote, even at the floor", () => {
@@ -102,50 +102,50 @@ describe("readLaunchBoard — what breaks the claim", () => {
   });
 
   it("settles equal totals by domain so two readings agree", () => {
-    const rows = [seat({ domain: "anthropic.com", symbol: "U", amountUsd: 39 }), seat({ domain: "huggingface.co", symbol: "U", amountUsd: 39 })];
-    expect(readLaunchBoard(rows).tiles[0].leader).toBe("anthropic.com");
-    expect(readLaunchBoard([...rows].reverse()).tiles[0].leader).toBe("anthropic.com");
+    const rows = [seat({ domain: "cal.com", symbol: "U", amountUsd: 39 }), seat({ domain: "huggingface.co", symbol: "U", amountUsd: 39 })];
+    expect(readLaunchBoard(rows).tiles[0].leader).toBe("cal.com");
+    expect(readLaunchBoard([...rows].reverse()).tiles[0].leader).toBe("cal.com");
   });
 });
 
 describe("readLaunchBoard — paid bidders are not failures", () => {
   it("keeps a paid ladder as info and stays ready", () => {
     const reading = readLaunchBoard([
-      seat({ domain: "stripe.com", symbol: "C", paid: true }),
+      seat({ domain: "resend.com", symbol: "C", paid: true }),
       seat({ domain: "example.com", symbol: "C", amountUsd: 12, paid: true }),
     ]);
 
     expect(reading.ready).toBe(true);
     expect(reading.issues.map((i) => [i.kind, i.severity])).toEqual([
       ["ladder", "info"],
-      // stripe.com is inventory and now paid: the FAQ copy is the thing to fix.
+      // resend.com is inventory and now paid: the FAQ copy is the thing to fix.
       ["paid-inventory", "info"],
     ]);
     expect(reading.issues[0].message).toContain("example.com $12 (paid)");
   });
 
   it("reports an inventory domain that paid as info, not as a warn", () => {
-    const reading = readLaunchBoard([seat({ domain: "stripe.com", symbol: "C", paid: true })]);
+    const reading = readLaunchBoard([seat({ domain: "resend.com", symbol: "C", paid: true })]);
 
     expect(reading.ready).toBe(true);
     expect(reading.issues).toEqual([
       {
         kind: "paid-inventory",
         severity: "info",
-        message: "stripe.com is a paying customer now (1 tile(s)) — the FAQ sentence about seats we did not sell needs a re-read",
+        message: "resend.com is a paying customer now (1 tile(s)) — the FAQ sentence about seats we did not sell needs a re-read",
       },
     ]);
   });
 
   it("says a paying customer once, not once per tile it holds", () => {
     const reading = readLaunchBoard([
-      seat({ domain: "stripe.com", symbol: "C", paid: true }),
-      seat({ domain: "stripe.com", symbol: "Ne", paid: true }),
-      seat({ domain: "stripe.com", symbol: "Ti", paid: true }),
+      seat({ domain: "resend.com", symbol: "C", paid: true }),
+      seat({ domain: "resend.com", symbol: "Ne", paid: true }),
+      seat({ domain: "resend.com", symbol: "Ti", paid: true }),
     ]);
 
     expect(reading.issues.filter((i) => i.kind === "paid-inventory")).toHaveLength(1);
-    expect(reading.domains[0]).toMatchObject({ domain: "stripe.com", tiles: 3, paid: true, inventory: true });
+    expect(reading.domains[0]).toMatchObject({ domain: "resend.com", tiles: 3, paid: true, inventory: true });
   });
 
   it("does not warn about a paid holder's price on a tile nobody else wants", () => {

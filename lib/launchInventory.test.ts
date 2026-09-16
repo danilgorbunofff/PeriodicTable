@@ -22,7 +22,7 @@ const symbolsIn = (src: string) => [...src.matchAll(/symbol:\s*"([^"]+)"/g)].map
 
 const clean = (over: Partial<InventoryStartupRow> = {}): InventoryStartupRow => ({
   id: "s1",
-  domain: "stripe.com",
+  domain: "resend.com",
   email: null,
   moderatedBy: null,
   moderatedReason: null,
@@ -93,7 +93,7 @@ describe("provenance guard", () => {
   });
 
   it.each([
-    ["notification email", { email: "founder@stripe.com" }],
+    ["notification email", { email: "founder@resend.com" }],
     ["a payment", { paymentCount: 1 }],
     ["a manage token", { manageTokenCount: 1 }],
     ["a manage session", { manageSessionCount: 1 }],
@@ -105,13 +105,13 @@ describe("provenance guard", () => {
 
   it("splits candidates and keeps blocked rows out of the delete set", () => {
     const { removable, blocked } = assessInventoryStartups([
-      clean({ id: "a", domain: "stripe.com" }),
-      clean({ id: "b", domain: "coinbase.com", email: "real@coinbase.com" }),
-      clean({ id: "c", domain: "nvidia.com" }),
+      clean({ id: "a", domain: "resend.com" }),
+      clean({ id: "b", domain: "lemonsqueezy.com", email: "real@lemonsqueezy.com" }),
+      clean({ id: "c", domain: "cal.com" }),
     ]);
     expect(removable.map((r) => r.id)).toEqual(["a", "c"]);
     expect(blocked.map((b) => b.row.id)).toEqual(["b"]);
-    expect(blocked[0].reasons[0]).toContain("real@coinbase.com");
+    expect(blocked[0].reasons[0]).toContain("real@lemonsqueezy.com");
   });
 });
 
