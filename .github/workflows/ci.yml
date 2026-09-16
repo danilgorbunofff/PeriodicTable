@@ -79,16 +79,20 @@ jobs:
           npx tsx prisma/seed.ts
           npx tsx prisma/launch-seed.ts
       - name: release rehearsal — live money flows
-        # VERCEL_ENV=preview keeps the app out of its fail-closed production
-        # mode, which requires real Stripe keys (PAYMENTS_LIVE=true + key +
-        # secret). The rehearsal deliberately drives the dev simulator
-        # (/api/dev/pay) so the ledger, ranking, idempotency, reservation and
-        # webhook paths run against the same settle service without live
-        # charges. True production fail-closed behavior is covered below by
-        # the paused rehearsal, which runs in production env shape.
+        # The rehearsal deliberately drives the dev simulator (/api/dev/pay) so
+        # the ledger, ranking, idempotency and reservation paths run against the
+        # same settle service without live charges. Since the R07-1/R07-2
+        # hardening, the simulator exists only in a development-shaped process
+        # holding NO Stripe credentials — a half-configured provider is the
+        # "paused" incident posture (403 waitlist), not a live one. So this step
+        # runs VERCEL_ENV=development with no Stripe vars at all; the script's
+        # signed-webhook block skips (it needs STRIPE_WEBHOOK_SECRET, which
+        # would disable the simulator), and webhook settling stays covered by
+        # lib/webhook.test.ts in the test step above. True production
+        # fail-closed behavior is covered below by the paused rehearsal, which
+        # runs in production env shape.
         env:
-          VERCEL_ENV: preview
-          STRIPE_WEBHOOK_SECRET: ci-rehearse-secret
+          VERCEL_ENV: development
           ADMIN_TOKEN: ci-rehearse-admin
           CRON_SECRET: ci-rehearse-cron
           RESERVATION_TTL_MS: 2000
@@ -101,7 +105,6 @@ jobs:
           done
           BASE_URL=http://localhost:3100 \
             ADMIN_TOKEN=ci-rehearse-admin \
-            STRIPE_WEBHOOK_SECRET=ci-rehearse-secret \
             bash scripts/rehearse-release.sh live
           kill $(cat /tmp/rehearse.pid) || true
       - name: release rehearsal — paused payments + waitlist
