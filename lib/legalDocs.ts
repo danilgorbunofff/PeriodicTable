@@ -22,7 +22,7 @@
  *    plausible-sounding guess.
  */
 
-import { LEGAL_REVISIONS, LEGAL_REVISION_LOG, type LegalSlug } from "./legal";
+import { LEGAL_REVISIONS, LEGAL_REVISION_LOG, SERVICE_TERM, type LegalSlug } from "./legal";
 import { ANALYTICS_EVENTS } from "./analytics";
 
 /* The corpus is deliberately independent of the environment: the operator's
@@ -197,7 +197,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
   },
   rules: {
     title: "Rules & payments",
-    desc: "The $5 floor, takeover and reclaim maths, what may be listed, how Stripe payments and taxes work, and why stakes are final.",
+    desc: "The $5 floor, takeover and reclaim maths, what may be listed, how Stripe payments and taxes work, why stakes are final, and how long the board is promised to run.",
     sections: [
       {
         h: "Who can participate",
@@ -241,6 +241,15 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
           "All stakes are final, and the checkout makes you acknowledge that before paying. A stake buys advertising inventory that is delivered immediately (your listing appears on the table and in leaderboards as soon as the payment settles), and it is bought for a named element, so we do not offer discretionary refunds, withdrawals, or cancellations — including if you are later outbid or if you change your mind. Nothing here removes a right to a refund that the law gives you and that cannot be waived; where a withdrawal right exists, asking for a slot in a live, ranked list before it is filled is the buyer's express request to begin performance immediately.",
           "If something went wrong with a payment, contact us before disputing the charge — the receipt carries the reference we need. If a payment is refunded (by us, or by your card issuer after a dispute), the stake behind it is reversed with it: the listing falls back to the previous holder and any leaderboard position it bought is lost. Chargebacks filed without first contacting us may result in the permanent removal of all your listings.",
           "You are responsible for any taxes arising from your purchase under your local law, other than the taxes the merchant of record collects and remits above.",
+        ],
+      },
+      {
+        h: "How long the board stays up",
+        ps: [
+          "Stakes in this game do not expire. A holder stays ahead on an element until someone outbids them, and being outbid consumes nothing: what was staked stays as a discount on that element that never expires, exactly as the Reclaim rule above says. Nobody's stake is running down while the board is up.",
+          `The board itself is committed to run at least until ${SERVICE_TERM.until}. That is a minimum, not a deadline: if we extend it, the new date is published on this page and on the questions page, and until then the date here is the one that applies.`,
+          `If the site ever does stop, we will say so on this page and by email to every current holder at least ${SERVICE_TERM.noticeDays} days beforehand. No further stakes are taken from the day that notice is published — the checkout is switched off rather than left running into a wind-down — and stakes already taken are not refunded, which is the same all-stakes-final rule as above, applied to the worst case. Listings and rankings go offline with the board.`,
+          "The documents also say the site is provided as is and as available, so this section is a commitment about a date and about notice; it is not a warranty that the service will run for any particular period beyond the date it names, and it does not turn a stake into a security, a share or a claim on revenue.",
         ],
       },
       {

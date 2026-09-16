@@ -38,6 +38,29 @@ export function canStartRow(
 }
 
 /**
+ * The composite daily run (Phase 20, R20-7).
+ *
+ * Two things the review measured on the deployment, not on paper: the plan
+ * allows two cron jobs and both were already spent on workers, and the two
+ * reports that would *say* a schedule had stopped (`/api/jobs/reconcile`,
+ * `/api/jobs/config`) were driven by nothing but the GitHub tick — so a tick
+ * that stopped also stopped the only thing that could have reported it. One cron
+ * slot now runs `/api/jobs/daily`, which is the preview worker and then both
+ * reports in one invocation.
+ *
+ * Sharing an invocation means sharing this ceiling, so the arithmetic names
+ * itself here the way the worker's own budget does: the reports are read-only
+ * and measured (1.4 s for both legs against the test database, and each is
+ * index-backed single queries in production), and the preview batch spends what
+ * is left of the 24 s work budget after that reserve. The sum is asserted in
+ * lib/postLaunch.test.ts, so the three numbers cannot drift apart: a reserve
+ * that grows past the ceiling is a test failure, not a truncated batch.
+ */
+export const DAILY_DIAGNOSTIC_RESERVE_MS = 5_000;
+export const DAILY_PREVIEW_BUDGET_MS =
+  JOB_WORK_BUDGET_MS - DAILY_DIAGNOSTIC_RESERVE_MS;
+
+/**
  * The batch size for this call: the body first, then the query string, then the
  * default.
  *

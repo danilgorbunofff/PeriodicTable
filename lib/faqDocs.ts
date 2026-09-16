@@ -11,7 +11,10 @@
  * `TAKEOVER_MARGIN`) and every mailbox from `lib/legal.ts`, so copy cannot
  * quote a price the pricing engine does not charge. The definitions of "own"
  * and "stake" are the corpus's own sentences: the FAQ may summarise the rules,
- * but it may not paraphrase them into something slightly different.
+ * but it may not paraphrase them into something slightly different. The service
+ * term is the corpus's constant too (`SERVICE_TERM`), for the same reason
+ * (R20-14/R20-15) — an answer about what happens if the site stops cannot name a
+ * date the rules page does not.
  *
  * Dependency-free apart from those imports — the page is a server component,
  * and `lib/legalDocs.ts` is already in the client bundle through checkout.
@@ -20,7 +23,7 @@
 import { MIN_STAKE, TAKEOVER_MARGIN, TIE_CLEARANCE } from "./pricing";
 import { NO_STAKES_YET } from "./activityFace";
 import { OWNERSHIP_SENTENCE, STAKE_SENTENCE } from "./legalDocs";
-import { SUPPORT } from "./legal";
+import { SUPPORT, SERVICE_TERM, SERVICE_TERM_SENTENCE } from "./legal";
 
 export type FaqItem = { q: string; a: string[] };
 
@@ -96,7 +99,9 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     q: "What happens to my stake if the site stops?",
     a: [
-      "Nothing here promises that the board stays up forever, and the documents say so: the site is provided \"as is\" and \"as available\", with no warranty of availability. A stake buys its slot when the payment settles, which is why a later shutdown does not refund it — that is the same rule as the refund answer above, applied to the worst case.",
+      "A stake has no expiry date. You stay ahead of an element until someone outbids you, and being outbid burns nothing: what you already staked there stays as a discount on that element and it never expires. Nobody's stake is running down.",
+      `${SERVICE_TERM_SENTENCE} That date is written in the rules, repeated here, and printed under the price on every element page; if it is ever extended, the new date is published in those same three places.`,
+      `If the site ever does stop, the rules say how: notice on the rules page and by email to every current holder at least ${SERVICE_TERM.noticeDays} days in advance, no further stakes taken from that day, and the stakes already taken are not refunded — the same all-stakes-final rule as the refund answer above, applied to the worst case. Nothing here promises the board runs forever: the site is provided "as is" and "as available", and a stake is advertising, not a share of anything.`,
     ],
   },
 ];

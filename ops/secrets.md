@@ -106,7 +106,7 @@ action lands, then deleting the old entry — one person, one line at a time.
 ## `CRON_SECRET` (two consoles, or the clock stops)
 
 `CRON_SECRET` is the bearer credential for every job route
-(`/api/jobs/config|reconcile|outbox|screenshot|abandoned-checkouts`) — no query
+(`/api/jobs/config|reconcile|outbox|screenshot|abandoned-checkouts|daily`) — no query
 string, no body secret over GET. It is read by:
 
 - the Vercel app (the routes), and

@@ -138,6 +138,33 @@ Procedure once the window is known (and generally, in this order):
    a live incident, and `payments-stuck.md` §4 is the recovery for individual
    payments (provider re-delivery) rather than whole-database surgery.
 
+### The drill (owed — R20-11)
+
+Steps 1–4 above are a plan, and a plan is not evidence that the window is real.
+Doc 12 asked for "a written, dated restore drill result — not a plan to do one"
+(`00-REVIEW-PLAN.md:127`); `doc/review/12`'s UNKNOWN U12-1 carries the same gap,
+and doc 20's R20-11 is the register's copy of it. The drill is **owed by
+2026-10-15**, before the first real payment, and until someone has run it this
+file will not claim a recovery point — the same honesty rule as the outage-drill
+screenshot (`:45`, U17-3).
+
+What the drill is, in one sitting and without touching the primary:
+
+1. Note the wall-clock time, then take a Neon branch at a point in time a few
+   minutes old (step 2 above; a branch, never the primary).
+2. Point a read-only check at the branch's connection string and confirm it
+   answers: `curl -sS -H "Authorization: ******" "$BRANCH_URL/api/jobs/config" | jq '{ok, findings}'`,
+   plus the counts that matter for an incident (`Payment` rows by status, the
+   newest `AuditLog` row, `Element.totalPoolUsd`).
+3. Compare those counts with production's — the *oldest* thing you can still see
+   in the branch is the honest answer to "how far back can we go".
+4. Delete the branch afterwards so nothing is left half-promoted.
+
+Record the result here as one dated line — recovery point observed, branch taken
+at, anything that did not work — and close R20-11's drill item with the date.
+Promoting a branch in an incident is *not* part of the drill: that decision stays
+with the operator (`ops/rollback.md`, D11).
+
 ## Is it reachable at all?
 
 `GET /api/health` is the surface for exactly this question, and it is public and

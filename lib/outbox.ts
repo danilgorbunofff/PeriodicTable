@@ -417,6 +417,44 @@ export async function dueOutboxCount(types?: OutboxType[]): Promise<number> {
   return rows[0]?.count ?? 0;
 }
 
+/* ------------------------------------------------------------------ *
+ * The preview worker's queue (Phase 20, R20-7)
+ * ------------------------------------------------------------------ */
+
+/** The preview worker claims these and nothing else (R13-7). Named because two
+ *  callers now drain them — the worker route and the composite daily run — and a
+ *  queue filter written down twice is a filter that drifts. */
+export const PREVIEW_TYPES = ["PREVIEW_GENERATE"] as const;
+
+/** One preview batch, budgeted by the caller: `/api/jobs/screenshot` spends the
+ *  whole work budget on it, `/api/jobs/daily` spends what is left after the two
+ *  reports it also has to run (lib/jobBudget.ts documents the split). Same rows,
+ *  same claim predicate, same response shape below — only the clock differs. */
+export async function drainPreviews(opts: {
+  limit: number;
+  budgetMs: number;
+}): Promise<OutboxBatchOutcome> {
+  return drainInBatches({
+    limit: opts.limit,
+    types: [...PREVIEW_TYPES],
+    budgetMs: opts.budgetMs,
+  });
+}
+
+/** What a preview batch did, in the names the worker's response has used since
+ *  Phase 6 (`checked` is what it *claimed*). Shared so the composite run cannot
+ *  report a different vocabulary than the route it stands in for. */
+export function previewCounts(out: OutboxBatchOutcome) {
+  return {
+    checked: out.claimed,
+    updated: out.completed,
+    failed: out.failed,
+    deferred: out.deferred,
+    batches: out.batches,
+    remaining: out.remaining,
+  };
+}
+
 export type OutboxHealth = {
   driver: "resend" | "logged";
   /** Undelivered rows a worker tick would claim right now. */

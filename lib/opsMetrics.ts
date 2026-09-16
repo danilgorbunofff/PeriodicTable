@@ -239,6 +239,11 @@ export async function opsReport(
   const days = opsWindowDays(opts.days);
   const since = opsWindowStart(days, now.getTime());
 
+  // Two money readings, deliberately different (`doc/PAYMENT-LEDGER-SHAPES.md`,
+  // R20-5): `windowPaid` is everything the processor settled, whatever it bought;
+  // `windowSettled` is what turned into a live stake, which is why it filters
+  // `stakeId`. A revenue figure a third party will read — tax, payout, diligence —
+  // must be the second one, and must say which it is.
   const [statusGroups, windowPaid, reversed, windowSettled, clicks, started] =
     await Promise.all([
       prisma.payment.groupBy({

@@ -287,12 +287,13 @@ async function getReconcileStatus(req: NextRequest) {
 }
 
 /** Same auth, same report — the second verb exists so this can be reached by
- * whatever schedule the deployment has. It is deliberately NOT in vercel.json,
- * and on the Hobby plan it could not be: the two cron slots are both daily mail
- * retries, which have no other wake-up, while this report is polled every ten
- * minutes by .github/workflows/outbox-tick.yml — better than a daily cron would
- * have been. A cron run here would also produce a response nobody reads; the
- * status code is the signal, so this belongs on a monitor's URL list next to
+ * whatever schedule the deployment has. Since R20-7 that schedule is the
+ * composite daily run: /api/jobs/daily calls this handler in-process at 04:30,
+ * so the diagnostics inherit the daily floor the workers have instead of riding
+ * the ten-minute GitHub tick alone (which is what the review measured — the
+ * alarm was driven by the same schedule it exists to watch). The tick still
+ * polls this every ten minutes, more often than the daily floor; the status code
+ * is the signal, so this also belongs on a monitor's URL list next to
  * /api/jobs/config, which is exactly where the tick put it. */
 async function postReconcile(req: NextRequest) {
   return getReconcileStatus(req);

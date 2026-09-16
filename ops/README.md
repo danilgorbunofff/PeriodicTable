@@ -67,6 +67,11 @@ export CRON_SECRET=…   # /api/jobs/*    — workers and reports
   `gh run list -w outbox-tick.yml -L 20` and `gh run view <id> --log`.
 - The tick is also the money alarm: a non-200 reconcile, or `divergent`/
   `unapplied` above zero, exits 1 and the run goes red.
+- The platform's own schedule is the two daily crons in `vercel.json` — 04:00
+  `/api/jobs/outbox?limit=25` and 04:30 `/api/jobs/daily`, the composite entry
+  that drains previews and then runs `reconcile` and `config` in-process
+  (`R20-7`, `D20-7`). The bound each route's silence is judged against is
+  derived in `lib/jobHeartbeat.ts` and tabulated in `alerts.md`.
 - A free external pinger reads `/api/jobs/config` status codes: **200** means the
   secret is right and no required variable is missing, **503** means
   authenticated but misconfigured, **401** means the pinger's secret is wrong.

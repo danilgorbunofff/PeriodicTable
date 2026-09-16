@@ -18,6 +18,33 @@ export const LEGAL_SLUGS = ["about", "rules", "contact", "privacy"] as const;
 export type LegalSlug = (typeof LEGAL_SLUGS)[number];
 
 /**
+ * How long the board is promised to run (R20-15, decided 2026-09-16).
+ *
+ * The register's finding was a one-sided silence: the rules described stakes as
+ * permanent and final while nothing anywhere said what happens to them if the
+ * service stops. The operator's answer is a floor, not a promise of forever —
+ * the board runs at least until this date, an extension is announced here, and a
+ * stop gets notice first — and it lives in one constant because three surfaces
+ * state it: the rules document, the FAQ and the price ladder on every element
+ * page. A date written down three times is a date that disagrees with itself;
+ * `lib/postLaunch.test.ts` asserts the three read this one.
+ */
+export const SERVICE_TERM = {
+  /** The date as printed. */
+  until: "9 September 2027",
+  /** The same date in ISO form, for anything that sorts or diffs. */
+  iso: "2027-09-09",
+  /** Days of notice promised before the board is switched off. */
+  noticeDays: 30,
+} as const;
+
+/** The permanence sentence, printed where a buyer is deciding: stakes do not run
+ *  down, and the board has a stated floor. Both halves are load-bearing and
+ *  neither replaces the other — the design's "a stake never expires" is the
+ *  buyer's best fact, and an unbounded promise is one nobody could keep. */
+export const SERVICE_TERM_SENTENCE = `Stakes never expire, and the board is committed to run at least until ${SERVICE_TERM.until}.`;
+
+/**
  * The revision of each document, as it appears in the printed stamp, the
  * revision log and the consent record. Bump it whenever the copy changes: the
  * digest in `lib/legalContent.test.ts` fails the suite if you don't, and the
@@ -42,6 +69,7 @@ export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: stri
     { version: "2026-09-16", note: "The data paragraph was corrected: it described a city/country we never collect, and listed one processor out of seven. The independence clause now says the seeded demo listings were never paid for, so neither their stake nor their city is real." },
   ],
   rules: [
+    { version: "2026-09-16", note: "Revised the same day to publish a minimum service term (R20-15): the board is committed to run at least until 9 September 2027, a later date is published here rather than assumed, a stop gets 30 days' notice on this page and by mail to every current holder with the checkout switched off, and the stakes already taken are not refunded. The same section states the permanence the design always assumed and no page said (R20-14): a stake never expires, and an outbid holder's value does not expire with it." },
     { version: "2026-09-16", note: "Named the seller and the statement descriptor, published the tax position, defined what a stake buys, and versioned the document." },
   ],
   contact: [

@@ -60,7 +60,10 @@ const text = (slug: LegalSlug) => legalCanonicalText(slug);
  * test: it is the copy asking to be versioned. */
 const DIGESTS: Record<LegalSlug, string> = {
   about: "78df6b30c09b8c39ee749e861373da556cbec00e68bd02451342134020cda1fd",
-  rules: "a338b41854e569939324ff77c3e5856461a850800867cddf8c23bf52064b68de",
+  // R20-14/R20-15: revised the same day as the phase-16 pass, so the version
+  // stamp is unchanged and this digest is the only thing that moves — the log
+  // entry (`LEGAL_REVISION_LOG.rules[0]`) is the announcement.
+  rules: "e4d92ed86027689a7e3ea8e2ff0b2d954c9e3a1877d6e8973d8fb2fdb18602a2",
   contact: "745291c0457b00967ccd9c377c7b862d1511d03353c80ec3fddb520419982008",
   privacy: "7543e10c8633c3b3b3abafec37e0b056b36104e96649f3f78befe404bda0215d",
 };

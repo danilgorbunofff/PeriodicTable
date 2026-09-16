@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jobGate } from "@/lib/jobs";
-import { drainInBatches } from "@/lib/outbox";
+import { drainPreviews, previewCounts } from "@/lib/outbox";
 import { JOB_WORK_BUDGET_MS, jobLimit } from "@/lib/jobBudget";
 import { stampHeartbeat } from "@/lib/jobHeartbeat";
 import { apiJson, apiRoute } from "@/lib/route";
@@ -28,7 +28,9 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
  *   filtered types, and the review watched this worker claim an unrelated row,
  *   re-read it, skip it and still count it in `checked` — which made "checked"
  *   untrue and left the row's lease held by a worker that had decided not to
- *   touch it.
+ *   touch it. R20-7 moved the claim itself into lib/outbox.ts (`drainPreviews`),
+ *   because the composite daily run drains the same queue with a smaller clock;
+ *   this route is still the fast path the tick calls every ten minutes.
  * - Retry state lives on the outbox row (attempts/nextAttemptAt/lastError).
  * - `backfill: true` enqueues rows for preview-less startups (bounded 50),
  *   then processes the due batch. Because this is an explicit operator action,
@@ -76,24 +78,13 @@ async function runScreenshot(req: NextRequest) {
   }
 
   const limit = jobLimit(req, body, 5, 10);
-  const out = await drainInBatches({
-    limit,
-    types: ["PREVIEW_GENERATE"],
-    budgetMs: JOB_WORK_BUDGET_MS,
-  });
+  const out = await drainPreviews({ limit, budgetMs: JOB_WORK_BUDGET_MS });
   await stampHeartbeat(
     "/api/jobs/screenshot",
     out.errors ? "batch failed" : null,
   );
 
-  const counts = {
-    checked: out.claimed,
-    updated: out.completed,
-    failed: out.failed,
-    deferred: out.deferred,
-    batches: out.batches,
-    remaining: out.remaining,
-  };
+  const counts = previewCounts(out);
   if (out.errors > 0) {
     return apiJson(
       {

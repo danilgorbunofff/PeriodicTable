@@ -18,3 +18,4 @@
 **Sub-phases:**
 1. `01-seed-instrument.md` — dogfood stakes, activity backlog, analytics
 2. `02-launch-gate-runbook.md` — gate, deploy, rollback, takedown, comms
+3. `03-launch-week-questions.md` — what only launch week can answer, and the query that answers each (R20-12); opened *after* T-0, and the one to read on day 7

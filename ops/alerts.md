@@ -134,14 +134,20 @@ table, and read `errors` when you are already looking.
 
 ## The stale-tick condition, exactly
 
-`lib/jobHeartbeat.ts` stamps a row on every tick for five routes
-(`/api/jobs/outbox`, `/api/jobs/screenshot`, `/api/jobs/abandoned-checkouts`,
-`/api/jobs/reconcile`, `/api/jobs/config`). The bound is *derived*, not guessed:
+`lib/jobHeartbeat.ts` stamps a row for six routes, and its `HEARTBEAT_ROUTES` is
+the list: `/api/jobs/outbox`, `/api/jobs/screenshot`, `/api/jobs/daily`,
+`/api/jobs/reconcile`, `/api/jobs/config`, `/api/jobs/abandoned-checkouts`. The
+bound is *derived*, not guessed — one row per route, so a route added to the
+registry cannot be missing here:
 
 | Route | Bound | Why |
 | --- | --- | --- |
-| `/api/jobs/outbox`, `/api/jobs/screenshot` | 26 h | `vercel.json` gives each a daily cron (04:00 and 04:30); 24 h + `HEARTBEAT_SLACK_MS` (2 h) |
-| `/api/jobs/abandoned-checkouts`, `/api/jobs/reconcile`, `/api/jobs/config` | 13 h 20 m | Tick-only — no cron of their own; twice `TICK_WORST_OBSERVED_MS` (6 h 40 m, the worst gap in the 34-run / 110 h sample) |
+| `/api/jobs/outbox` | 26 h | `vercel.json` gives it a daily cron (04:00); 24 h + `HEARTBEAT_SLACK_MS` (2 h) |
+| `/api/jobs/screenshot` | 26 h | Stamped by the 04:30 composite `/api/jobs/daily` (`R20-7`); 24 h + slack |
+| `/api/jobs/daily` | 26 h | The 04:30 entry itself, and the only direct evidence the platform fired it (`R20-7`, `U20-8`); 24 h + slack |
+| `/api/jobs/reconcile` | 26 h | Read by the 04:30 composite, so no longer tick-only (`R20-7`); 24 h + slack |
+| `/api/jobs/config` | 26 h | Same backstop as `reconcile` (`R20-7`); 24 h + slack |
+| `/api/jobs/abandoned-checkouts` | 13 h 20 m | Tick-only — the composite does not run the checkout sweep and Hobby's two cron slots are spent (`D20-7`); twice `TICK_WORST_OBSERVED_MS` (6 h 40 m, the worst gap in the 34-run / 110 h sample) |
 
 The bounds are wide on purpose: GitHub's `*/10` schedule is best-effort, and a
 2 h gap is normal. Only a stopped schedule trips these. If a route has *never*

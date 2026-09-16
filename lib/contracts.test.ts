@@ -156,10 +156,10 @@ describe("route wiring (R11-3, R11-4)", () => {
   it("puts every route file behind the shared boundary", () => {
     // 28 at R11-3; +1 for the icon proxy (R16-3); +1 for the operator bulk
     // moderation route (R17-14); +2 for the observability pair (R18-9 health,
-    // R18-1 the error sink's write end). The count is a tripwire, not
-    // bookkeeping: a new route file has to be added here on purpose, so it
-    // cannot arrive outside the boundary unnoticed.
-    expect(routes).toHaveLength(34);
+    // R18-1 the error sink's write end); +1 for the composite daily run (R20-7).
+    // The count is a tripwire, not bookkeeping: a new route file has to be added
+    // here on purpose, so it cannot arrive outside the boundary unnoticed.
+    expect(routes).toHaveLength(35);
     for (const [path, src] of routes) {
       expect(src, `${path} must use apiRoute`).toContain("apiRoute(");
       expect(src, `${path} must not export a raw verb handler`).not.toMatch(
@@ -180,6 +180,7 @@ describe("route wiring (R11-3, R11-4)", () => {
       "admin/startups/moderate-batch/route.ts",
       "jobs/abandoned-checkouts/route.ts",
       "jobs/config/route.ts",
+      "jobs/daily/route.ts",
       "jobs/outbox/route.ts",
       "jobs/reconcile/route.ts",
       "jobs/screenshot/route.ts",

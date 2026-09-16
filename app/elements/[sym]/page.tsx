@@ -9,7 +9,7 @@ import { siteOrigin } from "@/lib/siteUrl";
 import { twitterSite } from "@/lib/shareMeta";
 import { MIN_STAKE, takeLeadPrice } from "@/lib/pricing";
 import { FAQ_LABEL, FAQ_PATH } from "@/lib/faq";
-import { LEGAL_LINKS } from "@/lib/legal";
+import { LEGAL_LINKS, SERVICE_TERM_SENTENCE } from "@/lib/legal";
 
 export const dynamicParams = true;
 // The data window, and therefore the document's: Next derives
@@ -32,19 +32,28 @@ export async function generateStaticParams() {
  * outage shell — used to carry only the IUPAC line, so the page a buyer picks a
  * symbol on linked none of the documents a buyer needs (the phase-19 doc found
  * zero `/legal/` links here). Same two destinations in both branches, written
- * once: the FAQ for "what does this cost me", the rules for the contract. */
+ * once: the FAQ for "what does this cost me", the rules for the contract.
+ *
+ * R20-14 adds the permanence line above them, because this is where a buyer is
+ * looking at a price: the register found "a stake never expires" — the design's
+ * own answer (`doc/ROADMAP.md:26,98`) and the buyer's single most valuable fact —
+ * stated no further than an internal file. The sentence is one constant from
+ * `lib/legal.ts`, so the ladder, the FAQ and the rules cannot drift apart. */
 function FootnoteLinks() {
   const rules = LEGAL_LINKS.find((l) => l.href === "/legal/rules");
   return (
-    <p className="text-[11px] text-mutedink mt-2">
-      <Link href={FAQ_PATH} className="font-bold hover:text-ink hover:underline">{FAQ_LABEL}</Link>
-      {rules && (
-        <>
-          {" · "}
-          <Link href={rules.href} className="hover:text-ink hover:underline">{rules.label}</Link>
-        </>
-      )}
-    </p>
+    <>
+      <p className="text-[11px] text-mutedink mt-2">{SERVICE_TERM_SENTENCE}</p>
+      <p className="text-[11px] text-mutedink mt-1">
+        <Link href={FAQ_PATH} className="font-bold hover:text-ink hover:underline">{FAQ_LABEL}</Link>
+        {rules && (
+          <>
+            {" · "}
+            <Link href={rules.href} className="hover:text-ink hover:underline">{rules.label}</Link>
+          </>
+        )}
+      </p>
+    </>
   );
 }
 

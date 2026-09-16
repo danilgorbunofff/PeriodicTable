@@ -6,7 +6,14 @@
       "severity": "critical",
       "reason": "14.2.35 is the newest Next 14.x, and no 14.x carries a fix for the current set: npm audit --omit=dev reports next 9.5.0-15.5.23 as critical, whose only remedy is next@16.3.5, a semver-major requiring React 19. Assessed 2026-09-16 per advisory, by reachability rather than by severity. Both criticals are unreachable as deployed: GHSA-p293-qw3h-jr36 is unauthenticated RCE on Windows-hosted servers only, and production is Vercel Linux (iad1); GHSA-2xp9-vwfh-vxw4 is unauthenticated RCE in the Image Optimization API when AVIF is used, and next/image is imported 0 times while next.config.mjs declares no images key, so there are no remotePatterns/domains and formats stay webp-only. Confirmed live rather than from defaults: /_next/image with a remote url returns 400 Bad request, and the same endpoint with Accept: image/avif returns content-type image/webp for a local asset, so the AVIF path is never selected. Four further advisories are unreachable because the app declares no Server Actions (0 use server directives), ships no middleware.ts, and configures no rewrites/i18n/WebSocket upgrades. What stays reachable is unauthenticated DoS against App Router React Server Components (GHSA-h25m-26qc-wcjf, GHSA-q4gf-8mx6-v5v3, GHSA-8h8q-6873-q5fj) plus moderate cache-confusion issues: availability only, no disclosure and no code execution, bounded by Vercel platform limits. TRIPWIRE: this acceptance holds only while next.config.mjs keeps its images key absent (no remotePatterns, no AVIF formats) and hosting stays Linux; either changing makes both criticals live, so re-assess before that lands.",
       "scheduled": "Framework migration to Next 16 + React 19 after launch; payments went live 2026-09-14, so this is post-launch debt rather than a pre-launch gate.",
-      "expires": "2026-12-31"
+      "expires": "2026-12-31",
+      "tripwires": [
+        {
+          "file": "next.config.mjs",
+          "must_not_contain": "images:",
+          "because": "The AVIF half of the acceptance rests on next.config.mjs declaring no images key: with no remotePatterns/domains and no formats, /_next/image can never select AVIF, and GHSA-2xp9-vwfh-vxw4's AVIF-decode RCE is unreachable (R20-1). Adding an images key — including just to widen formats or remote hosts — makes that critical live and this acceptance void. Checked mechanically by `npm run audit:prod`; comments are stripped first, so prose about the images key cannot trip it."
+        }
+      ]
     }
   ]
 }

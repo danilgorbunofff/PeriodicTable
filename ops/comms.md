@@ -2,7 +2,9 @@
 
 Finding: R17-15. Related: `README.md` (the pinger and the clock — the same
 signals a customer's complaint will be about), `payments-stuck.md` (the money
-branch of an outage), `refunds-and-disputes.md` (the aftermath).
+branch of an outage), `refunds-and-disputes.md` (the aftermath), and the
+wind-down notice below (R20-15, the one message with a date the rules page
+promises).
 
 **Where the message goes, who writes it and which channel carries it is operator
 decision D16** (`doc/review/FINDINGS.md`). The repo cannot create an account for
@@ -73,6 +75,45 @@ fails on our page is a real branch (`reversed-before-paid`, `unapplied`).
 > triaged on [date].
 > What we changed so it does not repeat: [one sentence, only if true].
 > Questions: [channel]. We're sorry for the disruption.
+
+## Template: the wind-down notice (R20-15)
+
+This is the one message with a contractual clock on it. `/legal/rules` commits
+the board to run at least until **9 September 2027** and promises **30 days'
+notice** before any stop, with the notice published on the rules page and by
+email to every current holder; the checkout goes off on the day it is published
+(not on the day the board stops), and stakes already taken are **not** refunded.
+Both dates and the notice window come from `SERVICE_TERM` in `lib/legal.ts` —
+read them from there rather than from memory, because the term is extendable and
+the copy moves when it is.
+
+> **The board is closing on [date].**
+> We said it would run at least until 9 September 2027, and we are [ending it
+> then / stopping earlier than the extended date we published on [date]].
+> What this means for you:
+> - **Checkout is off from today** — no new stakes are being taken.
+> - **Stakes are not refunded.** Every stake was final when it was taken, which
+>   the rules said at the time of your purchase, and this is that rule applied
+>   to the end. [If any goodwill credit is being given: say exactly what, to
+>   whom, and when — do not imply a general refund.]
+> - **Listings and rankings go offline** with the board on [date]. Nothing of
+>   yours is published elsewhere by us.
+> - Questions: [channel]. We will answer them until [date].
+
+Who receives it: every `Startup.email` that holds a live stake, and every buyer
+whose `Payment.status = 'paid'` exists for that element — the receipt address is
+the only address the product is entitled to use (`REFUND_EMAIL`/`OUTBID_EMAIL`
+are the same population in practice, and `Payment.email` is the authority).
+Where it is published: the rules page itself, because that is where the promise
+lives, with the same sentence added to `/faq` so a reader who never opens the
+legal pages still meets it.
+
+There is **no `WIND_DOWN_EMAIL` outbox type** — the queue carries receipts,
+outbids, refunds, reports, waitlist and previews, and nothing broadcast-shaped
+(`lib/outbox.ts`). A wind-down notice is therefore a manual broadcast through
+the same provider the receipts use (`email.md`), written by a human and sent
+once; if the list is ever large enough that this is not a single send, that is
+the point at which the type should exist, and this section is the spec for it.
 
 ## Say this, not that
 

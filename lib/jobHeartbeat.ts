@@ -14,27 +14,33 @@
  * already turns red (a route that answers non-2xx). Nothing here fails a
  * request — a heartbeat that cannot be written logs and returns.
  *
- * The bounds are derived, not guessed. Two of the five routes have a daily
- * Vercel cron of their own (vercel.json), and all five ride the ten-minute
+ * The bounds are derived, not guessed. Five of the six routes have a daily
+ * platform backstop (vercel.json): outbox through its own entry, screenshot,
+ * reconcile and config through `/api/jobs/daily` — the composite run R20-7 added
+ * because Hobby allows two cron entries and both slots were needed by workers —
+ * and `/api/jobs/daily` itself, whose row is the only direct evidence that the
+ * platform fired the entry at all. The five workers still ride the ten-minute
  * GitHub tick. GitHub's schedule is best-effort and the measured behaviour is
- * much worse than nominal — 34 runs in 110 hours, so 5 % of the nominal 661,
- * with gaps of 1 h 44 m, 3 h 12 m and 6 h 40 m — while a Vercel cron is a
- * platform promise with its own slack. A tick-only route is therefore allowed
- * twice the worst gap ever observed (14 h), and a route that also has the daily
- * backstop is allowed that backstop plus two hours (26 h). Both are wide enough
- * that only a stopped schedule trips them; see U13-1 for what that costs.
+ * much worse than nominal — 34 runs in 110 hours, so 5 % of the nominal 661, with
+ * gaps of 1 h 44 m, 3 h 12 m and 6 h 40 m — while a Vercel cron is a platform
+ * promise with its own slack. A route backed by the daily run is therefore
+ * allowed that run plus two hours (26 h), and the one route only the tick drives
+ * is allowed twice the worst gap ever observed (14 h). Both are wide enough that
+ * only a stopped schedule trips them; see U13-1 for what that costs.
  */
 import type { ProdConfigFinding } from "./env";
 import { describeError, logWarn } from "./log";
 import { prisma } from "./prisma";
 
-/** The five routes the tick (and the two Vercel crons) drive. */
+/** The five workers the tick drives, plus the composite entry that is four of
+ *  their daily backstop (R20-7). */
 export const HEARTBEAT_ROUTES = [
   "/api/jobs/outbox",
   "/api/jobs/screenshot",
   "/api/jobs/abandoned-checkouts",
   "/api/jobs/reconcile",
   "/api/jobs/config",
+  "/api/jobs/daily",
 ] as const;
 
 export type HeartbeatRoute = (typeof HEARTBEAT_ROUTES)[number];
@@ -45,13 +51,20 @@ export const TICK_WORST_OBSERVED_MS = 400 * 60_000; // 6 h 40 m
 export const HEARTBEAT_SLACK_MS = 2 * 60 * 60_000;
 
 export const HEARTBEAT_STALE_MS: Record<HeartbeatRoute, number> = {
-  // "*/10" on GitHub, plus the 04:00/04:30 daily backstop in vercel.json.
+  // "*/10" on GitHub, plus the 04:00 daily backstop in vercel.json.
   "/api/jobs/outbox": 24 * 60 * 60_000 + HEARTBEAT_SLACK_MS,
+  // Own 04:30 entry before R20-7; now stamped by `/api/jobs/daily` at 04:30.
   "/api/jobs/screenshot": 24 * 60 * 60_000 + HEARTBEAT_SLACK_MS,
-  // Tick only — no cron entry, and Hobby allows two jobs, both spoken for.
+  // Tick only: /api/jobs/daily does not run the checkout sweep, and Hobby's two
+  // cron slots are spent (R20-7, D20-7).
   "/api/jobs/abandoned-checkouts": 2 * TICK_WORST_OBSERVED_MS,
-  "/api/jobs/reconcile": 2 * TICK_WORST_OBSERVED_MS,
-  "/api/jobs/config": 2 * TICK_WORST_OBSERVED_MS,
+  // Read by the 04:30 composite, which is what makes these two a schedule of
+  // their own rather than a passenger of the tick (R20-7).
+  "/api/jobs/reconcile": 24 * 60 * 60_000 + HEARTBEAT_SLACK_MS,
+  "/api/jobs/config": 24 * 60 * 60_000 + HEARTBEAT_SLACK_MS,
+  // The 04:30 entry itself, and the bound the one open item of the register asks
+  // about (U20-8): a row written here is the platform's own word that it fired.
+  "/api/jobs/daily": 24 * 60 * 60_000 + HEARTBEAT_SLACK_MS,
 };
 
 function hours(ms: number): string {

@@ -113,9 +113,9 @@ backoff, persisted `lastError`, operator retry at
 `maxDuration` each worker exports, and no row starts unless a 10s row ceiling
 still fits — both statements are asserted against the route sources by
 `lib/jobsAndCron.test.ts` rather than restated in prose. Workers are scheduled
-with an explicit batch size (`vercel.json`: `/api/jobs/outbox?limit=25`,
-`/api/jobs/screenshot?limit=10`) and the GitHub tick re-loops on the `remaining`
-each call reports; every drain answers what it could not finish
+with an explicit batch size (`vercel.json`: `/api/jobs/outbox?limit=25`) and the
+GitHub tick re-loops on the `remaining` each call reports; every drain answers
+what it could not finish
 (`errors / skipped / deferred / batches / remaining`), and a batch that never
 started is a 500 with the counts rather than a silent zero. Each job route
 stamps `JobHeartbeat` (`lib/jobHeartbeat.ts`) and `GET /api/jobs/config` returns
@@ -123,7 +123,11 @@ the ages as `operator` findings — advisory, so a stalled schedule never refuse
 a deploy. Previews are remote URLs of public listings (retained until hide
 clears them); rows keep id + source URL only. A sixth route,
 `/api/jobs/abandoned-checkouts`, rides the tick rather than a cron entry (Hobby
-allows two, both used).
+allows two cron entries, both used). The second of the two is `/api/jobs/daily`
+(R20-7): it runs the preview batch — the claim `lib/outbox.ts` shares with
+`/api/jobs/screenshot`, on the worker's budget minus a reserve — and then the
+`reconcile` and `config` handlers in-process, so the two reports that exist to
+notice a stopped schedule are no longer driven only by the schedule they watch.
 
 ## 8. Abuse controls & moderation
 

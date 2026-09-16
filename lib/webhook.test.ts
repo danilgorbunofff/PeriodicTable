@@ -331,6 +331,11 @@ describe.skipIf(!hasDb)("webhook refund / chargeback unwind", () => {
     // transaction that marks the payment PAID, so this state is unreachable
     // through the app. It must not be recorded as a reversal that unwound
     // nothing — the operator has to see it.
+    //
+    // The known production instance is three stake-less `PAID` rows, kept
+    // deliberately as settle proof rather than repaired (R20-5,
+    // `doc/PAYMENT-LEDGER-SHAPES.md`), which is why this branch is exercised
+    // rather than assumed.
     const p = await settledPayment("wh6-t.dev", 25, "cs_nostake_1");
     await prisma.stake.delete({ where: { elementId_startupId: { elementId: T9, startupId: p.startupId } } });
 

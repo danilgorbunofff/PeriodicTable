@@ -77,7 +77,7 @@ Index and auth: `ops/README.md`. This file is about undoing a *deploy*; a paymen
 - **Money is never part of containment.** Hiding a listing preserves stakes,
   payments, claims and the public aggregates, and `/api/stats` is hidden-inclusive
   by design. Refunds are a provider-side action with their own approval rule
-  (`refunds-and-disputes.md`, D14) and happen *per payment*, never as part of a
+  (`refunds-and-disputes.md`, `D17-5`) and happen *per payment*, never as part of a
   moderation call.
 - The throttle behind intake is per-instance unless Upstash is configured — an open
   production finding, and D15 (`doc/review/FINDINGS.md`). Do not assume a rate limit

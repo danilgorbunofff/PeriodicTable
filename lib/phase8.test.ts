@@ -434,8 +434,13 @@ describe("money that contradicts itself reaches a human (R08-3)", () => {
     const wf = read(".github/workflows/outbox-tick.yml");
     // A third cron is impossible on the deployed plan, which is why this tick
     // is the alerting channel — the workflow is the fix site, not vercel.json.
+    // R20-7 kept that true and also gave the two reports a daily floor: the
+    // composite /api/jobs/daily runs them, so vercel.json still names no
+    // diagnostic route of its own (asserted here, and again for its absence by
+    // name below).
     expect(wf).toContain("*/10 * * * *");
     expect(read("vercel.json")).not.toContain("reconcile");
+    expect(read("vercel.json")).not.toContain("/api/jobs/config");
 
     const guard = wf.indexOf("- name: Fail loudly when CRON_SECRET is missing");
     const sweep = wf.indexOf("- name: Abandon stale checkouts");

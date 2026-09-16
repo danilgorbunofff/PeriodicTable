@@ -15,9 +15,25 @@ Two rules frame everything here:
   without two explicit flags (`database.md`).
 
 **Who may approve a refund, from which console, and what the standard response to
-a chargeback is — operator decision D14** (`doc/review/FINDINGS.md`). This runbook
+a chargeback is — operator decision `D17-5`** (`doc/review/FINDINGS.md`; `17`'s own
+decision list numbers it `D14`, which is what this file used to cite). This runbook
 does not invent that answer; it gives the steps and the evidence once the decision
 says to proceed.
+
+**Nothing here has been done with real money yet** (R20-10, `checklist:310`). What
+*is* proven is the code half, in `lib/webhook.test.ts` ("webhook refund /
+chargeback unwind", `:214`): a `charge.refunded` delivery removes the stake, the
+element's pool and the crown, writes the `refund` activity row, the `ProviderEvent`
+and the `PAYMENT_REVERSED` audit row; a duplicate delivery is a no-op and a
+*different* event id for an already-reversed payment answers `already-reversed`;
+a dispute withdrawal on it changes nothing further; a partial refund still unwinds
+the full charged amount; and a never-applied payment closes `refunded` without
+touching the pool. The `REFUND_EMAIL` enqueue that rides with it is pinned by
+`lib/phase8.test.ts:259` rather than by the webhook suite. Run the same assertions
+against the payment you are refunding (steps 4 and 5 below, plus the `EmailLog`
+row for `refund-<paymentId>`) rather than trusting them. What has never happened is
+a refund on a card payment a human made: the first one is the drill, and it is the
+same event as the first real payment.
 
 ## Refund a charge
 
@@ -79,7 +95,7 @@ notice** — our ledger has removed the money. What is left is the dispute itsel
 1. **The clock is Stripe's.** Dashboard → **Payments → Disputes** shows the status
    and `evidence_due_by` for each open dispute. The product has no reminder; put
    the deadline in whatever the operator actually checks (calendar, issue tracker
-   — that habit is part of D10/D14, not something this repo can enforce).
+   — that habit is part of `D17-1`/`D17-5`, not something this repo can enforce).
 
 2. **Assemble the evidence pack** (§below) and submit it through the dashboard's
    dispute response form. Submit the provider's own identifiers first: a bank
@@ -172,4 +188,4 @@ Reading notes:
   hidden-inclusive by design): do not tell a complainant the public numbers moved.
 - Record date, payment id, provider event id, decision and who decided, in the
   incident note. Disputes are the one place where "who approved this" is asked
-  months later, which is why `D14` has to have an answer.
+  months later, which is why `D17-5` has to have an answer.

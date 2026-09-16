@@ -74,7 +74,7 @@ What does **not** happen: no stake, payment, claim or element aggregate moves.
 Hiding a listing never refunds, never unwinds and never changes the totals in
 `/api/stats` (which are hidden-inclusive by design). If a wave involves money —
 paid listings bought for abuse — that is `refunds-and-disputes.md`, per payment,
-with D14's approval rule.
+with `D17-5`'s approval rule.
 
 One audit row per domain (`PROFILE_MODERATED`, `actorType = operator`,
 `actorRef = <the token's name>`), so "who hid this and why" has an answer per
@@ -144,7 +144,7 @@ worse than an empty one.
 ## 4. Afterwards
 
 Write the wave up: the reason string used, how many domains, which state, who
-authorised it (`D10`/`D14` if money was involved), and the queue numbers before
+authorised it (`D17-1`/`D17-5` if money was involved), and the queue numbers before
 and after. A wave is the one event where the audit rows alone will not explain
 the decision, because the decision was "hide thirty things in twenty minutes".
 Also check the mail side: a `HIDDEN` listing stops being outbid, but any
