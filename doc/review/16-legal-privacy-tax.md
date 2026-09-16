@@ -39,7 +39,7 @@ Not this doc: retention as a schema question belongs to `12`; secret handling to
 
 ### 3.1 The corpus as shipped
 
-Three statically-generated documents by `generateStaticParams` (`app/legal/[slug]/page.tsx:130`, slugs `about|rules|contact` at `:9,51,101`), served from one component with per-page metadata and canonical (`lib/legalMeta.ts:24-35`), each carrying its own `title`, `desc` and one identical `updated` string (`:12,54,104`). Anything else under `/legal/*` falls to `notFound()` (`:143`). The footer links all three (`components/FooterBar.tsx:17-21`), the checkout modal links `rules` once, in the passive sentence under the button (`components/Modals.tsx:490`).
+Three statically-generated documents by `generateStaticParams` (`app/legal/[slug]/page.tsx:130`, slugs `about|rules|contact` at `:9,51,101`), served from one component with per-page metadata and canonical (`lib/legalMeta.ts:24-30`), each carrying its own `title`, `desc` and one identical `updated` string (`:12,54,104`). Anything else under `/legal/*` falls to `notFound()` (`:143`). The footer links all three (`components/FooterBar.tsx:17-21`), the checkout modal links `rules` once, in the passive sentence under the button (`components/Modals.tsx:490`).
 
 ### 3.2 The claims register
 
@@ -157,7 +157,7 @@ Grep for `automatic_tax|statement_descriptor|receipt_email|invoice_creation|bill
 
 ### 5.7 Nothing can be announced, nothing can be served
 
-No announcement surface exists: grep for `announce|changelog|release note|banner` across `app/` and `components/` returns only the checkout modal's aria-live comment (`components/Modals.tsx:325-329`) and a toast id. `app/sitemap.ts` + `lib/sitemapData.ts:17-27` emit **only** `/` and `/elements/:sym` — the three legal pages are not in the sitemap, though `app/robots.ts` allows crawling them (R16-13). Contact channels are printed as addresses with no mailbox behind them verifiable from here (U16-2) and no route for legal service.
+No announcement surface exists: grep for `announce|changelog|release note|banner` across `app/` and `components/` returns only the checkout modal's aria-live comment (`components/Modals.tsx:325-329`) and a toast id. `app/sitemap.ts` + `lib/sitemapData.ts:17-26` emit **only** `/` and `/elements/:sym` — the three legal pages are not in the sitemap, though `app/robots.ts` allows crawling them (R16-13). Contact channels are printed as addresses with no mailbox behind them verifiable from here (U16-2) and no route for legal service.
 
 ### 5.8 The operator is absent
 
@@ -499,7 +499,7 @@ identity and a stored acceptance (the change is now *identifiable*) but not the 
 
 ### R16-13 — The legal pages are absent from `sitemap.xml` · P3 · legal
 
-- Evidence: `lib/sitemapData.ts:17-27` emits `/` and `/elements/:sym` only; `app/sitemap.ts:12-15` documents the policy as "static routes + all 122 element pages"; `app/robots.ts` allows crawling. So the documents a buyer (or a rights holder) most needs to find are the only public pages with no discovery path beyond the footer.
+- Evidence: `lib/sitemapData.ts:17-26` emits `/` and `/elements/:sym` only; `app/sitemap.ts:12-15` documents the policy as "static routes + all 122 element pages"; `app/robots.ts` allows crawling. So the documents a buyer (or a rights holder) most needs to find are the only public pages with no discovery path beyond the footer.
 - Reproduction: `curl.exe -s https://www.periodictable.lol/sitemap.xml | Select-String "legal"` → nothing.
 - Proposed fix: append the three legal URLs (stable, non-churning) with no `lastModified` rather than a faked one — the file already refuses to fake timestamps.
 - **Fix.** The three legal URLs are appended to `lib/sitemapData.ts` with no faked `lastModified`, pinned by `lib/sitemapData.test.ts` (5 → 6). `app/robots.ts` already allowed crawling, so only the emission was missing. (§5.10)
@@ -612,6 +612,7 @@ thing a later doc should cite instead of this one.
 
 ## 11. Change log
 
+- 2026-09-16 (working tree) — re-verification fix, three citations that named lines their files did not have. §3.1: `lib/legalMeta.ts:24-35` → `:24-30` — the file was 30 lines, and `:23-29` is the metadata object the sentence describes (`title`, `description`, `alternates.canonical`, `openGraph`, `twitter`). §5.7 and R16-13's Evidence: `lib/sitemapData.ts:17-27` → `:17-26` — the file was 26 lines; `buildSitemapEntries` is what emits the `/` and `/elements/:sym` entries the sentence is about, and the `app/sitemap.ts:12-15` citation beside it is untouched. `FINDINGS.md`'s R16-13 row carries the same corrected range. No claim, verdict or status changed.
 - 2026-09-16 — **fix pass, this worktree, at the `15` close.** Fourteen findings addressed: eight `fixed`, six `fixed in part` (R16-4, R16-5, R16-8, R16-9 and R16-11 — each holding a half only the operator can supply, deliberately — plus R16-12, whose remaining half is three surfaces `17` owes). The copy corpus is generated and digest-locked, `/legal/privacy` exists, the favicon fetch moved server-side behind an allow-list and the hover preview is gone, the tax position is written once, the consent act is stored with its text hash, the operator block prints `OPERATOR_UNPUBLISHED` instead of a guess, seeded rows are labelled, the 72-hour report promise has a metric and the legal documents are in the sitemap. Two real product defects were found by writing the tests for R16-9: the demo predicate tested the negation of the set it was handed, so the label had rendered **nowhere** in the product, and `/api/board` marked rows before the rankers rebuilt them, discarding the flag — both fixed with regression coverage (§5.10). Suite 799 → **860 passed, 0 skipped** on the `ptl-fix08-pg` container with migrations `0000`–`0012` (724 passed | 136 skipped with no database), `tsc`/`eslint`/`prisma format`/`prisma validate`/`audit:prod` clean, and the prod-config gate exercised in all three arms. §8 ticks eight of thirteen boxes; §9 answers all nine operator decisions and `FINDINGS.md` gains an **Operator decisions** table for them; §12's five UNKNOWN rows all stand, since no console was reachable.
 - 2026-09-15 — authored 2026-09-15 against 9681dcb. Read-only pass: no application code, config, test, migration or legal page changed. Live probes at 2026-09-15T07:14:30Z UTC (§5.1) and the home-page probe (§5.1 row 5). 14 findings (R16-1…R16-14) registered with evidence; 5 UNKNOWN rows (§12); §9 lists nine decisions for the operator.
 

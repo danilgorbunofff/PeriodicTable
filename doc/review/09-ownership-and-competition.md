@@ -258,7 +258,7 @@ the post-fix location.
 - **R09-6 — the crown sentence is derived from the live board.** `components/Modals.tsx` no longer
   contains any fixed "$5+"/"takes #1"/"reclaims #1" sentence: it imports `crownCopy`, passes the live
   board (`boardComplete`, `priorTotal`) and the hold it read from the payload, and renders
-  `{crown.lead}` and `{crown.joins}` (`lib/stakeQuote.ts:161-215`). On a floor-priced tile that means
+  `{crown.lead}` and `{crown.joins}` (`lib/stakeQuote.ts:161-211`). On a floor-priced tile that means
   "$5 is already on the board" plus the exact amount that does land; with a live hold it means the
   amount and the expiry; the incumbent is told the wait instead of being offered a price the intake
   refuses. Verified by the new assertion block in `lib/detailFace.test.ts`, which requires the derived
@@ -428,7 +428,7 @@ Verified in §5.7 by `lib/stakeQuote.test.ts`, whose floor-plus-hold cases asser
 - **Proposed fix.** Derive the sentence from `stakeQuote` (`need`, `belowNeed`, `takeQuoted`) instead of a fixed "$5+": state the smallest acceptable amount for *this* bidder and, when a hold is live, the amount and the expiry. Test: `lib/claimFace.test.ts` (the batch-1 R05-1/R05-4 file) extended with the floor-plus-hold case.
 - **Fix.** The three fixed sentences are gone from `components/Modals.tsx`; the modal calls
 `crownCopy({ elementName, boardComplete, existing, existingTotals, heldUntil, heldTotal, need,
-priorTotal, takeLead, userTotal })` (`lib/stakeQuote.ts:161-215`) and renders `{crown.lead}` and
+priorTotal, takeLead, userTotal })` (`lib/stakeQuote.ts:161-211`) and renders `{crown.lead}` and
 `{crown.joins}`, so the sentence is a function of the board the modal can see and the hold the
 server published. On a floor-priced tile it says `$5 is already on the board — add $1 …` with the
 amount that does land; with a live hold it names the hold and the amount that still fits; the
@@ -585,6 +585,8 @@ armed the same risk — a bidder told one figure and refused another — and onl
   and §1's "Paths inspected" list keeps its at-the-time line ranges for the same reason.
   No production code or test changed in this pass — `npm run lint`, `npx tsc --noEmit` and
   `npm run test:ci` (46 files / 680 passed / 0 skipped) were re-run green on the tree it describes.
+- 2026-09-16 (working tree) — re-verification fix. Both citations of `lib/stakeQuote.ts:161-215` (§5.7 and R09-6's heading) ran four lines past a 211-line file: the last line is `crownCopy`'s closing brace at `:211`. Both read `:161-211` now. This is **not** the drift the citation-refresh entry above describes — the file is 211 lines at that commit and at this one, so no later change moved the range; it was never readable. No production code, test, claim or verification result changed.
+
 
 ## 12. UNKNOWN log
 

@@ -54,7 +54,7 @@ coming (§Restore step 1), and tell people (`comms.md`).
 
 ## Migrations are forward-only
 
-Thirteen migrations exist, `0000_baseline` through `0012_payment_consent`. They
+Fourteen migrations exist, `0000_baseline` through `0013_error_report`. They
 are applied in order and **there are no down migrations** — `prisma migrate
 resolve --rolled-back` marks a *failed* migration so it can be re-applied; it is
 not a way to undo a successful one. `ops/rollback.md` says what to do instead.

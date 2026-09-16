@@ -224,7 +224,7 @@ Read from `lib/env.ts` (`REQUIRED_PROD_ENV`, 9 names; `PROD_ENV_ADVISORIES`; `ge
 | `STRIPE_SECRET_KEY` | provider mode + checkout session creation | `lib/stripe.ts` | `POST /api/dev/pay` → `403 "Disabled when Stripe is enabled."`, which requires `getProviderMode() === "stripe"` and therefore both Stripe names present (doc 11 §5.14) |
 | `STRIPE_WEBHOOK_SECRET` | webhook HMAC | `lib/stripe.ts:172` region | same `403`; a missing secret makes the webhook answer `401`, not `403` |
 | `PAYMENTS_LIVE` | master money switch | `lib/flags.ts:10-19` | not provable from outside; inconsistent state would show as the payment link on `/` (U14-2) |
-| `ADMIN_TOKEN` | 4 admin routes | `x-admin-token` header (`lib/jobs.ts:33-45`) | **not proven present**; `GET /api/admin/reports` without it answers `403` whether or not it is set (fail-closed) — U14-2 has the settling command |
+| `ADMIN_TOKEN` | 4 admin routes | `x-admin-token` header (`lib/jobs.ts:34-41`) | **not proven present**; `GET /api/admin/reports` without it answers `403` whether or not it is set (fail-closed) — U14-2 has the settling command |
 | `CRON_SECRET` | 4 job routes | `Authorization: Bearer` **or** `?secret=` (`reconcile/route.ts:47`, `config/route.ts:35`) | **not proven present**; `GET /api/jobs/config` without it → `401` (§5.3) |
 | `RESEND_API_KEY` | outbound mail | `lib/email.ts` | **not proven**; locally unset, so every `EmailLog` row I created is `status='logged'` (§5.7) — U14-3 |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | shared limiter store | `lib/rateStore.ts` | **not proven**; if absent the code logs `rate-limit: no shared store configured … using instance-local memory` once per process — U14-3 |
@@ -424,7 +424,7 @@ per hour.
 
 ### 5.8 Attacker goal: SSRF through the screenshot worker — negative
 
-`lib/screenshots.ts:59-96` (`probeShot`) fetches exactly one URL, `https://api.microlink.io/?url=<encoded>`,
+`lib/screenshots.ts:59-92` (`probeShot`) fetches exactly one URL, `https://api.microlink.io/?url=<encoded>`,
 and stores only results whose own URL is `*.microlink.io`; `isPublicHost` and `BLOCKED_HOST_SUFFIXES`
 (`lib/validate.ts:24-63`) are re-checked at fetch time, blocking IP literals in any notation, `localhost`,
 `metadata.*`, `instance-data.*`, `.local`, `.internal`, `.invalid` and the wildcard-DNS helpers
@@ -1434,6 +1434,7 @@ Added by the fix pass (§5.16):
 | 2026-09-15 | §5.6 key table corrected from the call sites (`manage:${ip}`, `manage-verify:${ip}`, `profile:${ip}`, `search:${ip}`) |
 | 2026-09-15 | §5.15 added: the planned non-string-field 500 finding was **not** reproduced and is not registered |
 | 2026-09-15 | R14-10 replaced the dropped field-validation finding with the credential-rejection observability gap, on the strength of `lib/jobs.ts`'s missing logging |
+| 2026-09-16 | re-verification fix: `lib/jobs.ts:33-45` → `:34-41` in §5.2 (`adminAuth`'s true span in that 41-line file; it sits at `:87` in today's 347-line one) and `lib/screenshots.ts:59-96` → `:59-92` in §5.8 (`probeShot` ends at the file's last line of code). Both named lines their files did not have when written, and both files are larger now, so only an at-the-time check catches them. |
 | 2026-09-16 | fix pass for R14-1…R14-11: each finding's evidence is in §5.16 (a new section), its `Fix.`/`Status.` lines are in §7, the after-fix rows are in §6, and §8's tally moved from 7 of 16 to **12 of 16** |
 
 Written against a real Postgres: the same `postgres:16-alpine` the `08`–`13` passes used on host port 55433,

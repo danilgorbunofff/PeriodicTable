@@ -74,7 +74,7 @@ runbook acts on it.
 | 4 | Ledger divergence | `/api/jobs/reconcile` → `divergent.count` | **> 0** | `ops/payments-stuck.md` |
 | 5 | Queue depth / staleness | `/api/admin/ops` → `outbox.pending`, `oldestPendingMinutes`, `exhausted` | `pending ≥ 25`, or oldest ≥ 120 min, or `exhausted > 0` | `ops/email.md` |
 | 6 | Mail failure | `/api/admin/ops` → `mail.failedCount`, `mail.driver` | `failedCount > 0` (warn), `driver == "logged"` (critical) | `ops/email.md`, `ops/secrets.md` |
-| 7 | A tick stopped running | `/api/jobs/config` → `heartbeats[]` (advisory), `/api/admin/ops` → `staleTicks` (alarm) | `age > bound` — 26 h for the two daily-cron routes, 13 h 20 m for the three tick-only ones | `ops/README.md` §"The clock and the alarm" |
+| 7 | A tick stopped running | `/api/jobs/config` → `heartbeats[]` (advisory), `/api/admin/ops` → `staleTicks` (alarm) | `age > bound` — 26 h for the five routes a daily cron reaches (the 04:30 composite `/api/jobs/daily`, `R20-7`, plus `outbox`'s own 04:00 entry), 13 h 20 m for the one still tick-only (`abandoned-checkouts`, `R20-7`) | `ops/README.md` §"The clock and the alarm" |
 
 Rows 5–7 are the three the repository could not express before this pass: the
 queue's depth was invisible everywhere (`R18-8`), a failed send was a row nobody

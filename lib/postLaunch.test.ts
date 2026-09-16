@@ -216,7 +216,7 @@ describe("R20-7 one cron slot drives three jobs, and the arithmetic says how", (
     expect(src("app/api/jobs/daily/route.ts")).not.toContain("abandoned-checkouts");
   });
 
-  it("names every watched route in the runbook, with the bound the registry derives", () => {
+  it("names every watched route and the signal row's summary, with the bounds the registry derives", () => {
     // `ops/alerts.md` is where a stale tick is read, and it carried the pre-R20-7
     // bounds for a phase: `reconcile` and `config` listed as tick-only at 13 h 20 m
     // while the code said 26 h. The registry is the source, so the runbook is
@@ -234,6 +234,33 @@ describe("R20-7 one cron slot drives three jobs, and the arithmetic says how", (
       expect(row, route).toBeDefined();
       expect(row, route).toContain(`| ${boundText(HEARTBEAT_STALE_MS[route])} |`);
     }
+    // The per-route rows are half of what the file says. The signal table above
+    // them restates the same bounds in words, and that summary cell is the line
+    // an operator reads first when a tick goes quiet. It still carried the
+    // pre-R20-7 split after the rows were corrected, because a match keyed on a
+    // route name cannot reach a cell that names no route — which is how the
+    // correction passed over it. So the summary is derived here too.
+    const cell = alerts.split("\n").find((line) => line.startsWith("| 7 |"));
+    expect(cell).toBeDefined();
+    const byBound = new Map<number, string[]>();
+    for (const route of HEARTBEAT_ROUTES) {
+      const bound = HEARTBEAT_STALE_MS[route];
+      byBound.set(bound, [...(byBound.get(bound) ?? []), route]);
+    }
+    // Two regimes is the whole point of the composite: one bound for the routes
+    // the 04:30 backstop stamps, and the two-tick worst-gap bound for the route
+    // only the tick drives (R20-7, D20-7). A third regime would mean the signal
+    // table's sentence has to be rewritten, so failing here is the signal.
+    const groups = [...byBound.entries()].sort((a, b) => b[1].length - a[1].length);
+    expect(groups, "distinct bounds in the registry").toHaveLength(2);
+    const [wide, narrow] = groups;
+    expect(narrow[1]).toEqual(["/api/jobs/abandoned-checkouts"]);
+    const word = (n: number) => ["zero", "one", "two", "three", "four", "five"][n] ?? String(n);
+    expect(cell).toContain(`${boundText(wide[0])} for the ${word(wide[1].length)} routes`);
+    expect(cell).toContain(
+      `${boundText(narrow[0])} for the ${word(narrow[1].length)} still tick-only`,
+    );
+    expect(cell).toContain(`\`${narrow[1][0].split("/").pop()}\``);
   });
 
   it("is the only place the preview worker's response vocabulary is defined", () => {
