@@ -193,10 +193,12 @@ What the CSP does and does not do:
 - `script-src` carries `'unsafe-inline'` and no nonce (there is no `middleware.ts` to mint one), so an
   injection that survives React's escaping would execute. That is why the escaping analysis in §5.9 is
   load-bearing rather than decorative.
-- **Dead Turnstile entries.** `script-src` and `frame-src` both allow `https://challenges.cloudflare.com`,
+- **The Turnstile entries are load-bearing.** `script-src` and `frame-src` both allow `https://challenges.cloudflare.com`,
   and `next.config.mjs` emits that string unconditionally, while `lib/abuse.ts` only verifies a token when
-  `TURNSTILE_SECRET` is set. If the widget is never mounted the CSP entry is inert; if it is mounted
-  without the secret, the challenge is decorative (§5.12). Either way the header advertises a control that
+  `TURNSTILE_SECRET` is set. The entries are *not* dead — the script origin is hardcoded in `components/TurnstileWidget.tsx:22`
+  and the widget is mounted in checkout (`components/Modals.tsx:592`) — so a future CSP cleanup that strips
+  them would break the challenge, not tidy it (the premise doc 20 R20-2 corrects). Mounted without the secret,
+  the challenge is decorative (§5.12). Either way the header advertises a control that
   the code may not be enforcing — a reader of the headers alone would conclude a bot control exists.
 
 `next.config.mjs` applies CSP only when `NODE_ENV === "production"` (`:37-38`), so **my local dev server
@@ -224,7 +226,7 @@ Read from `lib/env.ts` (`REQUIRED_PROD_ENV`, 9 names; `PROD_ENV_ADVISORIES`; `ge
 | `STRIPE_SECRET_KEY` | provider mode + checkout session creation | `lib/stripe.ts` | `POST /api/dev/pay` → `403 "Disabled when Stripe is enabled."`, which requires `getProviderMode() === "stripe"` and therefore both Stripe names present (doc 11 §5.14) |
 | `STRIPE_WEBHOOK_SECRET` | webhook HMAC | `lib/stripe.ts:172` region | same `403`; a missing secret makes the webhook answer `401`, not `403` |
 | `PAYMENTS_LIVE` | master money switch | `lib/flags.ts:10-19` | not provable from outside; inconsistent state would show as the payment link on `/` (U14-2) |
-| `ADMIN_TOKEN` | 4 admin routes | `x-admin-token` header (`lib/jobs.ts:34-41`) | **not proven present**; `GET /api/admin/reports` without it answers `403` whether or not it is set (fail-closed) — U14-2 has the settling command |
+| `ADMIN_TOKEN` | 4 admin routes | `Authorization: Bearer` header (`lib/jobs.ts:88-98`; no `x-admin-token` form), or a named operator token | **not proven present**; `GET /api/admin/reports` without it answers `403` whether or not it is set (fail-closed) — U14-2 has the settling command |
 | `CRON_SECRET` | 4 job routes | `Authorization: Bearer` **or** `?secret=` (`reconcile/route.ts:47`, `config/route.ts:35`) | **not proven present**; `GET /api/jobs/config` without it → `401` (§5.3) |
 | `RESEND_API_KEY` | outbound mail | `lib/email.ts` | **not proven**; locally unset, so every `EmailLog` row I created is `status='logged'` (§5.7) — U14-3 |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | shared limiter store | `lib/rateStore.ts` | **not proven**; if absent the code logs `rate-limit: no shared store configured … using instance-local memory` once per process — U14-3 |
@@ -639,12 +641,15 @@ of erroring. `usableHop()` refuses anything that is not address-shaped, so `unkn
 comma fragment cannot become a fresh bucket. `lib/rateStore.ts` gained a `StoreErrorPolicy` and a failure
 counter: the store-error path still fails **open** by default — an Upstash outage must not 500 the site, and
 that degradation is accepted for the public surface — but the four callers whose limiter *is* the abuse
-control pass `onStoreError: "closed"`: `app/api/waitlist/route.ts:44,116`, `app/api/checkout/route.ts:275`,
-`app/api/report/route.ts:28` and the job/admin gates (`lib/jobs.ts:247`). Each of those sends something —
+control pass `onStoreError: "closed"`: `app/api/waitlist/route.ts:45,117`, `app/api/checkout/route.ts:290`,
+`app/api/report/route.ts:30`. Each of those sends something —
 mail, a provider session, a webhook-driven suppression — on the strength of the limiter, so an outage that
 silently lifts their cap turns a capacity control into an open relay; their answer during an outage is a
 retryable `429`, and the failure is logged once per hour-window **with its running count** and only the key's
-prefix, so an outage cannot look like calm and no credential hash or address reaches a log line. The eight
+prefix, so an outage cannot look like calm and no credential hash or address reaches a log line. The
+job/admin gates are *not* in that list: their throughput throttle stays fail-open **by design**
+(`lib/jobs.ts:202-203`: "a limiter outage must not take the outbox down with it"), and the only
+`onStoreError: "closed"` call inside `lib/jobs.ts` meters the auth-denied refusal (`:297-305`). The eight
 privileged routes that had no ceiling at all now have one (`JOB_LIMIT 30/min`, `ADMIN_LIMIT 60/min`,
 `lib/jobs.ts:101-103`), keyed on the credential digest via `callerKey()` rather than on IP, because a bearer
 token identifies its holder better than an address does. Residuals, stated: which header this deployment's
@@ -814,7 +819,7 @@ column above is kept as the record of the 2026-09-15 build:
 | # | Attempt | Before (2026-09-15) | After the fix pass (§5.16) | Finding |
 |---|---|---|---|---|
 | 1 | rotate `cf-connecting-ip` to nullify every limiter | 11/11 rotating headers → `200`; a fixed one → 10×`200`, 11th `429` | `cf-connecting-ip` is read **only** when `cf-ray` proves the hop; the identity is otherwise the rightmost usable XFF hop or `x-real-ip`, else one shared `0.0.0.0` bucket. Rotating the header no longer mints buckets — it either does nothing or makes the bucket coarser | R14-2 |
-| 2 | blow up the limiter store to fail open | fails **open** and silently, for every caller | still open by default for read-only routes (the doc 20 R20-8 acceptance), but the four senders — waitlist (both limiters), checkout, report — and the job/admin gates answer a retryable `429`, and the failure is logged once per hour-window with a running count | R14-2 |
+| 2 | blow up the limiter store to fail open | fails **open** and silently, for every caller | still open by default for read-only routes (the doc 20 R20-8 acceptance), but the four senders — waitlist (both limiters), checkout, report — answer a retryable `429`, and the failure is logged once per hour-window with a running count; the job/admin throughput throttle stays open **by design** (`lib/jobs.ts:202-203`) — only the auth-denied meter is closed (`:297-305`) | R14-2 |
 | 3 | `POST /api/dev/pay` for a `DEV` payment | PROD process with 0 or 1 Stripe keys → `200` + a real `Stake`; only a *fully* configured Stripe made it `403` | `404` on any production process, before the flag or the credentials are read; the route exists in `development`/`test` only. A deployment that intends to charge but cannot service the charge is refused with `503` at checkout | R14-1 |
 | 8 | send mail to an arbitrary address via waitlist | accepted; a repeat submission re-sent the same mail, and new recipients were uncapped | a known address gets `200` and **no** mail; new recipients are capped at 5 per source per 24 h, the per-address bucket is a hashed day key, and both limiters fail closed | R14-3 |
 | 11 | inject markup via domain/social handle | blocked by the charset check, not by escaping — one regex regression from live injection | unchanged controls, and now the rule is stated where the templates live (subjects are header values and are never escaped; `esc()` runs once, into HTML) and the subject line is asserted by a test | R14-4 |
@@ -933,8 +938,11 @@ operator/scheduler routes so a leaked secret is not unlimited.
   erroring, and `usableHop()` refuses non-address-shaped fields so `unknown` cannot mint a bucket either. The
   fail-open path became a policy: `StoreErrorPolicy` + `onStoreError` (`lib/rateStore.ts:93-140`), default
   `"open"` (doc 20 R20-8's acceptance for the public surface) and `"closed"` for the callers that *send* on
-  the strength of the limiter — waitlist's two limiters, checkout, report, and the job/admin gates — with the
+  the strength of the limiter — waitlist's two limiters, checkout, report — with the
   failure logged once per hour-window, at `error`, carrying a running count and only the key's prefix. The
+  job/admin gates' throughput throttle deliberately stays open (`lib/jobs.ts:202-203`: a limiter outage must
+  not take the outbox down with it); inside `lib/jobs.ts` the fail-closed policy belongs to the auth-denied
+  refusal meter alone (`:297-305`). The
   eight operator/scheduler routes gained `JOB_LIMIT = 30/min` and `ADMIN_LIMIT = 60/min`, keyed on the
   credential digest (`callerKey`, `lib/jobs.ts:101-103,122`) rather than on IP. Not measurable from here:
   which hop the edge actually writes (U14-5) and whether the store is shared at all, i.e. whether the true
@@ -1271,7 +1279,8 @@ when it happens, re-run `npm run audit:prod` and delete the acceptance entry rat
 - [x] Every per-IP ceiling is keyed on a value the client cannot choose, and the store fails closed for
   mail and money — `clientIp()` reads `cf-connecting-ip` only behind a `cf-ray` proof and otherwise takes the
   rightmost usable `x-forwarded-for` hop, then `x-real-ip`, then one shared bucket; the four senders (waitlist's
-  two limiters, checkout, report) and the job/admin gates pass `onStoreError: "closed"` (R14-2, §5.16).
+  two limiters, checkout, report) pass `onStoreError: "closed"` (R14-2, §5.16); the job/admin throughput
+  throttle is fail-open by design and the auth-denied meter alone is closed (`lib/jobs.ts:202-203,297-305`).
 - [ ] Every outbound mail goes to an address whose owner asked for it — R14-3. **Not met as written**: the
   relay is closed for addresses already on the list and capped at five *new* recipients per source per day,
   but a first mail to an arbitrary address is still possible; double opt-in is a product decision that was not
@@ -1303,7 +1312,8 @@ when it happens, re-run `npm run audit:prod` and delete the acceptance entry rat
   metered per route at 60/h with a fail-closed `429`, and escalated at the twentieth — but nothing outside the
   repository reads those lines (§5.16, U14-6).
 - [ ] CSP `script-src` has no `'unsafe-inline'` and the header advertises no control the code does not
-  enforce (the two dead Turnstile entries) — §5.1. **Not taken in this pass**: it is a change to
+  enforce (the Turnstile entries as mounted without `TURNSTILE_SECRET`; the origins themselves are
+  load-bearing, the premise doc 20 R20-2 corrects) — §5.1. **Not taken in this pass**: it is a change to
   `next.config.mjs` with a bundle-wide blast radius, and R14-6 answered the page-local half with a response
   header instead — a policy delivered per response is enforced *in addition* to the site-wide one.
 
@@ -1385,8 +1395,8 @@ malformed-body row was ticked when §5.15 was added, after that sentence was wri
   Doc 11 owns route contracts; this document owns exploitability.
 - Doc 12 — §7 owns PII retention and deletion (`EmailLog`, `WaitlistEntry`, `Report.ipHash`); this document
   only records who can read or write those rows.
-- Doc 13 — the per-job auth tables and the `EmailLog` "no provider id, every row `logged`" gap (R13-4,
-  R13-5, §9) are cited in §5.7 and R14-9; doc 13 owns job semantics.
+- Doc 13 — the per-job auth tables and the `EmailLog` "no provider id, every row `logged`" gap (R13-8,
+§5.12) are cited in §5.7 and R14-9; doc 13 owns job semantics.
 - Docs 06–10 (batch 2, not yet written): 06 checkout validation order, 07 provider-mode semantics (the
   money-path half of R14-1), 08 settlement authority, 09 ownership/competition, 10 mail cadence and copy.
   Where R14-1 and R14-3 touch money-path behaviour, the *behaviour* belongs to those docs; the *authority*
@@ -1436,6 +1446,7 @@ Added by the fix pass (§5.16):
 | 2026-09-15 | R14-10 replaced the dropped field-validation finding with the credential-rejection observability gap, on the strength of `lib/jobs.ts`'s missing logging |
 | 2026-09-16 | re-verification fix: `lib/jobs.ts:33-45` → `:34-41` in §5.2 (`adminAuth`'s true span in that 41-line file; it sits at `:87` in today's 347-line one) and `lib/screenshots.ts:59-96` → `:59-92` in §5.8 (`probeShot` ends at the file's last line of code). Both named lines their files did not have when written, and both files are larger now, so only an at-the-time check catches them. |
 | 2026-09-16 | fix pass for R14-1…R14-11: each finding's evidence is in §5.16 (a new section), its `Fix.`/`Status.` lines are in §7, the after-fix rows are in §6, and §8's tally moved from 7 of 16 to **12 of 16** |
+| 2026-09-16 | final-verification audit (PR `26`): §5.2's `ADMIN_TOKEN` row now names the `Authorization: Bearer` header `adminAuth` actually reads (`lib/jobs.ts:88-98`); the "dead Turnstile entries" premise is corrected in §5.1, §8 and U14-8 (the origins are load-bearing — `components/TurnstileWidget.tsx:22`, `components/Modals.tsx:592`); R14-2's prose and §6's row no longer list the job/admin gates among the fail-closed callers (the throughput throttle is fail-open by design, `lib/jobs.ts:202-203`; only the auth-denied meter is closed, `:297-305`), and the four senders' line cites are refreshed; the `EmailLog` gap is attributed to R13-8; U14-6's route count reads 35 |
 
 Written against a real Postgres: the same `postgres:16-alpine` the `08`–`13` passes used on host port 55433,
 all **eleven** migrations `0000`–`0010` applied, `npm run test:ci` green at **53 files / 791 passed /
@@ -1463,9 +1474,9 @@ where the box stays unticked.
 | U14-3 | Whether `RESEND_API_KEY`, `UPSTASH_REDIS_REST_URL`/`_TOKEN` and `TURNSTILE_SECRET` are set in production — decides whether R14-3 delivers and whether §5.6's limits are shared | Vercel → Logs at process start: the single `rate-limit: no shared store configured … using instance-local memory` line, the Turnstile not-configured warning; a delivered mail's `DKIM`/`Return-Path` headers prove Resend *Unchanged as a fact, bounded as a consequence:* an unset `RESEND_API_KEY` now costs the waitlist *confirmation* rather than exposing a relay, because the path mails only unknown, unsuppressed addresses and caps a source at five new ones per day (R14-3). One name should be added to this row's read: `RESEND_WEBHOOK_SECRET`, without which `/api/webhooks/resend` cannot record a bounce or complaint — and that record is the suppression list the cap consults |
 | U14-4 | Whether any alias of a preview deployment is reachable without Vercel Authentication | Enumerate `gh api repos/danilgorbunofff/PeriodicTable/deployments` (and `…/deployments/<id>/statuses`) and `curl -sS -o NUL -D -` each host, expecting `302 → vercel.com/sso-api`; one branch-alias form did not resolve from this host (`curl` exit `000`) *Less load-bearing than when written, and still unanswered:* nothing reachable on a preview mints capability now — `devSimulatorEnabled()` requires a `development`/`test` app env and `__devToken` requires the literal `development` (R07-2, R14-7) — so an open alias costs a staging surface, not a stake or a manage token. It matters for a different reason if that alias is wired to the **production** database, and which database a preview points at is not visible from a checkout |
 | U14-5 | Which request header this deployment sets as the client identity, i.e. whether `x-forwarded-for`/`x-real-ip` can be trusted as the limiter key | One request per header value against a harmless production route and comparison of limiter behaviour, or the Vercel project's edge configuration; **blocks the R14-2 fix** *The fix pass took the answer-agnostic path this row was blocking.* `clientIp()` honours `cf-connecting-ip` only behind a `cf-ray` proof, then the rightmost usable `x-forwarded-for` hop, then `x-real-ip`, and puts anything carrying none of them in one shared bucket — so R14-2 is closed without this answer, at the cost of a coarser ceiling in the worst case. Answering it would still sharpen "one bucket" into "one bucket per client", and it decides whether the rightmost-hop fallback is the *right* hop. §5.16 records the ladder and `lib/ip.ts` the code |
-| U14-6 | Whether Vercel adds `Access-Control-Allow-Origin: *` to any `/api/*` response besides `/` | Header sweep: `curl -sS -D - -o NUL` over all 26 production routes (§5.1 captured `/` and `/api/stats`; `/` has it, `/api/stats` does not). Matters only if a cookie-authenticated route is added later *Unchanged, and cheaper to check in the same sweep:* no route this pass touched sets an origin header, and every `/api/admin/*` write this doc audits is token-gated rather than cookie-gated, so a wildcard would still be inert. The question is about Vercel's behaviour on this project, not about anything in the repository |
+| U14-6 | Whether Vercel adds `Access-Control-Allow-Origin: *` to any `/api/*` response besides `/` | Header sweep: `curl -sS -D - -o NUL` over all 35 production routes (§5.1 captured `/` and `/api/stats`; `/` has it, `/api/stats` does not). Matters only if a cookie-authenticated route is added later *Unchanged, and cheaper to check in the same sweep:* no route this pass touched sets an origin header, and every `/api/admin/*` write this doc audits is token-gated rather than cookie-gated, so a wildcard would still be inert. The question is about Vercel's behaviour on this project, not about anything in the repository |
 | U14-7 | The last-rotation dates of `STRIPE_WEBHOOK_SECRET`, `CRON_SECRET`, `ADMIN_TOKEN`, `CLICK_SALT` (and whether `CLICK_SALT` is set at all — unset means the literal `"ptl-dev-salt"` is hashed into every `Report.ipHash`) | Provider consoles plus a dated line per secret in the runbook; **values are never printed**, only names and dates *Unchanged, and one name longer:* the pass added `DEV_MANAGE_TOKENS` to `.env.example` — an opt-in flag whose default is off and which has no value to rotate — so the inventory below is the same list plus a boolean. Nothing was rotated in this pass: `CRON_SECRET` and `CLICK_SALT` are as old as they were, and `CLICK_SALT` unset still means the literal `"ptl-dev-salt"` is hashed into every `Report.ipHash` |
-| U14-8 | Whether a real browser blocks a foreign-host `logoUrl` render, and whether a future build keeps `script-src` free of `'unsafe-inline'` | Browser matrix against a listing whose `logoUrl` points at a foreign host (needs a manage session, i.e. after the v2 manage pages ship); the CSP half is re-checkable on every deploy from the headers §5.1 captured *Unchanged in both halves, with the CSP half now a stated decision rather than an omission:* the pass added a page-local CSP response header to the unsubscribe page (R14-6) and deliberately did not touch `script-src` in `next.config.mjs`, so the site-wide header still carries `'unsafe-inline'` and the two Turnstile entries nothing calls. The browser half stays unmeasured — it needs a manage session and a listing whose `logoUrl` points at a foreign host — with R14-5 now at least bounding what such a value can be (2048 characters, control characters rejected) |
+| U14-8 | Whether a real browser blocks a foreign-host `logoUrl` render, and whether a future build keeps `script-src` free of `'unsafe-inline'` | Browser matrix against a listing whose `logoUrl` points at a foreign host (needs a manage session, i.e. after the v2 manage pages ship); the CSP half is re-checkable on every deploy from the headers §5.1 captured *Unchanged in both halves, with the CSP half now a stated decision rather than an omission:* the pass added a page-local CSP response header to the unsubscribe page (R14-6) and deliberately did not touch `script-src` in `next.config.mjs`, so the site-wide header still carries `'unsafe-inline'` and the two Turnstile entries (which are load-bearing, not dead — the checkout mounts the widget, `components/Modals.tsx:592`, script origin hardcoded at `components/TurnstileWidget.tsx:22`; the premise doc 20 R20-2 corrects). The browser half stays unmeasured — it needs a manage session and a listing whose `logoUrl` points at a foreign host — with R14-5 now at least bounding what such a value can be (2048 characters, control characters rejected) |
 
 **Nothing in this table was settled by the fix pass.** Two rows lost their blocking power without being
 answered — U14-5, because the R14-2 fix was written to be correct whichever header the deployment sets, and
