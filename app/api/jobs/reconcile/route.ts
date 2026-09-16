@@ -5,6 +5,7 @@ import { stampHeartbeat } from "@/lib/jobHeartbeat";
 import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/money";
 import { aggregateDrift } from "@/lib/recompute";
 import { reportQueueAge, TRIAGE_PROMISE_HOURS } from "@/lib/moderation";
+import { outboxHealth } from "@/lib/outbox";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
@@ -196,6 +197,14 @@ async function getReconcileStatus(req: NextRequest) {
 
   const triage = await reportQueueAge();
 
+  // R17-13: "is the mail path stuck" was unanswerable from the public
+  // surface and took two queries against two tables to answer by hand. It is
+  // an outbox question, not a money question, so it neither sets `ok` nor
+  // joins the `failing` list below — a receipt that never went out does not
+  // contradict the ledger, and the runbook is what turns these numbers into a
+  // decision (ops/email.md).
+  const outbox = await outboxHealth();
+
   const staleWhere = {
     status: "PENDING" as const,
     createdAt: { lt: new Date(Date.now() - STALE_PENDING_MS) },
@@ -267,6 +276,10 @@ async function getReconcileStatus(req: NextRequest) {
         count: staleCount,
         samples: staleSamples,
         note: "Pending past the provider session's own lifetime, so no delivery is coming. Rows with no session at all are cancelled by /api/jobs/abandoned-checkouts; these carry one and are operator work.",
+      },
+      outbox: {
+        ...outbox,
+        note: "Mail and preview work. `due` is what the next worker tick would claim (it clears itself); `exhausted` has spent all 5 attempts and `failed` failed without a later success — those two are operator work, and POST /api/admin/outbox/retry with the dedupe key is the lever. `oldestDueHours` is how long the oldest undelivered row has been waiting, `lastDeliveredAt` says whether the pipeline is moving at all, and `driver: \"logged\"` means RESEND_API_KEY is unset so nothing is leaving the building.",
       },
     },
     { status: failing ? 503 : 200 },

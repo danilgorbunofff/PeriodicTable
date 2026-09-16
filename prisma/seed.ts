@@ -5,11 +5,19 @@
    Ranking reuses the shared rankStakes + assertLedgerInvariants path
    (lib/pricing.ts) so seeded state can never drift from production invariants.
    Historical createdAt/ts are preserved intentionally — applyStakeTx would
-   stamp now(), which would rewrite history. */
+   stamp now(), which would rewrite history.
+
+   R17-5: this script deletes nothing, so it needs no guard — but it is the
+   other half of the same hazard. "npm run seed" against whatever
+   DATABASE_URL happens to be exported is how a demo row lands in production,
+   and the operator sees no host in the output. It therefore prints the target
+   host (loopback or not) before it writes anything, using the same
+   lib/seedGuard.ts host resolution the destructive script refuses on. */
 import { PrismaClient, ChemicalFamily, PrestigeTier } from "@prisma/client";
 import { ELEMENTS } from "../lib/elements";
 import { MOCK_STAKES } from "../mocks/startups";
 import { rankStakes, assertLedgerInvariants } from "../lib/pricing";
+import { seedGuard } from "../lib/seedGuard";
 
 const prisma = new PrismaClient();
 
@@ -32,6 +40,27 @@ async function recomputeElement(elementId: number) {
 }
 
 async function main() {
+  // R17-5: say where this is about to write, before it writes. A bare guard
+  // refusal (no DATABASE_URL) is still just a warning here: PrismaClient's own
+  // error is the authoritative one for this non-destructive script.
+  const target = seedGuard({
+    fresh: false,
+    databaseUrl: process.env.DATABASE_URL,
+    argv: process.argv.slice(2),
+  });
+  if (target.ok) {
+    console.log(
+      `seed: target ${target.host}${target.local ? " (loopback)" : " (NOT a loopback host) — appending only"}`,
+    );
+    if (!target.local)
+      console.warn(
+        "seed: this is a remote database. The seed upserts and never deletes, but " +
+          "run it against production only when that is what you meant to do.",
+      );
+  } else {
+    console.warn(`seed: target unknown (${target.code}) — ${target.message}`);
+  }
+
   // 1) Elements (122 tiles)
   for (const e of ELEMENTS) {
     await prisma.element.upsert({

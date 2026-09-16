@@ -33,6 +33,7 @@ Any Postgres 16 works (Neon/Supabase pooled URI for serverless, local
 |---|---|---|
 | `DATABASE_URL` | required | required |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | optional (absent = dev pay simulator) | **required** |
+| `STRIPE_WEBHOOK_SECRET_OLD` | unset | unset except during a rotation overlap (accepted for the same 300s window; `/api/jobs/config` reports it while set — see `ops/secrets.md`) |
 | `NEXT_PUBLIC_APP_URL` | default localhost | **required, https** |
 | `TURNSTILE_SECRET` | optional (absent = checks pass locally) | **required** |
 | `CLICK_SALT` | default dev salt | **required, private random** |
@@ -156,8 +157,14 @@ their destination element + profile URL.
   non-public hosts; security headers + allowlist CSP ship in `next.config.mjs`.
 - Moderation: `ops/takedown.md` is executable — report queue, triage states,
   HIDE (all surfaces, stops /go, clears preview) / UNLIST (discovery only) /
-  restore, all audited. Operator endpoints need `ADMIN_TOKEN` bearer.
-  Financial history is never deleted; aggregates keep counting hidden stakes.
+  restore, one listing at a time or up to 50 at once at
+  `POST /api/admin/startups/moderate-batch`, all audited. Operator endpoints
+  need an `ADMIN_TOKEN` bearer; named operators (`ADMIN_TOKENS`) are recorded
+  by the name their token proves. Financial history is never deleted;
+  aggregates keep counting hidden stakes.
+- Runbooks: `ops/README.md` indexes the operator procedures (payments, webhooks,
+  disputes, secrets, database, email, abuse waves, comms) next to `takedown.md`
+  and `rollback.md`.
 - Email: no addresses in URLs; unsubscribe is POST-first (RFC 8058 headers
   on outgoing mail, confirm form on GET).
 

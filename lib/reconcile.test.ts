@@ -37,6 +37,17 @@ type Report = {
     note: string;
   };
   triage: { open: number; overdue: number; oldestHours: number | null; breached: boolean; promiseHours: number };
+  outbox: {
+    driver: string;
+    due: number;
+    exhausted: number;
+    failed: number;
+    oldestKey: string | null;
+    oldestDueHours: number | null;
+    oldestDueAt: string | null;
+    lastDeliveredAt: string | null;
+    note: string;
+  };
 };
 
 async function call(): Promise<Report> {
@@ -303,6 +314,50 @@ describe.skipIf(!hasDb)("money reconciliation report", () => {
 
     await prisma.report.deleteMany({ where: { reason: "reconcile triage probe" } });
     expect(await prisma.report.count({ where: { id: backlog.id } })).toBe(0);
+  });
+
+  it("reports the mail queue as an advisory block that cannot page anyone", async () => {
+    // R17-13: the queue used to be invisible — an operator could see that mail
+    // failed but not how much, since when, or whether anything was still
+    // coming. The block answers that, and deliberately sits outside `ok`:
+    // undelivered receipts are a customer-visible fault, not a money fault, and
+    // paging on them would train the pinger to be ignored on the day money is
+    // actually wrong.
+    const report = await call();
+    expect(report.ok).toBe(true);
+    expect(["resend", "logged"]).toContain(report.outbox.driver);
+    // The note is the runbook's index into the numbers: it must name the two
+    // stuck kinds (which a person clears) and the lever that clears them.
+    expect(report.outbox.note).toMatch(/mail/i);
+    expect(report.outbox.note).toContain("exhausted");
+    expect(report.outbox.note).toContain("/api/admin/outbox/retry");
+  });
+
+  it("shows an exhausted row in the outbox block without failing the report", async () => {
+    const key = `reconcile-outbox-${Date.now()}`;
+    await prisma.outboxEvent.create({
+      data: {
+        type: "RECEIPT_EMAIL",
+        payload: {},
+        dedupeKey: key,
+        attempts: 5,
+        nextAttemptAt: new Date(Date.now() - 3 * 3_600_000),
+      },
+    });
+    try {
+      const report = await call();
+      // Still not a page: the status code is unchanged.
+      expect(report.ok).toBe(true);
+      expect(report.outbox.exhausted).toBeGreaterThanOrEqual(1);
+      expect(report.outbox.due).toBeGreaterThanOrEqual(0);
+      // The row was created now, so the block must not invent an age for it.
+      const row = await prisma.outboxEvent.findUnique({ where: { dedupeKey: key } });
+      expect(row?.completedAt).toBeNull();
+      expect(report.outbox.oldestDueAt).not.toBeNull();
+    } finally {
+      await prisma.outboxEvent.deleteMany({ where: { dedupeKey: key } });
+    }
+    expect(await prisma.outboxEvent.count({ where: { dedupeKey: key } })).toBe(0);
   });
 
   it("fails ok when an element's aggregates disagree with its stake rows", async () => {

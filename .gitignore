@@ -38,3 +38,7 @@ next-env.d.ts
 
 # impeccable design-hook cache (local tooling state, never shared)
 .impeccable/
+
+# release rehearsal records (ops/rollback.md prints the path; keep them with the
+# release, not in git)
+rehearsal-*.log

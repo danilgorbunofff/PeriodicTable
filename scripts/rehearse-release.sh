@@ -12,6 +12,12 @@
 #   refused, and one case asserts exactly that.
 #   Expiry coverage needs RESERVATION_TTL_MS=2000 on the server (else skipped).
 #
+#   Every run writes its own record to REHEARSE_RESULT (default
+#   rehearsal-<run>.log): run id, target, commit, which optional credentials
+#   were present, each pass/skip/fail line with its reason, and the tally. Keep
+#   it with the release — "we rehearsed it" is only checkable if the record says
+#   what the run covered and what it could not (R17-16, ops/rollback.md).
+#
 # Requires: curl, and a working python3 (falls back to python). On Windows the
 # Store alias stub for python3 resolves on PATH but cannot run, so the probe
 # below executes the candidate instead of trusting `command -v`.
@@ -33,6 +39,18 @@ export MSYS_NO_PATHCONV=1
 BASE="${BASE_URL:?set BASE_URL}"
 MODE="${1:-live}"
 RUN="${REHEARSE_RUN:-$(date +%s)}"
+# R17-16: the run's own record. The run id reached only the payloads it created
+# (idempotency keys) and the skips scrolled off the terminal, so nothing said
+# afterwards which blocks a release rehearsal actually exercised. Presence of a
+# credential is recorded; never its value.
+RESULT="${REHEARSE_RESULT:-rehearsal-$RUN.log}"
+: > "$RESULT"
+rec() { printf '%s\n' "$*" >> "$RESULT"; }
+# A run that dies before its tally — curl cannot reach the server, a block
+# throws — must still say so in the record, or the file reads like a run that
+# simply stopped talking. ENDED flips once the run has reported itself.
+ENDED=0
+finish() { local rc=$?; rm -rf "$TMPD"; [ "$ENDED" = 1 ] || rec "ABORTED exit=$rc before the tally"; }
 PASS=0
 SKIP=0
 CALLN=0
@@ -47,14 +65,17 @@ winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else pr
 NULLDEV=/dev/null
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) NULLDEV=NUL ;; esac
 TMPD=$(winpath "$TMPD")
-trap 'rm -rf "$TMPD"' EXIT
+trap finish EXIT
+rec "# release rehearsal $RUN $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+rec "# base=$BASE mode=$MODE commit=$(git rev-parse --short HEAD 2>/dev/null || printf unknown)"
+rec "# coverage: ADMIN_TOKEN=$([ -n "${ADMIN_TOKEN:-}" ] && printf set || printf unset) STRIPE_WEBHOOK_SECRET=$([ -n "${STRIPE_WEBHOOK_SECRET:-}" ] && printf set || printf unset) STRIPE_SECRET_KEY=$([ -n "${STRIPE_SECRET_KEY:-}" ] && printf set || printf unset) RESERVATION_TTL_MS=${RESERVATION_TTL_MS:-unset}"
 BODY="$TMPD/body.txt"
 STATUS="$TMPD/status.txt"
 WHBODY="$TMPD/whbody.json"
 
-fail() { echo "❌ FAIL: $1${2:+ — $2}"; exit 1; }
-pass() { PASS=$((PASS + 1)); echo "✓ $1"; }
-skip() { SKIP=$((SKIP + 1)); echo "- SKIP: $1"; }
+fail() { echo "❌ FAIL: $1${2:+ — $2}"; rec "FAIL $1${2:+ — $2}"; ENDED=1; exit 1; }
+pass() { PASS=$((PASS + 1)); echo "✓ $1"; rec "PASS $1"; }
+skip() { SKIP=$((SKIP + 1)); echo "- SKIP: $1"; rec "SKIP $1"; }
 need() { command -v "$1" >/dev/null || fail "missing tool" "$1"; }
 need curl
 PY=""
@@ -112,7 +133,10 @@ if [ "$MODE" = "paused" ]; then
   ID2=$("$PY" -c "import json; print(json.load(open('$BODY'))['id'])")
   [ "$ID1" = "$ID2" ] && [ -n "$ID1" ] || fail "waitlist dedupes by email"
   pass "waitlist stores one row per email"
+  ENDED=1
+  rec "TOTAL $PASS passed, $SKIP skipped"
   echo "== $PASS passed, $SKIP skipped =="
+  echo "   record: $RESULT"
   exit 0
 fi
 
@@ -279,4 +303,7 @@ for p in "/api/stats" "/api/elements" "/api/table-order" "/api/board?tab=crowns"
 done
 pass "read APIs within latency budget"
 
+ENDED=1
+rec "TOTAL $PASS passed, $SKIP skipped"
 echo "== $PASS passed, $SKIP skipped =="
+echo "   record: $RESULT"

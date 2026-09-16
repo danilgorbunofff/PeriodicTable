@@ -495,6 +495,16 @@ export function mailIdempotencyKey(dedupeKey: string): string {
     : `pt_mail_sha256_${createHash("sha256").update(dedupeKey).digest("hex")}`;
 }
 
+/** Which driver a send will use: the provider when a key is configured, the
+ *  log otherwise. Exported because "mail is staged, not sent" is the single
+ *  fact an operator most needs from a health report (R17-13) and it should not
+ *  be spelled out in two places. */
+export function mailDriver(
+  env: NodeJS.ProcessEnv = process.env,
+): "resend" | "logged" {
+  return env.RESEND_API_KEY ? "resend" : "logged";
+}
+
 async function deliver(
   to: string,
   subject: string,
@@ -502,7 +512,7 @@ async function deliver(
   unsubUrl: string | null,
   dedupeKey?: string | null,
 ): Promise<DeliveryResult> {
-  if (!process.env.RESEND_API_KEY) return { status: "logged" };
+  if (mailDriver() === "logged") return { status: "logged" };
   try {
     // RFC 8058 one-click unsubscribe (P1-18): POST endpoint + headers. The
     // token is opaque; no email address ever appears in a URL.

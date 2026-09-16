@@ -12,6 +12,7 @@ import { ModerationState, type Prisma } from "@prisma/client";
 
 /** Startups visible on discovery surfaces (search/boards/table-order). */
 import { prisma } from "./prisma";
+import { audit } from "./audit";
 
 export const DISCOVERABLE_STATES: ModerationState[] = ["VISIBLE"];
 
@@ -40,6 +41,73 @@ export function isDiscoverable(state: ModerationState): boolean {
 
 export function isDirectVisible(state: ModerationState): boolean {
   return state === "VISIBLE" || state === "UNLISTED";
+}
+
+/** The states an operator may put a listing into, in one place (R17-14). */
+export const MODERATION_STATES: ModerationState[] = ["VISIBLE", "UNLISTED", "HIDDEN"];
+
+export type ModerationOutcome = {
+  domain: string;
+  state: ModerationState;
+  previous: ModerationState;
+  /** False when the listing already stood in the requested state. */
+  changed: boolean;
+};
+
+/**
+ * Move one listing to a moderation state, auditing it (R17-14).
+ *
+ * Extracted from the single-listing route so the bulk lever added by phase 17
+ * cannot drift from it: same columns, same retention behaviour (HIDDEN clears
+ * the stored preview and nothing else), same PROFILE_MODERATED audit row per
+ * domain, financial rows never touched. `domain` is expected already
+ * normalised by the caller; the row's own domain is what comes back.
+ *
+ * Returns null when there is no such listing, so a bulk caller can report the
+ * typos it was given instead of silently skipping them.
+ *
+ * The reason is trimmed here as well as at the routes: `"  "` used to satisfy
+ * the "a reason is required to hide or unlist" rule and land in the trail as
+ * three spaces, which is a reason nobody wrote. The check belongs to the write
+ * so both routes inherit it rather than each remembering to trim.
+ */
+export async function applyModeration(opts: {
+  domain: string;
+  state: ModerationState;
+  reason?: string;
+  operator: string;
+  now?: Date;
+}): Promise<ModerationOutcome | null> {
+  const startup = await prisma.startup.findUnique({ where: { domain: opts.domain } });
+  if (!startup) return null;
+  const now = opts.now ?? new Date();
+  const restoring = opts.state === "VISIBLE";
+  const updated = await prisma.startup.update({
+    where: { domain: startup.domain },
+    data: {
+      moderationState: opts.state,
+      moderatedBy: restoring ? startup.moderatedBy : opts.operator,
+      moderatedReason: restoring
+        ? startup.moderatedReason
+        : String(opts.reason ?? "").trim().slice(0, 300),
+      moderatedAt: restoring ? startup.moderatedAt : now,
+      restoredAt: restoring ? now : null,
+      ...(opts.state === "HIDDEN" ? { previewImgUrl: null } : {}),
+    },
+  });
+  await audit({
+    action: "PROFILE_MODERATED",
+    startupId: startup.id,
+    actorType: "operator",
+    actorRef: opts.operator,
+    detail: `${startup.moderationState} → ${updated.moderationState}: ${updated.moderatedReason ?? "restored"}`.slice(0, 300),
+  });
+  return {
+    domain: updated.domain,
+    state: updated.moderationState,
+    previous: startup.moderationState,
+    changed: startup.moderationState !== updated.moderationState,
+  };
 }
 
 /**

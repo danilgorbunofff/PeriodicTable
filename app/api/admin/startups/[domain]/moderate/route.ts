@@ -1,19 +1,21 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { adminGate } from "@/lib/jobs";
+import { adminGate, operatorIdentity } from "@/lib/jobs";
 import { apiJson, apiError, apiRoute } from "@/lib/route";
-import { audit } from "@/lib/audit";
+import { applyModeration, MODERATION_STATES } from "@/lib/moderation";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getModerationState, POST: moderateStartup });
-
-const STATES = ["VISIBLE", "HIDDEN", "UNLISTED"] as const;
 
 /**
  * Hide / unlist / restore a listing (takedown runbook: contain first).
  * Financial history is NEVER touched — stakes, payments, and aggregates
  * stay; only public visibility changes. Hiding also clears the stored
  * preview (retention policy) and is fully audited with operator + reason.
+ *
+ * Phase 17: the write itself lives in lib/moderation.ts so the bulk lever
+ * (`admin/startups/moderate-batch`) shares it, and `operator` defaults to the
+ * name the presented token proves (R17-6) rather than to a body string.
  */
 async function moderateStartup(req: NextRequest, { params }: { params: { domain: string } }) {
   const denied = await adminGate(req, "admin/startups/[domain]/moderate");
@@ -25,35 +27,27 @@ async function moderateStartup(req: NextRequest, { params }: { params: { domain:
   } catch {
     return apiError("Invalid JSON body.", { status: 400 });
   }
-  if (!body.state || !(STATES as readonly string[]).includes(body.state)) {
+  const state = MODERATION_STATES.find((s) => s === body.state);
+  if (!state) {
     return apiError("state must be VISIBLE, HIDDEN, or UNLISTED.", { status: 400, code: "BAD_STATE" });
   }
-  if ((body.state === "HIDDEN" || body.state === "UNLISTED") && !body.reason) {
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if ((state === "HIDDEN" || state === "UNLISTED") && !reason) {
     return apiError("A reason is required to hide or unlist.", { status: 400, code: "REASON_REQUIRED" });
   }
-  const startup = await prisma.startup.findUnique({ where: { domain } });
-  if (!startup) return apiError("Startup not found.", { status: 404, code: "NOT_FOUND" });
-  const operator = typeof body.operator === "string" ? body.operator.slice(0, 120) : "operator";
-  const now = new Date();
-  const updated = await prisma.startup.update({
-    where: { domain },
-    data: {
-      moderationState: body.state as (typeof STATES)[number],
-      moderatedBy: body.state === "VISIBLE" ? startup.moderatedBy : operator,
-      moderatedReason: body.state === "VISIBLE" ? startup.moderatedReason : String(body.reason ?? "").slice(0, 300),
-      moderatedAt: body.state === "VISIBLE" ? startup.moderatedAt : now,
-      restoredAt: body.state === "VISIBLE" ? now : null,
-      ...(body.state === "HIDDEN" ? { previewImgUrl: null } : {}),
-    },
+  const operator =
+    operatorIdentity(req) ??
+    (typeof body.operator === "string" && body.operator.trim()
+      ? body.operator.trim().slice(0, 120)
+      : "operator");
+  const outcome = await applyModeration({
+    domain,
+    state,
+    reason,
+    operator,
   });
-  await audit({
-    action: "PROFILE_MODERATED",
-    startupId: startup.id,
-    actorType: "operator",
-    actorRef: operator,
-    detail: `${startup.moderationState} → ${updated.moderationState}: ${updated.moderatedReason ?? "restored"}`.slice(0, 300),
-  });
-  return apiJson({ ok: true, domain, state: updated.moderationState });
+  if (!outcome) return apiError("Startup not found.", { status: 404, code: "NOT_FOUND" });
+  return apiJson({ ok: true, domain: outcome.domain, state: outcome.state });
 }
 
 async function getModerationState(req: NextRequest, { params }: { params: { domain: string } }) {
@@ -65,5 +59,7 @@ async function getModerationState(req: NextRequest, { params }: { params: { doma
     select: { domain: true, moderationState: true, moderatedBy: true, moderatedReason: true, moderatedAt: true, restoredAt: true },
   });
   if (!startup) return apiError("Startup not found.", { status: 404, code: "NOT_FOUND" });
-  return apiJson(startup);
+  // R17-6: the caller's own identity, so an operator can tell a named token
+  // from the shared one before acting — and know what the audit trail will say.
+  return apiJson({ ...startup, operatorIdentity: operatorIdentity(req) });
 }

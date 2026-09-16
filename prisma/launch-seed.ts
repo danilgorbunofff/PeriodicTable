@@ -7,10 +7,18 @@
  * startups/stakes by (element,startup), never mutates existing stakes, re-runs
  * converge. Ranking reuses shared rankStakes + assertLedgerInvariants
  * (lib/pricing.ts); historical ts preserved by design.
- * Usage: DATABASE_URL=... tsx prisma/launch-seed.ts [--fresh]
+ *
+ * R17-5: this is the one irreversible script in the repo, so `--fresh` is
+ * guarded (lib/seedGuard.ts). Against a non-loopback database it refuses
+ * unless both `--allow-remote` and `--confirm=<host>` are given, prints the
+ * host and the row counts of all twelve tables before deleting anything, and
+ * reports the total it wiped. A bare run is the documented production seed
+ * step and stays unguarded — it appends.
+ * Usage: DATABASE_URL=... tsx prisma/launch-seed.ts [--fresh [--allow-remote --confirm=<host>]]
  */
 import { PrismaClient } from "@prisma/client";
 import { rankStakes, assertLedgerInvariants } from "../lib/pricing";
+import { seedGuard } from "../lib/seedGuard";
 
 const prisma = new PrismaClient();
 const FRESH = process.argv.includes("--fresh");
@@ -59,31 +67,72 @@ async function recompute(elementId: number) {
   await prisma.element.update({ where: { id: elementId }, data: { totalPoolUsd: pool, stakeCount: ranked.length, currentLeaderId: leader } });
 }
 
-async function main() {
-  if (FRESH) {
-    // Demo-data reset, FK-safe order (deepest dependents first). Never used in
-    // production flows — only when explicitly passed --fresh.
-    for (const table of [
-      prisma.providerEvent,
-      prisma.claimReservation,
-      prisma.manageToken,
-      prisma.manageSession,
-      prisma.firstClaim,
-      prisma.report,
-      prisma.clickEvent,
-      prisma.auditLog,
-      prisma.activityLog,
-      prisma.payment,
-      prisma.stake,
-      prisma.startup,
-    ]) {
-      await (table as { deleteMany: () => Promise<unknown> }).deleteMany();
-    }
-    await prisma.element.updateMany({
-      data: { totalPoolUsd: 0, stakeCount: 0, currentLeaderId: null },
-    });
-    console.log("launch-seed --fresh: wiped demo rows + reset element aggregates");
+/** Deepest dependents first (FK-safe), with the names the operator is shown
+ *  before `--fresh` deletes anything (R17-5). Name and model travel together
+ *  so a table cannot be wiped without appearing in the printout. */
+type WipeTarget = {
+  name: string;
+  count: () => Promise<number>;
+  deleteMany: () => Promise<unknown>;
+};
+
+function wipeTargets(): WipeTarget[] {
+  const t = (name: string, model: { count: () => Promise<number>; deleteMany: () => Promise<unknown> }): WipeTarget => ({
+    name,
+    count: () => model.count(),
+    deleteMany: () => model.deleteMany(),
+  });
+  return [
+    t("ProviderEvent", prisma.providerEvent),
+    t("ClaimReservation", prisma.claimReservation),
+    t("ManageToken", prisma.manageToken),
+    t("ManageSession", prisma.manageSession),
+    t("FirstClaim", prisma.firstClaim),
+    t("Report", prisma.report),
+    t("ClickEvent", prisma.clickEvent),
+    t("AuditLog", prisma.auditLog),
+    t("ActivityLog", prisma.activityLog),
+    t("Payment", prisma.payment),
+    t("Stake", prisma.stake),
+    t("Startup", prisma.startup),
+  ];
+}
+
+/** The destructive half: print what is about to be lost, then lose it. */
+async function freshWipe(host: string, local: boolean) {
+  const targets = wipeTargets();
+  const counts = await Promise.all(
+    targets.map(async (t) => ({ name: t.name, rows: await t.count() })),
+  );
+  const total = counts.reduce((n, c) => n + c.rows, 0);
+  console.log(
+    `launch-seed --fresh: target ${host}${local ? "" : " (NOT a loopback host)"} — ` +
+      `${total} rows in ${targets.length} tables are about to be deleted:`,
+  );
+  for (const { name, rows } of counts) {
+    console.log(`  ${name.padEnd(18)} ${rows}`);
   }
+  for (const target of targets) await target.deleteMany();
+  await prisma.element.updateMany({
+    data: { totalPoolUsd: 0, stakeCount: 0, currentLeaderId: null },
+  });
+  console.log(
+    `launch-seed --fresh: wiped ${total} rows across ${targets.length} tables + reset element aggregates`,
+  );
+}
+
+async function main() {
+  const guard = seedGuard({
+    fresh: FRESH,
+    databaseUrl: process.env.DATABASE_URL,
+    argv: process.argv.slice(2),
+  });
+  if (!guard.ok) {
+    console.error(`launch-seed: refusing to run — ${guard.message}`);
+    process.exit(2);
+  }
+  if (!FRESH) console.log(`launch-seed: appending to ${guard.host}`);
+  if (FRESH) await freshWipe(guard.host, guard.local);
   for (const s of STAKES) {
     const element = await prisma.element.findUnique({ where: { symbol: s.symbol } });
     if (!element) {

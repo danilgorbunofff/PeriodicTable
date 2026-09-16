@@ -14,6 +14,8 @@ import {
   adminAuth,
   adminGate,
   jobGate,
+  operatorTokens,
+  operatorIdentity,
   ADMIN_LIMIT,
   JOB_LIMIT,
   AUTH_REJECTION_LIMIT,
@@ -22,6 +24,9 @@ import { isDiscoverable, isDirectVisible } from "./moderation";
 
 type Env = Record<string, string | undefined>;
 const env = process.env as unknown as Env;
+/** `next-env.d.ts` requires NODE_ENV on ProcessEnv, so a partial snapshot needs
+ *  the double assertion to reach a function that takes the real one. */
+const penv = (o: Env) => o as unknown as NodeJS.ProcessEnv;
 const saved: Env = {};
 function set(k: string, v: string | undefined) {
   if (saved[k] === undefined && !(k in saved)) saved[k] = env[k];
@@ -56,6 +61,7 @@ beforeEach(() => {
     "VITEST",
     "CRON_SECRET",
     "ADMIN_TOKEN",
+    "ADMIN_TOKENS",
     "DATABASE_URL",
   ]) {
     if (!(k in saved)) saved[k] = env[k];
@@ -256,6 +262,33 @@ describe("jobAuth", () => {
 });
 
 describe("config report route", () => {
+  it("reports the mail driver and the suppression count the email runbook reads (R17-13)", async () => {
+    const { GET } = await import("../app/api/jobs/config/route");
+    const { mailDriver } = await import("./email");
+
+    // Pure: the driver is an env read, so both arms are pinned without a send.
+    expect(mailDriver(penv({}))).toBe("logged");
+    expect(mailDriver(penv({ RESEND_API_KEY: "re_test" }))).toBe("resend");
+
+    set("CRON_SECRET", "s3cr3t");
+    set("DATABASE_URL", LOCAL_DB);
+    const res = await GET(
+      new NextRequest("http://localhost/api/jobs/config") as never,
+    );
+    const body = (await res.json()) as {
+      mail: { driver: string; suppressed: number; failedCount: number } | null;
+    };
+    // `mail` is null when the database cannot answer — that is the block's own
+    // design (R10-1). When it can, ops/email.md's first step reads two fields
+    // that must be there whatever the queue looks like.
+    if (body.mail) {
+      expect(["resend", "logged"]).toContain(body.mail.driver);
+      expect(body.mail.driver).toBe(mailDriver());
+      expect(typeof body.mail.suppressed).toBe("number");
+      expect(typeof body.mail.failedCount).toBe("number");
+    }
+  });
+
   it("gates like the other job endpoints and never echoes values", async () => {
     const { GET } = await import("../app/api/jobs/config/route");
     const call = (h?: Record<string, string>) =>
@@ -408,6 +441,57 @@ describe("adminAuth", () => {
     expect(adminAuth(req("wrong") as never)?.status).toBe(403);
     expect(adminAuth(req() as never)?.status).toBe(403);
     expect(adminAuth(req("opaque-admin") as never)).toBeNull();
+  });
+});
+
+describe("named operator tokens (R17-6)", () => {
+  const req = (bearer?: string) =>
+    new Request(
+      "http://localhost/api/admin/x",
+      bearer ? { headers: { authorization: `Bearer ${bearer}` } } : ({} as RequestInit),
+    );
+
+  it("parses name:token pairs, tolerating spaces and tokens that contain colons", () => {
+    expect(operatorTokens(penv({ ADMIN_TOKENS: undefined }))).toEqual([]);
+    expect(operatorTokens(penv({ ADMIN_TOKENS: "" }))).toEqual([]);
+    expect(
+      operatorTokens(penv({ ADMIN_TOKENS: "alice:aaa, bob:bbb" })),
+    ).toEqual([
+      { name: "alice", token: "aaa" },
+      { name: "bob", token: "bbb" },
+    ]);
+    // indexOf(":") — a base64-ish token with a colon in it still resolves, and
+    // the name is what precedes the *first* separator.
+    expect(operatorTokens(penv({ ADMIN_TOKENS: "carol:a:b:c" }))).toEqual([
+      { name: "carol", token: "a:b:c" },
+    ]);
+    // Malformed entries are skipped rather than treated as anonymous
+    // credentials: a pair with no name or no token must not authenticate.
+    expect(operatorTokens(penv({ ADMIN_TOKENS: ":nope,dan: ,eve:" }))).toEqual([]);
+  });
+
+  it("names a credential only when the list names it, never the shared token", () => {
+    set("ADMIN_TOKEN", "shared");
+    set("ADMIN_TOKENS", "alice:aaa,bob:bbb");
+    expect(operatorIdentity(req("shared") as never)).toBeNull();
+    expect(operatorIdentity(req("bbb") as never)).toBe("bob");
+    expect(operatorIdentity(req("nope") as never)).toBeNull();
+    expect(operatorIdentity(req() as never)).toBeNull();
+  });
+
+  it("adminAuth accepts a named token too, and still refuses everything else", () => {
+    set("ADMIN_TOKEN", "shared");
+    set("ADMIN_TOKENS", "alice:aaa,bob:bbb");
+    expect(adminAuth(req("bbb") as never)).toBeNull();
+    expect(adminAuth(req("shared") as never)).toBeNull();
+    // Removing one entry revokes exactly that person.
+    set("ADMIN_TOKENS", "alice:aaa");
+    expect(adminAuth(req("bbb") as never)?.status).toBe(403);
+    expect(adminAuth(req("aaa") as never)).toBeNull();
+    // Named list only: no shared token, no anonymous exit.
+    set("ADMIN_TOKEN", undefined);
+    expect(adminAuth(req("aaa") as never)).toBeNull();
+    expect(adminAuth(req() as never)?.status).toBe(403);
   });
 });
 

@@ -16,7 +16,8 @@ import { GET as goGET } from "../app/go/[stakeId]/route";
 import { POST as reportPOST } from "../app/api/report/route";
 import { GET as reportsGET } from "../app/api/admin/reports/route";
 import { PATCH as triagePATCH } from "../app/api/admin/reports/[id]/route";
-import { POST as moderatePOST } from "../app/api/admin/startups/[domain]/moderate/route";
+import { GET as moderateGET, POST as moderatePOST } from "../app/api/admin/startups/[domain]/moderate/route";
+import { GET as moderateBatchGET, POST as moderateBatchPOST, MAX_BATCH_DOMAINS } from "../app/api/admin/startups/moderate-batch/route";
 import { POST as outboxRetryPOST } from "../app/api/admin/outbox/retry/route";
 import { POST as outboxPOST } from "../app/api/jobs/outbox/route";
 import { POST as shotPOST } from "../app/api/jobs/screenshot/route";
@@ -437,5 +438,206 @@ describe.skipIf(!hasDb)("preview writes respect moderation (P1-14 retention)", (
     expect((await attachPreview(id, late)).count).toBe(1);
     expect((await prisma.startup.findUniqueOrThrow({ where: { id } })).previewImgUrl).toBe(late);
     await prisma.startup.update({ where: { id }, data: { previewImgUrl: null } });
+  });
+});
+
+/* R17-14: the bulk lever. A wave of abuse arrives as dozens of listings in an
+   hour, and the single-domain route is the wrong shape for that — but a bulk
+   write is also where a takedown can quietly stop meaning what takedown means,
+   so this suite pins the three things that matter: it classifies what it
+   actually changed instead of counting, it refuses the same bodies the single
+   route refuses, and it moves visibility without touching a cent. */
+describe.skipIf(!hasDb)("batch moderation (R17-14)", () => {
+  const BATCH = ["modb1-t.dev", "modb2-t.dev", "modb3-t.dev"];
+  const GHOST = "modbogus-t.dev";
+  const REASON = "wave containment test";
+  let before: { pool: number; count: number };
+
+  const batch = (body: object) =>
+    moderateBatchPOST(req("/api/admin/startups/moderate-batch", jsonInit(body)), {} as never);
+
+  beforeAll(async () => {
+    if (!hasDb) return;
+    for (const domain of BATCH) {
+      const s = await prisma.startup.upsert({
+        where: { domain },
+        create: { domain, title: domain, pitch: "batch fixture pitch", url: `https://${domain}`, logoUrl: "x", email: `${domain.split(".")[0]}@example.com` },
+        update: { moderationState: "VISIBLE", previewImgUrl: null, moderatedBy: null, moderatedReason: null, moderatedAt: null, restoredAt: null },
+      });
+      // One settled stake, so "the money does not move" is a measurement rather
+      // than a claim about rows that were never there.
+      if (domain === BATCH[0]) {
+        await prisma.stake.deleteMany({ where: { startupId: s.id } });
+        const payment = await prisma.payment.create({
+          data: { elementId: T7, startupId: s.id, amountUsd: 7, path: "JOIN", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
+        });
+        const out = await settlePayment(payment.id, { provider: "dev", eventId: `dev-${key()}`, eventType: "dev.test", paid: true });
+        expect(out.outcome).toBe("applied");
+      }
+    }
+    await prisma.startup.updateMany({ where: { domain: { in: BATCH } }, data: { previewImgUrl: "https://iad.microlink.io/batch.png" } });
+    const el = await prisma.element.findUniqueOrThrow({ where: { id: T7 }, select: { totalPoolUsd: true, stakeCount: true } });
+    before = { pool: el.totalPoolUsd, count: el.stakeCount };
+  });
+
+  afterAll(async () => {
+    if (!hasDb) return;
+    await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: BATCH } } } } });
+    await purgeSettledOutbox(prisma, { startup: { domain: { in: BATCH } } });
+    await prisma.activityLog.deleteMany({ where: { domain: { in: BATCH } } });
+    await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: BATCH } } } });
+    await prisma.payment.deleteMany({ where: { startup: { domain: { in: BATCH } } } });
+    await prisma.stake.deleteMany({ where: { elementId: T7, startup: { domain: { in: BATCH } } } });
+    await prisma.startup.deleteMany({ where: { domain: { in: BATCH } } });
+    await prisma.$disconnect();
+  });
+
+  it("is an operator surface: no token, no call", async () => {
+    expect((await moderateBatchPOST(req("/api/admin/startups/moderate-batch", jsonInit({ state: "VISIBLE", domains: BATCH }, false)), {} as never)).status).toBe(403);
+    expect((await moderateBatchPOST(req("/api/admin/startups/moderate-batch", { method: "POST", headers: { "Content-Type": "application/json", authorization: "Bearer not-the-token" }, body: JSON.stringify({ state: "VISIBLE", domains: BATCH }) }), {} as never)).status).toBe(403);
+    // A GET is not a read of anything: the route exports one verb.
+    // The route exports one verb, body or no body: a GET cannot move a listing,
+    // and it must not answer as if it had been asked to.
+    expect((await moderateBatchGET(req("/api/admin/startups/moderate-batch", { headers: adminHeaders }), {} as never)).status).toBe(405);
+  });
+
+  it("classifies the batch rather than counting it, and audits one row per domain", async () => {
+    const res = await batch({
+      state: "HIDDEN",
+      reason: REASON,
+      operator: "tester",
+      // Mixed input on purpose: two spellings of the same domain, a scheme and
+      // a path, a trailing space, a case difference, a typo, and a bare scheme
+      // that normalises to nothing.
+      domains: ["modb1-t.dev", "https://modb2-t.dev/path", " MODB3-T.DEV ", "modb1-t.dev", GHOST, "https://"],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean; state: string; operator: string;
+      changed: { domain: string; from: string }[]; unchanged: string[]; unknown: string[];
+      lost: string[]; publicNumbersUnchanged: boolean;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.state).toBe("HIDDEN");
+    // No named token is configured in this suite, so attribution falls back to
+    // the body — and the caller still gets named in the trail.
+    expect(body.operator).toBe("tester");
+    expect(body.changed.map((c) => c.domain).sort()).toEqual([...BATCH].sort());
+    expect(body.changed.every((c) => c.from === "VISIBLE")).toBe(true);
+    expect(body.unchanged).toEqual([]);
+    expect(body.unknown).toEqual([GHOST]);
+    expect(body.lost).toEqual([]);
+    expect(body.publicNumbersUnchanged).toBe(true);
+
+    const rows = await prisma.startup.findMany({ where: { domain: { in: BATCH } }, select: { moderationState: true, moderatedBy: true, moderatedReason: true, previewImgUrl: true, restoredAt: true } });
+    expect(rows).toHaveLength(BATCH.length);
+    for (const row of rows) {
+      expect(row.moderationState).toBe("HIDDEN");
+      expect(row.moderatedBy).toBe("tester");
+      expect(row.moderatedReason).toBe(REASON);
+      // Retention: hiding clears the stored preview, because it was captured
+      // from a listing we have just decided not to publish.
+      expect(row.previewImgUrl).toBeNull();
+      expect(row.restoredAt).toBeNull();
+    }
+
+    // One row per domain, not one row per call: the trail has to name each
+    // listing it moved.
+    const audits = await prisma.auditLog.findMany({ where: { action: "PROFILE_MODERATED", startup: { domain: { in: BATCH } }, actorRef: "tester" } });
+    expect(audits).toHaveLength(BATCH.length);
+    expect(audits.every((a) => a.detail?.includes("VISIBLE → HIDDEN"))).toBe(true);
+  });
+
+  it("answers a repeat run as unchanged, with no second audit row and no second write", async () => {
+    const res = await batch({ state: "HIDDEN", reason: REASON, operator: "tester", domains: [...BATCH, GHOST] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { changed: unknown[]; unchanged: string[]; unknown: string[] };
+    expect(body.changed).toEqual([]);
+    expect(body.unchanged.sort()).toEqual([...BATCH].sort());
+    expect(body.unknown).toEqual([GHOST]);
+    expect(await prisma.auditLog.count({ where: { action: "PROFILE_MODERATED", actorRef: "tester", startup: { domain: { in: BATCH } } } })).toBe(BATCH.length);
+  });
+
+  it("leaves the money exactly where it was", async () => {
+    const el = await prisma.element.findUniqueOrThrow({ where: { id: T7 }, select: { totalPoolUsd: true, stakeCount: true } });
+    expect({ pool: el.totalPoolUsd, count: el.stakeCount }).toEqual(before);
+    const stake = await prisma.stake.findFirst({ where: { elementId: T7, startup: { domain: BATCH[0] } }, select: { amountUsd: true, clicksDelivered: true } });
+    expect(stake?.amountUsd).toBe(7);
+    const payments = await prisma.payment.findMany({ where: { startup: { domain: { in: BATCH } } }, select: { status: true } });
+    expect(payments).toHaveLength(1);
+    expect(payments[0].status).toBe("PAID");
+  });
+
+  it("refuses the same bodies the single-listing route refuses, at the same boundary", async () => {
+    const bad = async (body: object, code: string) => {
+      const res = await batch(body);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code?: string }).code).toBe(code);
+    };
+    await bad({ state: "GONE", domains: BATCH, reason: REASON }, "BAD_STATE");
+    await bad({ state: "HIDDEN", domains: BATCH }, "REASON_REQUIRED");
+    // A whitespace-only reason is not a reason: it used to satisfy this rule and
+    // land in the trail as three spaces, which is a reason nobody wrote.
+    await bad({ state: "UNLISTED", domains: BATCH, reason: "  " }, "REASON_REQUIRED");
+    const single = await moderatePOST(
+      req("/api/admin/startups/modb1-t.dev/moderate", jsonInit({ state: "UNLISTED", reason: "   " })),
+      { params: { domain: "modb1-t.dev" } } as never
+    );
+    expect(single.status).toBe(400);
+    expect(((await single.json()) as { code?: string }).code).toBe("REASON_REQUIRED");
+    await bad({ state: "HIDDEN", domains: BATCH[0], reason: REASON }, "BAD_DOMAINS");
+    await bad({ state: "VISIBLE", domains: [], reason: REASON }, "BAD_DOMAINS");
+    await bad({ state: "VISIBLE", domains: ["", "   ", "https://"], reason: REASON }, "BAD_DOMAINS");
+    // The cap is a real boundary, not a suggestion: 50 domains are accepted
+    // (all unknown here, so nothing is written) and 51 are refused.
+    const wave = (n: number) => Array.from({ length: n }, (_, i) => `modwave-${i}-t.dev`);
+    const fifty = await batch({ state: "VISIBLE", domains: wave(MAX_BATCH_DOMAINS) });
+    expect(fifty.status).toBe(200);
+    expect(((await fifty.json()) as { unknown: string[] }).unknown).toHaveLength(MAX_BATCH_DOMAINS);
+    await bad({ state: "VISIBLE", domains: wave(MAX_BATCH_DOMAINS + 1) }, "BATCH_TOO_LARGE");
+
+    // Nothing above moved a listing that was already contained.
+    expect(await prisma.startup.count({ where: { domain: { in: BATCH }, moderationState: "VISIBLE" } })).toBe(0);
+  });
+
+  it("records the name a named token proves, and revokes one operator at a time", async () => {
+    penv.ADMIN_TOKENS = "alice:tok-alice,bob:tok-bob";
+    const asAlice = (body: object) =>
+      moderateBatchPOST(req("/api/admin/startups/moderate-batch", { method: "POST", headers: { "Content-Type": "application/json", authorization: "Bearer tok-alice" }, body: JSON.stringify(body) }), {} as never);
+    try {
+      const res = await asAlice({ state: "VISIBLE", domains: BATCH, operator: "someone-else" });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { operator: string; changed: { domain: string; from: string }[] };
+      // The token outranks the body: the trail records who acted, not who was
+      // named in the request.
+      expect(body.operator).toBe("alice");
+      expect(body.changed.map((c) => c.from)).toEqual(["HIDDEN", "HIDDEN", "HIDDEN"]);
+
+      const rows = await prisma.startup.findMany({ where: { domain: { in: BATCH } }, select: { moderationState: true, moderatedBy: true, previewImgUrl: true, restoredAt: true } });
+      for (const row of rows) {
+        expect(row.moderationState).toBe("VISIBLE");
+        expect(row.restoredAt).not.toBeNull();
+        // Restoring is not the exact inverse: the cleared preview stays cleared
+        // until the screenshot cron is asked for it, because a restored tile
+        // showing a stale capture is worse than an empty one.
+        expect(row.previewImgUrl).toBeNull();
+        // The hide's attribution is history and must survive the restore.
+        expect(row.moderatedBy).toBe("tester");
+      }
+      expect(await prisma.auditLog.count({ where: { action: "PROFILE_MODERATED", actorRef: "alice", startup: { domain: { in: BATCH } } } })).toBe(BATCH.length);
+
+      // The single-listing read names the caller too, so an operator can see
+      // what the trail will say before acting.
+      const read = await moderateGET(req(`/api/admin/startups/${BATCH[0]}/moderate`, { headers: { authorization: "Bearer tok-alice" } }), { params: { domain: BATCH[0] } } as never);
+      expect(((await read.json()) as { operatorIdentity: string | null }).operatorIdentity).toBe("alice");
+
+      // Revocation is deleting one entry: bob loses the surface, alice keeps it.
+      penv.ADMIN_TOKENS = "alice:tok-alice";
+      const asBob = await moderateBatchPOST(req("/api/admin/startups/moderate-batch", { method: "POST", headers: { "Content-Type": "application/json", authorization: "Bearer tok-bob" }, body: JSON.stringify({ state: "VISIBLE", domains: BATCH }) }), {} as never);
+      expect(asBob.status).toBe(403);
+      expect((await asAlice({ state: "VISIBLE", domains: BATCH })).status).toBe(200);
+    } finally {
+      delete penv.ADMIN_TOKENS;
+    }
   });
 });

@@ -281,6 +281,18 @@ function digestMatches(expected: string, presented: string): boolean {
  * SDK default. */
 const SIGNATURE_TOLERANCE_SECONDS = 300;
 
+/** The endpoint secrets this deployment will accept a delivery against.
+ *  `STRIPE_WEBHOOK_SECRET_OLD` is only ever a second chance at the same check,
+ *  and only while a current secret exists (R17-2). */
+export function webhookSecrets(
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  const current = env.STRIPE_WEBHOOK_SECRET;
+  if (!current) return [];
+  const old = env.STRIPE_WEBHOOK_SECRET_OLD;
+  return old && old !== current ? [current, old] : [current];
+}
+
 /**
  * Stripe's signature envelope is `t=<unix>,v1=<hex>[,v1=<hex>…]`: HMAC-SHA256
  * over the string `${t}.${rawBody}`. Unlike the provider this replaces, the
@@ -292,6 +304,22 @@ const SIGNATURE_TOLERANCE_SECONDS = 300;
  * observes one delivery could replay it, or re-time it into a forgery, at any
  * point in the future.
  *
+ * R17-2: the rotation window. Stripe lets an endpoint hold two active secrets
+ * for a few minutes and stamps a `v1` for each in that window — which is only
+ * true if the receiver accepts the second one. With `STRIPE_WEBHOOK_SECRET_OLD`
+ * set, either secret verifies for the same tolerance window as any other
+ * delivery, so rotating becomes: add the new secret at Stripe, set both
+ * variables here, deploy, verify a delivery, then unset the old one. Without
+ * that second slot the only honest way to rotate was to deploy the new secret
+ * and accept that every delivery Stripe sent during the switch — a dispute
+ * closing, a refund settling — was refused, which is how a routine rotation
+ * turns into an incident (ops/secrets.md).
+ *
+ * What this deliberately does NOT relax: the timestamp window, the
+ * requirement that a current secret exists at all, and the single-secret
+ * behaviour when the old variable is absent or identical. An expired delivery
+ * is refused no matter which secret signed it.
+ *
  * `nowSeconds` is injectable so the tolerance window is testable without a
  * clock dependency.
  */
@@ -300,8 +328,8 @@ export function verifyStripeSignature(
   signatureHeader: string | null,
   nowSeconds: number = Math.floor(Date.now() / 1000)
 ): boolean {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret || !signatureHeader) return false;
+  const secrets = webhookSecrets();
+  if (secrets.length === 0 || !signatureHeader) return false;
 
   let timestamp: number | null = null;
   const candidates: string[] = [];
@@ -320,13 +348,17 @@ export function verifyStripeSignature(
   if (timestamp === null || candidates.length === 0) return false;
   if (Math.abs(nowSeconds - timestamp) > SIGNATURE_TOLERANCE_SECONDS) return false;
 
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`, "utf8")
-    .digest("hex");
   // The header may carry several signatures while an endpoint secret is being
-  // rotated, so any matching v1 entry is enough.
-  return candidates.some((candidate) => digestMatches(expected, candidate));
+  // rotated, so any matching (secret, v1) pair is enough — and a header signed
+  // by the previous secret is accepted only while the old one is still
+  // configured.
+  return secrets.some((secret) => {
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody}`, "utf8")
+      .digest("hex");
+    return candidates.some((candidate) => digestMatches(expected, candidate));
+  });
 }
 
 type StripeObject = {

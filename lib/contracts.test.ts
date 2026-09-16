@@ -154,10 +154,11 @@ describe("route wiring (R11-3, R11-4)", () => {
   const routes = routeSources();
 
   it("puts every route file behind the shared boundary", () => {
-    // 28 at R11-3; +1 for the icon proxy (R16-3). The count is a tripwire, not
-    // bookkeeping: a new route file has to be added here on purpose, so it
-    // cannot arrive outside the boundary unnoticed.
-    expect(routes).toHaveLength(29);
+    // 28 at R11-3; +1 for the icon proxy (R16-3); +1 for the operator bulk
+    // moderation route (R17-14). The count is a tripwire, not bookkeeping: a new
+    // route file has to be added here on purpose, so it cannot arrive outside
+    // the boundary unnoticed.
+    expect(routes).toHaveLength(30);
     for (const [path, src] of routes) {
       expect(src, `${path} must use apiRoute`).toContain("apiRoute(");
       expect(src, `${path} must not export a raw verb handler`).not.toMatch(
@@ -173,6 +174,7 @@ describe("route wiring (R11-3, R11-4)", () => {
       "admin/reports/[id]/route.ts",
       "admin/reports/route.ts",
       "admin/startups/[domain]/moderate/route.ts",
+      "admin/startups/moderate-batch/route.ts",
       "jobs/abandoned-checkouts/route.ts",
       "jobs/config/route.ts",
       "jobs/outbox/route.ts",

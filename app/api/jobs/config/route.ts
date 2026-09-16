@@ -14,6 +14,7 @@ import {
   type CredentialHealth,
 } from "@/lib/env";
 import { probeStripeKey } from "@/lib/stripe";
+import { mailDriver, suppressedCount } from "@/lib/email";
 import { dueOutboxCount, failedMailHealth } from "@/lib/outbox";
 import { prisma } from "@/lib/prisma";
 import { apiRoute } from "@/lib/route";
@@ -86,11 +87,25 @@ async function getConfig(req: NextRequest) {
   // mail does not make the deployment unservable, and the endpoint must keep
   // meaning "config" for the pinger. Read-only and best-effort — a database
   // that cannot answer reports null rather than turning this into a 500.
-  let mail: { failedCount: number; oldestUnretriedKey: string | null } | null =
-    null;
+  let mail: {
+    driver: "resend" | "logged";
+    suppressed: number;
+    failedCount: number;
+    oldestUnretriedKey: string | null;
+  } | null = null;
   try {
     const health = await failedMailHealth();
-    mail = { failedCount: health.failed, oldestUnretriedKey: health.oldestKey };
+    mail = {
+      // R17-13: the two facts ops/email.md's first step reads and the queue
+      // cannot give — which driver a send will use at all (`logged` means
+      // RESEND_API_KEY is unset, so nothing leaves the building however
+      // healthy the queue looks), and how many addresses we are refusing to
+      // mail. Reads only; the remedy is in the runbook.
+      driver: mailDriver(),
+      suppressed: await suppressedCount(),
+      failedCount: health.failed,
+      oldestUnretriedKey: health.oldestKey,
+    };
   } catch {
     mail = null;
   }

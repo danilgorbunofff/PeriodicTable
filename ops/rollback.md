@@ -1,5 +1,7 @@
 # Rollback Runbook (Phase 5)
 
+Index and auth: `ops/README.md`. This file is about undoing a *deploy*; a payment, a webhook or an email that went wrong has its own runbook, and none of them is fixed by rolling back code (`payments-stuck.md` says this in its first paragraph).
+
 ## One-flag payments kill switch
 - `PAYMENTS_LIVE=false` (server) + `NEXT_PUBLIC_PAYMENTS_LIVE=false` (client) flips
   checkout to `[ Join waitlist ]` via env-only redeploy.
@@ -42,7 +44,17 @@
 3. Deploy Vercel prod 4. Smoke $1 claim → refund/keep 5. Announce
 
 ## DB incidents
-- Bad migrate: `prisma migrate resolve --rolled-back <name>`, restore Neon branch (PITR).
+- **Bad migration.** `prisma migrate resolve --rolled-back <name>` marks a *failed*
+  migration so it can be re-applied; it does **not** undo a successful one, and there
+  are no down migrations (R17-11). Stop the deploy and apply the forward fix as a new
+  migration. Restoring a Neon branch is the only true undo, and it discards everything
+  written since the branch point — the procedure, the freeze-first step and the
+  retention-window decision (D11) are in `database.md` §"Restore".
+- **The check that says whether a restore is even needed:** before touching the
+  branch, read the ledger — `curl -sS -H "Authorization: Bearer $CRON_SECRET"
+  "$APP_URL/api/jobs/reconcile" | jq '{ok, divergent, unapplied, aggregate}'`. Code
+  rollback and data rollback are separate decisions; `ok: true` means the database
+  does not need to be part of this one.
 - `ADD CONSTRAINT` that fails on deploy (0009_data_invariants): the constraint validates
   the rows already present, so a pre-existing violation fails the deploy instead of being
   accepted, and the error names the constraint. Run `0009`'s two pre-flight queries first
@@ -56,5 +68,31 @@
   Rehearse this on a sanitized snapshot with `scripts/rebuild-p1-snapshot.sh`.
 
 ## Abuse/spam
-- Blocklist domain in `lib/validate.ts` `BLOCKED_DOMAINS`, hide stake via report triage,
-  refund via provider dashboard (Stripe). Takedown playbook: `ops/takedown.md`.
+- **Contain with the product, not with a deploy.** One listing: `ops/takedown.md`.
+  A wave: `ops/abuse-wave.md` (`POST /api/admin/startups/moderate-batch`, up to 50
+  domains, preview-preserving `HIDDEN`/`UNLISTED`, restore + `backfill`).
+- Blocklisting a whole domain class is still a `lib/validate.ts` `BLOCKED_DOMAINS`
+  edit plus a ~1.3 min deploy — the last resort, because it is the only lever here
+  that is not reversible from the API.
+- **Money is never part of containment.** Hiding a listing preserves stakes,
+  payments, claims and the public aggregates, and `/api/stats` is hidden-inclusive
+  by design. Refunds are a provider-side action with their own approval rule
+  (`refunds-and-disputes.md`, D14) and happen *per payment*, never as part of a
+  moderation call.
+- The throttle behind intake is per-instance unless Upstash is configured — an open
+  production finding, and D15 (`doc/review/FINDINGS.md`). Do not assume a rate limit
+  is protecting the report path during a distributed wave.
+
+## Rehearsal records
+- `bash scripts/rehearse-release.sh` writes a record file and prints its path as
+  `record: …` on the last line; the run id, base, mode, commit, which credentials were
+  present, every PASS/SKIP/FAIL and the `TOTAL` are in it, and an interrupted run ends
+  `ABORTED exit=<rc> before the tally` rather than looking like a pass (R17-16).
+- Records are ignored by git (`rehearsal-*.log`) and are the only durable evidence a
+  rehearsal happened — keep them with the incident notes for the release they cover,
+  not in `/tmp`.
+
+## When the site itself is down
+- `ops/comms.md` carries the three templates (planned/maintenance, active, resolved)
+  and the list of claims the product can actually back up. Who publishes and where is
+  D16.

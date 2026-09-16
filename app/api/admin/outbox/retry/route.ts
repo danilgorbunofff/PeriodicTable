@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { adminGate } from "@/lib/jobs";
+import { adminGate, operatorIdentity } from "@/lib/jobs";
 import { apiJson, apiError, apiRoute } from "@/lib/route";
 import { audit } from "@/lib/audit";
 
@@ -34,7 +34,9 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
  * rows are completed with zero attempts.
  *
  * R14-9: the reset is audited (`OUTBOX_RETRY`), with the operator's name when the
- * body carries one. A retry is the one privileged action here whose effect is
+ * body carries one — and R17-6 puts a named token (`ADMIN_TOKENS`) ahead of that
+ * string, so the trail names the holder of the credential rather than whatever a
+ * request body claims. A retry is the one privileged action here whose effect is
  * that mail goes out, so a leaked ADMIN_TOKEN used to resend receipts must not be
  * the one operator action with no row in the trail.
  */
@@ -50,7 +52,13 @@ async function retryOutbox(req: NextRequest) {
   if (!body.dedupeKey)
     return apiError("dedupeKey is required.", { status: 400 });
 
-  const operator = typeof body.operator === "string" ? body.operator.slice(0, 120) : "operator";
+  // R17-6: a named token (ADMIN_TOKENS) outranks the body field, exactly as in
+  // the two moderation routes — the trail records who held the credential.
+  const operator =
+    operatorIdentity(req) ??
+    (typeof body.operator === "string" && body.operator.trim()
+      ? body.operator.trim().slice(0, 120)
+      : "operator");
   const row = await prisma.outboxEvent.findUnique({
     where: { dedupeKey: body.dedupeKey },
   });

@@ -255,6 +255,19 @@ const PROD_ENV_ADVISORIES: {
     detail:
       "Resend bounce/complaint webhooks cannot authenticate: set RESEND_WEBHOOK_SECRET (whsec_…) so /api/webhooks/resend can suppress addresses the provider rejects",
   },
+  {
+    // R17-2/R17-4: the rotation overhang. `STRIPE_WEBHOOK_SECRET_OLD` exists so
+    // a rotation can overlap (lib/stripe.ts webhookSecrets), and an overlap
+    // that is never closed is not a rotation — it is a second live secret whose
+    // holder still holds it. The report names it so the window ends on a
+    // deliberate step. `operator`, not `required`: deliveries verify and money
+    // moves either way, but the old credential is not supposed to live here.
+    key: "STRIPE_WEBHOOK_SECRET_OLD",
+    severity: "operator",
+    satisfied: (env) => !env.STRIPE_WEBHOOK_SECRET_OLD,
+    detail:
+      "STRIPE_WEBHOOK_SECRET_OLD is set: a previous endpoint secret is still accepted. Finish the rotation — verify a live delivery, then unset it (ops/secrets.md)",
+  },
 ];
 
 /**

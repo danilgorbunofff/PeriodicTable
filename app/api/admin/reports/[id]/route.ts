@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { adminGate } from "@/lib/jobs";
+import { adminGate, operatorIdentity } from "@/lib/jobs";
 import { apiJson, apiError, apiRoute } from "@/lib/route";
 import { isReportStatus, type ReportStatus } from "@/lib/api";
 import { audit } from "@/lib/audit";
@@ -23,12 +23,20 @@ async function patchReport(req: NextRequest, { params }: { params: { id: string 
   }
   const report = await prisma.report.findUnique({ where: { id: params.id } });
   if (!report) return apiError("Report not found.", { status: 404, code: "NOT_FOUND" });
+  // R17-6: a named token (ADMIN_TOKENS) outranks the body field, so the trail
+  // records who held the credential rather than who the caller said they were.
+  const named = operatorIdentity(req);
+  const reviewedBy =
+    named ??
+    (typeof body.reviewedBy === "string" && body.reviewedBy.trim()
+      ? body.reviewedBy.trim().slice(0, 120)
+      : "operator");
   const updated = await prisma.report.update({
     where: { id: params.id },
     data: {
       ...(body.status ? { status: body.status as ReportStatus } : {}),
       ...(body.note !== undefined ? { note: String(body.note).slice(0, 500) } : {}),
-      reviewedBy: typeof body.reviewedBy === "string" ? body.reviewedBy.slice(0, 120) : "operator",
+      reviewedBy,
       reviewedAt: new Date(),
     },
   });

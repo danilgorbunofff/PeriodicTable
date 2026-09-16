@@ -10,6 +10,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import {
+  mailDriver,
   sendOutbidEmail,
   sendReceiptEmail,
   sendRefundEmail,
@@ -413,6 +414,68 @@ export async function dueOutboxCount(types?: OutboxType[]): Promise<number> {
     WHERE "completedAt" IS NULL AND "nextAttemptAt" <= NOW() AND attempts < ${OUTBOX_MAX_ATTEMPTS}
       ${typeFilter}`;
   return rows[0]?.count ?? 0;
+}
+
+export type OutboxHealth = {
+  driver: "resend" | "logged";
+  /** Undelivered rows a worker tick would claim right now. */
+  due: number;
+  /** Undelivered rows that have spent their attempts: the worker will never
+   *  touch them again, so a person must. */
+  exhausted: number;
+  /** Mail that failed and was never superseded by a success (R10-1). */
+  failed: number;
+  /** The dedupe key of the oldest unresolved mail failure, or null. */
+  oldestKey: string | null;
+  /** How long the oldest undelivered row has been waiting, in hours. */
+  oldestDueHours: number | null;
+  oldestDueAt: string | null;
+  /** When a row was last delivered. The liveness floor: with `due: 0` an old
+   *  stamp means quiet, and with `due > 0` it means the pipeline is dead. */
+  lastDeliveredAt: string | null;
+};
+
+/**
+ * The one question an operator asks about the mail path (R17-13): is anything
+ * stuck, and since when. Answered from `OutboxEvent` (the work queue) plus
+ * `EmailLog`'s unresolved failures — two different kinds of stuck, and the
+ * difference matters: `due` clears itself, `exhausted` and `failed` do not.
+ *
+ * `due` is counted by the claim's own predicate rather than by a second WHERE
+ * clause, so the number cannot drift from what a worker would actually pick up;
+ * `oldestDueHours` is measured from `createdAt` because that is how long the
+ * customer has been waiting, not how long the backoff has been running.
+ */
+export async function outboxHealth(now: Date = new Date()): Promise<OutboxHealth> {
+  const [due, exhausted, oldest, last, mail] = await Promise.all([
+    dueOutboxCount(),
+    prisma.outboxEvent.count({
+      where: { completedAt: null, attempts: { gte: OUTBOX_MAX_ATTEMPTS } },
+    }),
+    prisma.outboxEvent.findFirst({
+      where: { completedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+    prisma.outboxEvent.findFirst({
+      where: { completedAt: { not: null } },
+      orderBy: { completedAt: "desc" },
+      select: { completedAt: true },
+    }),
+    failedMailHealth(),
+  ]);
+  return {
+    driver: mailDriver(),
+    due,
+    exhausted,
+    failed: mail.failed,
+    oldestKey: mail.oldestKey,
+    oldestDueHours: oldest
+      ? Math.max(0, Math.round((now.getTime() - oldest.createdAt.getTime()) / 36_000) / 100)
+      : null,
+    oldestDueAt: oldest ? oldest.createdAt.toISOString() : null,
+    lastDeliveredAt: last?.completedAt ? last.completedAt.toISOString() : null,
+  };
 }
 
 /** Process one bounded batch of due events, inline. Returns

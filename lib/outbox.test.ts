@@ -366,6 +366,33 @@ describe.skipIf(!hasDb)("outbox row lifecycle", () => {
     expect(await retries()).toBe(before + 2);
   });
 
+  /* R17-6: the same precedence the two moderation routes use. A named token is
+     a fact about the credential; the body's `operator` is a claim about the
+     caller — so when the deployment has names, the name wins. */
+  it("records the named token's holder over the name in the body", async () => {
+    penv.ADMIN_TOKENS = "dana:tok-outbox-dana";
+    try {
+      const row = await mk({ attempts: OUTBOX_MAX_ATTEMPTS, lastError: "exhausted" });
+      const res = await outboxRetryPOST(
+        req("/api/admin/outbox/retry", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            authorization: "Bearer tok-outbox-dana",
+          },
+          body: JSON.stringify({ dedupeKey: row.dedupeKey, operator: "someone-else" }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      const written = await prisma.auditLog.findFirstOrThrow({
+        where: { action: "OUTBOX_RETRY", detail: { contains: row.dedupeKey } },
+      });
+      expect(written).toMatchObject({ actorType: "operator", actorRef: "dana" });
+    } finally {
+      delete penv.ADMIN_TOKENS;
+    }
+  });
+
   it("a provider refusal fails its row, and the operator retry puts it back in flight", async () => {
     const row = await mk({
       type: "RECEIPT_EMAIL",

@@ -72,15 +72,70 @@ export function jobAuth(
 
 /** Operator endpoints (moderation triage, outbox retry). ADMIN_TOKEN bearer,
  * timing-safe; 403 when unset OR mismatched — even in development, so a
- * leaked dev database is never one missing header from mutation. */
+ * leaked dev database is never one missing header from mutation.
+ *
+ * R17-6: `ADMIN_TOKENS` adds *named* operators (`name:token,name:token`), and a
+ * named token authenticates here exactly like the shared one. The reason is
+ * attribution rather than secrecy: with one token, the name in
+ * `AuditLog.actorRef` is whatever the caller typed, so the trail records who
+ * claimed to act and revocation is all-or-nothing (one env var, one deploy).
+ * With a named token the route can record the identity the credential proves —
+ * see operatorIdentity() — and removing one operator is deleting one entry.
+ * Both mechanisms may be live at once: the shared token stays for the
+ * break-glass case (D12), and it simply carries no name. */
 export function adminAuth(req: NextRequest): NextResponse | null {
-  const token = process.env.ADMIN_TOKEN;
   const bearer =
     req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
-  if (!token || !bearer || !safeEqual(bearer, token)) {
-    return apiError("forbidden", { status: 403, code: "FORBIDDEN" });
+  const token = process.env.ADMIN_TOKEN;
+  const ok =
+    !!bearer &&
+    ((!!token && safeEqual(bearer, token)) ||
+      operatorTokens().some((t) => safeEqual(bearer, t.token)));
+  if (ok) return null;
+  return apiError("forbidden", { status: 403, code: "FORBIDDEN" });
+}
+
+/** One named operator credential. */
+export type OperatorToken = { name: string; token: string };
+
+/**
+ * Parse `ADMIN_TOKENS` into named credentials. Malformed entries are skipped
+ * rather than fatal: this is an operator convenience variable, and a stray
+ * comma must not take the moderation surface down. Empty when unset — the
+ * single-token posture, which is what production runs today.
+ */
+export function operatorTokens(
+  env: NodeJS.ProcessEnv = process.env,
+): OperatorToken[] {
+  const raw = env.ADMIN_TOKENS;
+  if (!raw) return [];
+  const out: OperatorToken[] = [];
+  for (const entry of raw.split(",")) {
+    const at = entry.indexOf(":");
+    if (at <= 0) continue;
+    const name = entry.slice(0, at).trim().slice(0, 120);
+    const token = entry.slice(at + 1).trim();
+    if (name && token) out.push({ name, token });
   }
-  return null;
+  return out;
+}
+
+/**
+ * The name of the operator whose *token* this request presented, or null when
+ * it presented the unnamed shared one (or nothing at all — a route only asks
+ * after adminGate has already accepted the caller, so null here means "this
+ * deployment has one shared token and no way to name the caller").
+ *
+ * Routes use it as the default attribution for `reviewedBy`/`operator` and for
+ * `AuditLog.actorRef`, ahead of any string the body carries: when a named token
+ * authenticated the call, the name in the trail is a fact rather than a claim.
+ */
+export function operatorIdentity(req: NextRequest): string | null {
+  const bearer =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
+  if (!bearer) return null;
+  const match = operatorTokens().find((t) => safeEqual(bearer, t.token));
+  return match?.name ?? null;
 }
 
 /* ------------------------------------------------------------------ *

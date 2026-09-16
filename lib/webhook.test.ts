@@ -2,11 +2,11 @@
    A provider session id attached to two payments must fail safe (operator
    ERROR), never 500-loop or double-apply. */
 import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must stay first
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 import { POST as webhookPOST } from "../app/api/webhooks/stripe/route";
-import { stripePayloadReversal, verifyStripeSignature } from "./stripe";
+import { stripePayloadReversal, verifyStripeSignature, webhookSecrets } from "./stripe";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -441,5 +441,76 @@ describe("stripe signature verification", () => {
     } finally {
       process.env.STRIPE_WEBHOOK_SECRET = kept;
     }
+  });
+});
+
+/* R17-2: the rotation overlap. `STRIPE_WEBHOOK_SECRET_OLD` exists so a rotation
+   in Stripe's dashboard is not an outage: while both are set, a delivery signed
+   with either is accepted. The ordering rule matters more than the overlap does
+   — a stale second secret must never be able to authenticate on its own, or a
+   leaked old value stays a forgery key forever. */
+describe("stripe webhook secret rotation (R17-2)", () => {
+  const raw = '{"type":"charge.refunded"}';
+  const TS = 1700000000;
+  const sign = (secret: string) =>
+    `t=${TS},v1=${createHmac("sha256", secret).update(`${TS}.${raw}`, "utf8").digest("hex")}`;
+  const saved = {
+    current: process.env.STRIPE_WEBHOOK_SECRET,
+    old: process.env.STRIPE_WEBHOOK_SECRET_OLD,
+  };
+  const restore = () => {
+    for (const [k, v] of [
+      ["STRIPE_WEBHOOK_SECRET", saved.current],
+      ["STRIPE_WEBHOOK_SECRET_OLD", saved.old],
+    ] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+  beforeEach(restore);
+  afterAll(restore);
+
+  it("accepts the current secret, and the previous one only during an overlap", () => {
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_new";
+    expect(verifyStripeSignature(raw, sign("whsec_new"), TS)).toBe(true);
+    // No overlap set: the old value is not a key. This is the case a botched
+    // rotation leaves behind, and it must fail rather than half-work.
+    expect(verifyStripeSignature(raw, sign("whsec_old"), TS)).toBe(false);
+
+    process.env.STRIPE_WEBHOOK_SECRET_OLD = "whsec_old";
+    expect(verifyStripeSignature(raw, sign("whsec_new"), TS)).toBe(true);
+    expect(verifyStripeSignature(raw, sign("whsec_old"), TS)).toBe(true);
+    // A third value is still nobody.
+    expect(verifyStripeSignature(raw, sign("whsec_third"), TS)).toBe(false);
+
+    // Deleting the overlap closes the window: verified after the fact, which is
+    // the state the config advisory is meant to force.
+    delete process.env.STRIPE_WEBHOOK_SECRET_OLD;
+    expect(verifyStripeSignature(raw, sign("whsec_old"), TS)).toBe(false);
+  });
+
+  it("treats a lone STRIPE_WEBHOOK_SECRET_OLD as no secret at all", () => {
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    process.env.STRIPE_WEBHOOK_SECRET_OLD = "whsec_orphan";
+    expect(webhookSecrets()).toEqual([]);
+    expect(webhookSecrets({} as NodeJS.ProcessEnv)).toEqual([]);
+    // Consequence, not decoration: the verifier cannot accept the orphan, so a
+    // half-rotated deploy refuses every delivery instead of accepting an
+    // unmanaged key.
+    expect(verifyStripeSignature(raw, sign("whsec_orphan"), TS)).toBe(false);
+  });
+
+  it("reports which secrets are loaded, without echoing them", () => {
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    delete process.env.STRIPE_WEBHOOK_SECRET_OLD;
+    expect(webhookSecrets()).toEqual([]);
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_a";
+    expect(webhookSecrets()).toEqual(["whsec_a"]);
+    process.env.STRIPE_WEBHOOK_SECRET_OLD = "whsec_b";
+    expect(webhookSecrets()).toEqual(["whsec_a", "whsec_b"]);
+    // An empty overlap string is "not set" — Vercel exports empty-string vars
+    // all the time, and treating one as a key would accept a blank signature.
+    process.env.STRIPE_WEBHOOK_SECRET_OLD = "";
+    expect(webhookSecrets()).toEqual(["whsec_a"]);
   });
 });
