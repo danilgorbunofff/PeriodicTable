@@ -67,7 +67,7 @@ export const CONSENT_VERSION = LEGAL_REVISIONS.rules;
 export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: string }[]> = {
   about: [
     { version: "2026-09-16", note: "The independence clause stopped describing seeded listings as \u201cdemo\u201d, because the site no longer marks them: a seat the operator opens before launch is stated as inventory, never paid for or approved by the company named on it, beatable for a dollar over what it holds, and releasable by the operator." },
-    { version: "2026-09-16", note: "The data paragraph was corrected: it described a city/country we never collect, and listed one processor out of seven. The independence clause now says the seeded demo listings were never paid for, so neither their stake nor their city is real." },
+    { version: "2026-09-16", note: "The data paragraph was corrected: it described a city/country we never collect, and listed one processor out of seven. The independence clause now says the seeded inventory listings were never paid for, so neither their stake nor their city is real." },
   ],
   rules: [
     { version: "2026-09-16", note: "Revised the same day to publish a minimum service term (R20-15): the board is committed to run at least until 9 September 2027, a later date is published here rather than assumed, a stop gets 30 days' notice on this page and by mail to every current holder with the checkout switched off, and the stakes already taken are not refunded. The same section states the permanence the design always assumed and no page said (R20-14): a stake never expires, and an outbid holder's value does not expire with it." },
@@ -78,7 +78,7 @@ export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: stri
     { version: "2026-09-16", note: "Replaced the copyright/DMCA heading with the process that actually runs, and said what a billing request must contain." },
   ],
   privacy: [
-    { version: "2026-09-16", note: "Stopped describing a city on a \u201cdemo\u201d row: the launch inventory writes no city at all now, so no row carries one and there is nothing to explain." },
+    { version: "2026-09-16", note: "Stopped describing a city on a seeded inventory row: the launch inventory writes no city at all now, so no row carries one and there is nothing to explain." },
     { version: "2026-09-16", note: "First published. Every category, processor and retention period was taken from the schema and the writers, not from intent. Revised the same day to describe the analytics consent gate (R18-13): the switch used to be the same thing as the collection, and it now says the script loads only after a notice is accepted, so a visitor who never answers makes no request to Plausible." },
   ],
 };
