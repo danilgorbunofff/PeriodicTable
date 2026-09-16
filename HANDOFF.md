@@ -618,8 +618,14 @@ newest production deployment, not GitHub's commit status (see the traps below).
       exposure), and the fix is a product/routing call rather than a one-liner —
       the page is `"use client"`, so gating on `getProviderMode()` needs either a
       server wrapper that calls `notFound()` or a new `middleware.ts`.
-- [ ] `EMAIL_FROM` is `info@periodictable.lol`; the plan is `hi@…` — align when
-      convenient (both work, same verified domain)
+- [x] `EMAIL_FROM` and the rest of the deployment lead with
+      `info@periodictable.lol`. It is the only mailbox the site publishes: the
+      `hi@`, `hello@`, `payments@`, `abuse@` and `privacy@` boxes quoted in
+      earlier copy were retired, and the receipt, the report fallback and the
+      legal pages all read `SUPPORT_EMAIL` now. Set `EMAIL_FROM` explicitly in
+      Vercel (Production and Preview) to
+      `periodictable.lol <info@periodictable.lol>` — the code fallback is the
+      bare address.
 - [ ] Vercel dashboard Cron Jobs tab should list both daily jobs (visual check)
 
 **Environment traps — do not lose time on these**

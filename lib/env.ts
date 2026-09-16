@@ -314,14 +314,15 @@ export function getProdConfigReport(env: NodeJS.ProcessEnv = process.env): {
     }
   }
   // R16-5: the operator's own identity belongs in the same report as the rest
-  // of the deployment's configuration, because the gaps it names are only
-  // visible to a reader of the legal pages — and a missing statement descriptor
-  // surfaces as a payer who does not recognise a charge, which is a billing
-  // problem long before it is a legal one. Never `required`: an unset operator
-  // name serves traffic, takes money and prints a page; it just cannot be
-  // enforced against, and a monitor that alerts on it would be muted within a
-  // week. Reported here so /api/jobs/config lists it and the checklist has a
-  // line to point at.
+  // of the deployment's configuration, because a missing statement descriptor
+  // surfaces as a payer who does not recognise a charge — a billing problem
+  // long before it is a legal one. Reported here rather than published: the
+  // legal pages name no operator detail at all, so the receipt is the only
+  // surface a payer sees these on. Never `required`: a deployment with neither
+  // value serves traffic, takes money and prints a receipt; it just cannot be
+  // enforced against, and a monitor that alerted on it would be muted within a
+  // week. Kept so /api/jobs/config lists it and the checklist has a line to
+  // point at.
   for (const gap of operatorAdvisories(env)) {
     findings.push({
       key: gap.key,

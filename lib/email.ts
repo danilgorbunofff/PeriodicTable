@@ -24,7 +24,7 @@ import { prisma } from "./prisma";
 import { hashIp } from "./clicks";
 import { logError } from "./log";
 import { joinMin } from "./pricing";
-import { SUPPORT } from "./legal";
+import { SUPPORT_EMAIL } from "./legal";
 import { outbidHtml, outbidSubject } from "../emails/outbid";
 import { outbidReclaimUrl } from "./links";
 import { receiptHtml, receiptSubject } from "../emails/receipt";
@@ -579,10 +579,11 @@ async function deliver(
       },
       body: JSON.stringify({
         from:
-          // R19-7: the sender is a published constant, so the address a buyer
-          // sees in their inbox is one the contact page and `/faq` both name.
+          // The sender is the one published address, so the mailbox a buyer sees
+          // in their inbox is the one the contact page and `/faq` both name — and
+          // a reply to a receipt lands in the same place.
           process.env.EMAIL_FROM ??
-          `periodictable.lol <${SUPPORT.hi}>`,
+          `periodictable.lol <${SUPPORT_EMAIL}>`,
         to,
         subject,
         html,

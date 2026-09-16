@@ -76,10 +76,11 @@ describe("R05-7 report notice", () => {
     expect(esc("a&b<c>d\"e'f")).toBe("a&amp;b&lt;c&gt;d&quot;e&#39;f");
   });
 
-  it("is sent to the abuse inbox, never to the person who reported", () => {
-    // R19-7 re-pointed this assertion: the address is the published constant
-    // now, not a literal, so the route and the contact page cannot drift.
-    expect(reportRoute).toMatch(/REPORT_NOTIFY_EMAIL \?\? SUPPORT\.abuse/);
+  it("is sent to the published mailbox, never to the person who reported", () => {
+    // R19-7 re-pointed this assertion: the address is the published constant,
+    // not a literal, so the route and the contact page cannot drift. There is
+    // one constant, not five: the abuse@ box this used to name was never read.
+    expect(reportRoute).toMatch(/REPORT_NOTIFY_EMAIL \?\? SUPPORT_EMAIL/);
     // The reporter is never an address this route knows: the payload it mails
     // carries only the moderation facts, minus the hashed IP it stores.
     const payload = /payload: \{[\s\S]*?\n      \},/.exec(reportRoute)?.[0] ?? "";

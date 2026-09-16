@@ -30,7 +30,7 @@ import {
   HEARTBEAT_SLACK_MS,
   HEARTBEAT_STALE_MS,
 } from "./jobHeartbeat";
-import { SERVICE_TERM, SERVICE_TERM_SENTENCE, LEGAL_REVISION_LOG, LEGAL_REVISIONS } from "./legal";
+import { SERVICE_TERM, SERVICE_TERM_SENTENCE } from "./legal";
 import { legalCanonicalText } from "./legalDocs";
 import { FAQ_ITEMS } from "./faqDocs";
 
@@ -422,15 +422,16 @@ describe("R20-14/R20-15 the permanence and the term are published, from one sour
     expect(rules).toContain(`${SERVICE_TERM.noticeDays} days`);
     // Whatever the term is, the rules have to say what happens if it is
     // extended — an extendable date with no mechanism is a date nobody can rely
-    // on either way.
-    expect(rules).toMatch(/if we extend it/i);
+    // on either way. There is no log to announce it in any more, so the
+    // mechanism is the section itself: the later date is published here.
+    expect(rules).toMatch(/if the commitment is extended/i);
+    expect(rules).toMatch(/published in this section/i);
     // ...and what happens to stakes on a wind-down, so the "all stakes are final"
     // clause above it is not read as the whole answer.
     expect(rules).toMatch(/not refunded/i);
-    // A change to any of this is a revision, and the log is where it is announced.
-    const entry = LEGAL_REVISION_LOG.rules[0];
-    expect(entry.version).toBe(LEGAL_REVISIONS.rules);
-    expect(entry.note).toContain(SERVICE_TERM.until);
+    // Nothing about the commitment lives outside the document: the floor, the
+    // notice and the extension mechanism are all stated in this section.
+    expect(rules).toMatch(/it is not a warranty/i);
   });
 
   it("answers the same question in the FAQ, in the same words", () => {

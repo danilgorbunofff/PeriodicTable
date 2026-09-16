@@ -518,11 +518,13 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
       })
     );
 
-  it("refuses a checkout that attests to a revision the product no longer shows (R16-7)", async () => {
+  it("refuses a checkout that attests to wording the product no longer serves (R16-7)", async () => {
     // A tab left open across a rules change would otherwise attest to words it
     // never displayed, and the stored record would be a lie about what the
     // payer read. The refusal is a 409 with a code, so a client can tell
-    // "reload" apart from "you forgot to tick the box".
+    // "reload" apart from "you forgot to tick the box". The stamp stays
+    // invisible: nothing on the site prints a version for a reader to compare,
+    // so the only place a stale tab meets it is here.
     const stale = await post16({ attest: true, consentVersion: "1999-01-01" });
     expect(stale.status).toBe(409);
     const staleBody = (await stale.json()) as { code?: string; field?: string; error?: string };
@@ -530,7 +532,7 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
     expect(staleBody.field).toBe("attest");
     expect(staleBody.error).toMatch(/Rules/);
 
-    // Junk is not a version either — a client that sends an object cannot be
+    // Junk does not match either — a client that sends an object cannot be
     // assumed to have shown the page.
     const junk = await post16({ attest: true, consentVersion: { major: 1 } });
     expect(junk.status).toBe(409);
@@ -540,8 +542,9 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
     expect(await prisma.startup.findUnique({ where: { domain: "rt-r16-a.dev" } })).toBeNull();
     expect(await prisma.payment.count({ where: { startup: { domain: "rt-r16-a.dev" } } })).toBe(0);
 
-    // The version in force is accepted, and the row is not merely a yes/no:
-    // it carries the revision, the hash of the words, and the clock.
+    // The stamp in force is accepted, and the row is not merely a yes/no: it
+    // carries the day, the hash of the words, and the clock — the internal
+    // record of what was agreed to, which no page displays.
     const stampedKey = key();
     const ok = await post16({ attest: true, consentVersion: ATTEST_VERSION }, stampedKey);
     expect(ok.status).toBe(200);
@@ -551,9 +554,9 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
     expect(stamped.consentAt).toBeInstanceOf(Date);
     expect(Math.abs(Date.now() - (stamped.consentAt as Date).getTime())).toBeLessThan(120_000);
 
-    // A client older than the version field still checks out — refusing it
-    // would break a page mid-deploy — and is recorded under the same revision,
-    // because that is the revision the server is serving right now.
+    // A client older than the field still checks out — refusing it would break
+    // a page mid-deploy — and is recorded under the stamp in force, because
+    // that is what the server is serving right now.
     const bareKey = key();
     expect((await post16({ attest: true }, bareKey)).status).toBe(200);
     const bare = await prisma.payment.findFirstOrThrow({ where: { idempotencyKey: bareKey } });

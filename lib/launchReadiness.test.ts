@@ -22,7 +22,7 @@ import { FAQ_PATH, FAQ_REVISED } from "./faq";
 import { FAQ_ITEMS, FAQ_META } from "./faqDocs";
 import { twitterSite } from "./shareMeta";
 import { NO_STAKES_YET } from "./activityFace";
-import { SUPPORT } from "./legal";
+import { SUPPORT_EMAIL } from "./legal";
 import { REQUIRED_PROD_ENV } from "./env";
 
 const src = (p: string) =>
@@ -156,21 +156,29 @@ describe("R19-6 no surface restates the ladder by hand", () => {
   });
 });
 
-describe("R19-7 one address per job, published once", () => {
-  it("the sender, the report inbox and the FAQ read the same constants", () => {
-    expect(SUPPORT.hi).toMatch(/^[^@\s]+@[^@\s]+$/);
-    expect(SUPPORT.abuse).toMatch(/^[^@\s]+@[^@\s]+$/);
-    expect(src("lib/email.ts")).toMatch(/SUPPORT\.hi/);
-    expect(src("app/api/report/route.ts")).toMatch(/SUPPORT\.abuse/);
-    expect(src("lib/legalDocs.ts")).toMatch(/SUPPORT\.hi|hello@/);
+describe("R19-7 one address for every job, published once", () => {
+  // The five mailboxes this pass collapsed (`hi@`, `hello@`, `payments@`,
+  // `abuse@`, `privacy@`) existed because a *page* had a job to describe, not
+  // because anyone read them. One mailbox is read, so one mailbox is published:
+  // the sender, the report inbox, the receipt's billing line, the corpus and the
+  // FAQ all name the same constant.
+  it("the sender, the report inbox and the corpus read the same constant", () => {
+    expect(SUPPORT_EMAIL).toMatch(/^[^@\s]+@periodictable\.lol$/);
+    expect(src("lib/email.ts")).toMatch(/SUPPORT_EMAIL/);
+    expect(src("app/api/report/route.ts")).toMatch(/SUPPORT_EMAIL/);
+    expect(src("lib/legalDocs.ts")).toMatch(/SUPPORT_EMAIL/);
+    expect(src("lib/operator.ts")).toMatch(/SUPPORT_EMAIL/);
   });
 
-  it("the legal corpus publishes the same three addresses the pages promise", () => {
+  it("publishes it in the corpus, the FAQ and the legal module, and no other address", () => {
     const faq = FAQ_ITEMS.flatMap((i) => i.a).join("\n");
-    expect(faq).toContain(SUPPORT.hi);
-    expect(faq).toContain(SUPPORT.abuse);
-    for (const address of [SUPPORT.hi, SUPPORT.abuse, SUPPORT.billing]) {
-      expect(src("lib/legal.ts")).toContain(address);
+    expect(faq).toContain(SUPPORT_EMAIL);
+    expect(src("lib/legal.ts")).toContain(SUPPORT_EMAIL);
+    // The retired mailboxes are gone from every source file, not merely unused
+    // in them: a stale recipient is the failure this pins.
+    const retired = ["hi@periodictable.lol", "hello@periodictable.lol", "payments@periodictable.lol", "abuse@periodictable.lol", "privacy@periodictable.lol"];
+    for (const file of ["lib/legal.ts", "lib/legalDocs.ts", "lib/faqDocs.ts", "lib/email.ts", "lib/operator.ts", "app/api/report/route.ts", "emails/receipt.tsx"]) {
+      for (const address of retired) expect(src(file), `${file} still names ${address}`).not.toContain(address);
     }
   });
 });

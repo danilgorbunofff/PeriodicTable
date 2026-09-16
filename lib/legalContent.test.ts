@@ -8,16 +8,19 @@
 
    What is locked here:
      - the digest of each document, so an edit to the words fails the suite until
-       someone consciously bumps `LEGAL_REVISIONS` and records what changed;
+       someone consciously accepts it and moves `LEGAL_UPDATED` with it;
+     - the absence of a version stamp, a change log and a revision history: the
+       documents are not versioned, and the one date that matters is recorded
+       against a payment rather than printed on a page;
      - the claims that a finding turned into a code change (the icon proxy, the
-       analytics event list, the processor list, the mailboxes), each checked
+       analytics event list, the processor list, the single mailbox), each checked
        against the constant the code itself uses, so prose and behaviour cannot
        drift apart in either direction;
      - the consent record: the words hashed are the words the modal renders, and
        a stale version is refused rather than recorded.
 
-   The digests are meant to be updated — in the same commit as the revision bump
-   and the new revision-log entry, never on their own. */
+   The digests are meant to be updated — in the same commit as the copy change,
+   never on their own. */
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import {
@@ -32,12 +35,12 @@ import {
 } from "./legalDocs";
 import {
   CONSENT_STATEMENT,
+  CONSENT_VERSION,
   LEGAL_LINKS,
-  LEGAL_REVISIONS,
-  LEGAL_REVISION_LOG,
   LEGAL_SLUGS,
+  LEGAL_UPDATED,
   RECEIPT_TAX_LINE,
-  SUPPORT,
+  SUPPORT_EMAIL,
   type LegalSlug,
 } from "./legal";
 import {
@@ -49,29 +52,20 @@ import {
 } from "./consent";
 import { ANALYTICS_EVENTS } from "./analytics";
 
-/** sha256 of the canonical text — the same string the page renders, minus the
- * operator's own lines, which are deployment configuration. */
+/** sha256 of the canonical text — the whole of what a visitor reads, since the
+ * operator block that used to be appended is gone. */
 const digest = (slug: LegalSlug) =>
   createHash("sha256").update(legalCanonicalText(slug), "utf8").digest("hex");
 
 const text = (slug: LegalSlug) => legalCanonicalText(slug);
 
-/** Every digest as of the phase-16 fix pass. A failure here is not a broken
- * test: it is the copy asking to be versioned. */
+/** Every digest as of the mailbox/legal rewrite. A failure here is not a broken
+ * test: it is a published word asking to be re-approved. */
 const DIGESTS: Record<LegalSlug, string> = {
-  // Launch-day wording pass on the same revision: the two 2026-09-16 notes in
-  // `LEGAL_REVISION_LOG.about` stopped calling an unpaid operator seat a "demo
-  // listing" and call it inventory, which is the word the clause itself uses.
-  // No obligation changed, so the version stamp does not move.
-  about: "aebc66d0cbdc61152866e38af5f619c143b6cd98c528e038e4dcef02f83e087b",
-  // R20-14/R20-15: revised the same day as the phase-16 pass, so the version
-  // stamp is unchanged and this digest is the only thing that moves — the log
-  // entry (`LEGAL_REVISION_LOG.rules[0]`) is the announcement.
-  rules: "e4d92ed86027689a7e3ea8e2ff0b2d954c9e3a1877d6e8973d8fb2fdb18602a2",
-  contact: "745291c0457b00967ccd9c377c7b862d1511d03353c80ec3fddb520419982008",
-  // Same wording pass as `about`: the privacy note that described a city on a
-  // "demo" row now calls that row a seeded inventory row.
-  privacy: "df8e13a8b434cbc82c51273c1ca5e9b5f8f4cc676b679879dbe2fadd0bda1c0f",
+  about: "9f19d1ad12c350f261a93b307d1198a05dc1404c4d80669e8202f7c0ace5d4fb",
+  rules: "aa6481883f96a09dc72ad83a45002965b3fcd6bd9a08f232a43f6e77dabdbf68",
+  contact: "26fcea6210e671ab857f0450a04fbeb9f571e0bfff2a12d8adb88caa46251385",
+  privacy: "128500cc037fa53d748bf343e633aca9647e541cb6976b859131aa320367cadb",
 };
 
 describe("legal corpus", () => {
@@ -85,44 +79,50 @@ describe("legal corpus", () => {
     }
   });
 
-  it("renders no empty section, and no section that is prose-less unless the operator fills it", () => {
+  it("renders no empty section", () => {
     for (const slug of LEGAL_SLUGS) {
       for (const s of LEGAL_PAGES[slug].sections) {
         expect(s.h.length).toBeGreaterThan(1);
-        if (s.h === "Operator") {
-          // The one deliberate placeholder: filled from configuration (R16-11).
-          expect(s.ps).toEqual([]);
-          continue;
-        }
-        expect(s.ps.length + (s.bullets?.length ?? 0) + (s.table?.length ?? 0)).toBeGreaterThan(0);
+        expect(
+          (s.ps?.length ?? 0) + (s.bullets?.length ?? 0) + (s.table?.length ?? 0),
+          `${slug}: ${s.h}`,
+        ).toBeGreaterThan(0);
       }
     }
   });
 
-  it("prints the operator's lines into the Operator section and nowhere else", () => {
-    const lines = ["Legal entity, established in Testland", "Descriptor: TEST"];
-    const sections = legalSections("about", lines);
-    expect(sections.find((s) => s.h === "Operator")?.ps).toEqual(lines);
-    expect(sections.length).toBe(LEGAL_PAGES.about.sections.length);
-  });
-
-  it("carries a revision stamp and a log entry for every document", () => {
+  it("serves the corpus's own sections, in the order the corpus lists them", () => {
     for (const slug of LEGAL_SLUGS) {
-      const version = LEGAL_REVISIONS[slug];
-      expect(version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      const log = LEGAL_REVISION_LOG[slug];
-      expect(log.length).toBeGreaterThan(0);
-      // The stamp printed on the page is the newest logged revision.
-      expect(log[0].version).toBe(version);
-      expect(log[0].note.length).toBeGreaterThan(20);
-      // And the page quotes it, so a stamp cannot be edited out of the document.
-      expect(text(slug)).toContain(version);
+      expect(legalSections(slug)).toBe(LEGAL_PAGES[slug].sections);
+      expect(legalSections(slug).length).toBeGreaterThan(0);
     }
   });
 
-  it("fails the copy lock when the words change without a version bump", () => {
+  it("prints no version stamp, no change log and no revision history", () => {
     for (const slug of LEGAL_SLUGS) {
-      expect(digest(slug), `the ${slug} copy changed — bump LEGAL_REVISIONS and log it`).toBe(DIGESTS[slug]);
+      const body = text(slug);
+      // The words a visitor reads carry no date and no "as of" claim, and no
+      // heading announcing that anything was revised.
+      expect(body).not.toMatch(/revision history|last revised|last updated|revised on|updated on/i);
+      expect(body).not.toMatch(/\bversion\b/i);
+      expect(body).not.toMatch(/\b20\d{2}-\d{2}-\d{2}\b/);
+      // The only mention of a change log is the rules sentence that says there
+      // is not one, so a reader is never sent looking for the apparatus that was
+      // removed.
+      const mentions = body.match(/change ?log/gi) ?? [];
+      expect(mentions.length).toBeLessThanOrEqual(1);
+      if (mentions.length === 1) expect(body).toMatch(/no change log/i);
+    }
+    // `LEGAL_UPDATED` still exists — the sitemap's `lastmod` and the consent
+    // version read it — it is simply never rendered, which is what the digests
+    // above enforce.
+    expect(LEGAL_UPDATED).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(CONSENT_VERSION).toBe(LEGAL_UPDATED);
+  });
+
+  it("fails the copy lock when the words change without re-approving them", () => {
+    for (const slug of LEGAL_SLUGS) {
+      expect(digest(slug), `the ${slug} copy changed — accept it and move LEGAL_UPDATED`).toBe(DIGESTS[slug]);
     }
   });
 
@@ -175,15 +175,15 @@ describe("legal corpus", () => {
     expect(new Set(PRIVACY_PROCESSORS.map((p) => p.name)).size).toBe(PRIVACY_PROCESSORS.length);
   });
 
-  it("publishes exactly the mailboxes the product publishes, and no others", () => {
+  it("publishes exactly one mailbox — the only one that is read", () => {
     const quoted = new Set<string>();
     for (const slug of LEGAL_SLUGS) {
       for (const m of text(slug).matchAll(/[a-z]+@periodictable\.lol/g)) quoted.add(m[0]);
     }
-    for (const address of Object.values(SUPPORT)) expect(quoted.has(address)).toBe(true);
-    // `hi@` is the sender on outbound mail, not a request mailbox.
-    const known = new Set([...Object.values(SUPPORT), "hi@periodictable.lol"]);
-    for (const address of quoted) expect(known.has(address)).toBe(true);
+    expect([...quoted]).toEqual([SUPPORT_EMAIL]);
+    // The constant is the one address every surface prints, and the corpus names
+    // no second one — which is the whole point of collapsing the five mailboxes.
+    expect(SUPPORT_EMAIL).toMatch(/^[\w.+-]+@periodictable\.lol$/);
   });
 
   it("defines the vocabulary it uses, in the documents that use it (R16-10)", () => {
@@ -208,7 +208,10 @@ describe("legal corpus", () => {
     for (const slug of LEGAL_SLUGS) {
       const body = text(slug);
       expect(body).not.toMatch(/\b(TBD|TODO|FIXME|XXX|Lorem)\b/i);
-      // The operator values render as explicit blanks, never as their own names.
+      // The retired operator block printed these two strings when a value was
+      // unset, and it is gone: no page says an address or a company is
+      // "not published".
+      expect(body).not.toContain("not published in this deployment");
       expect(body).not.toContain("OPERATOR_UNPUBLISHED");
       expect(body).not.toMatch(/\{\{|\}\}/);
     }
@@ -222,9 +225,12 @@ describe("legal corpus", () => {
 });
 
 describe("consent record", () => {
-  it("is the revision the checkout prints and the document stamps", () => {
-    expect(ATTEST_VERSION).toBe(LEGAL_REVISIONS.rules);
+  it("is the version the checkout sends and the record keeps, printed nowhere", () => {
+    expect(ATTEST_VERSION).toBe(CONSENT_VERSION);
     expect(CONSENT_STATEMENT).toContain("I am 18+");
+    // The version is an internal coordinate, not a claim on a page: the four
+    // documents must not quote it.
+    for (const slug of LEGAL_SLUGS) expect(text(slug)).not.toContain(CONSENT_VERSION);
   });
 
   it("hashes the words the modal shows, under the version it shows", () => {

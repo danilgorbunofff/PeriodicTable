@@ -610,10 +610,11 @@ export function CheckoutPreview({
       {/* The agreement moved into the label above, where the checkbox that
           affirms it lives; printing "by continuing you agree to the rules" here
           as well would be a second, unversioned agreement (R16-6). What is left
-          is the payment-security line and the version of the rules the box
-          quotes (R16-7). */}
+          is the payment-security line. The rules are not versioned and print no
+          stamp: the version is recorded with the payment, not shown to the
+          buyer. */}
       <div className="text-xs text-mutedink mt-2 text-center">
-        🔒 Secure payment via Stripe · it&apos;s an ad buy, not a bet · rules version {CONSENT_VERSION}
+        🔒 Secure payment via Stripe · it&apos;s an ad buy, not a bet
       </div>
       {/* R19-4: this is the last screen before money moves, and it is where
           "what happens when someone outbids me" gets asked. The consent label

@@ -3,21 +3,20 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { legalMetadata } from "../../../lib/legalMeta";
 import { LEGAL_PAGES, legalSections } from "../../../lib/legalDocs";
-import { LEGAL_LINKS, LEGAL_REVISIONS, LEGAL_REVISION_LOG, type LegalSlug } from "../../../lib/legal";
-import { operatorLines } from "../../../lib/operator";
+import { LEGAL_LINKS, type LegalSlug } from "../../../lib/legal";
 
-/* The corpus is one route rendering four documents (R16-1 … R16-14).
+/* The corpus is one route rendering four documents.
  *
- * What changed in the phase-16 fix pass, and why the shape is what it is:
- *  - the copy moved out of this file into `lib/legalDocs.ts`, so a test can
- *    import it and fail when a sentence stops matching the code (R16-2, R16-3);
- *  - every document prints the revision it is and carries a dated revision
- *    history, which is the announcement surface §5.7 could not find (R16-7,
- *    R16-12c);
- *  - a fourth document exists — `/legal/privacy` — because the data inventory
- *    had nowhere to live (R16-1);
- *  - the operator's identity, address and governing law render from
- *    configuration, as explicit blanks when unset (R16-11).
+ * The shape is deliberate, and each part of it is load-bearing:
+ *  - the copy lives in `lib/legalDocs.ts` rather than here, so a test can import
+ *    it and fail when a sentence stops matching what the code actually does;
+ *  - every document is plain prose with no version stamp and no revision history,
+ *    because the wording on the page is the wording that applies;
+ *  - nothing about the operator is rendered from configuration. The one contact
+ *    point is an address inside the copy itself, so a missing environment value
+ *    can never appear as a blank or a placeholder on a page a buyer reads;
+ *  - a fourth document exists — `/legal/privacy` — because the data inventory has
+ *    nowhere else to live.
  */
 
 export function generateStaticParams() {
@@ -36,18 +35,17 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
   const slug = params.slug as LegalSlug;
   const page = LEGAL_PAGES[slug];
   if (!page) return notFound();
-  const log = LEGAL_REVISION_LOG[slug] ?? [];
-  const sections = legalSections(slug, operatorLines().map((l) => `${l.label}: ${l.value}`));
+  const sections = legalSections(slug);
   return (
     <main id="main" className="min-h-screen bg-profilebg text-ink">
       <div className="max-w-2xl mx-auto px-4 py-8">
         <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
         <h1 className="font-display text-2xl font-bold mt-3">{page.title}</h1>
-        <div className="text-xs font-bold text-mutedink mt-1">Version {LEGAL_REVISIONS[slug]}</div>
+        <p className="text-sm text-mutedink mt-2 leading-relaxed">{page.desc}</p>
         {sections.map((s) => (
           <section key={s.h} className="mt-5">
             <h2 className="font-display text-base font-bold text-ink">{s.h}</h2>
-            {s.ps.map((p) => (
+            {(s.ps ?? []).map((p) => (
               <p key={p.slice(0, 24)} className="text-sm text-mutedink mt-2 leading-relaxed">{p}</p>
             ))}
             {s.bullets && (
@@ -57,18 +55,18 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
                 ))}
               </ul>
             )}
+            {s.table && (
+              <dl className="mt-2 space-y-1.5">
+                {s.table.map((row) => (
+                  <div key={row.label} className="text-sm text-mutedink leading-relaxed">
+                    <dt className="font-bold inline">{row.label}: </dt>
+                    <dd className="inline">{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
           </section>
         ))}
-        <section className="mt-6">
-          <h2 className="font-display text-base font-bold text-ink">Revision history</h2>
-          <ul className="mt-2 space-y-1.5">
-            {log.map((r) => (
-              <li key={r.version} className="text-sm text-mutedink leading-relaxed pl-4 -indent-4">
-                <span className="font-bold">{r.version}</span> — {r.note}
-              </li>
-            ))}
-          </ul>
-        </section>
         <div className="text-xs text-mutedink mt-8">
           {LEGAL_LINKS.filter((l) => l.href !== `/legal/${slug}`).map((l, i) => (
             <span key={l.href}>

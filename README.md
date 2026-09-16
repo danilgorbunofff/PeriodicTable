@@ -39,7 +39,7 @@ Any Postgres 16 works (Neon/Supabase pooled URI for serverless, local
 | `CLICK_SALT` | default dev salt | **required, private random** |
 | `CRON_SECRET` | optional locally | **required** |
 | `RESEND_API_KEY` / `EMAIL_FROM` | optional (absent = emails logged, not sent) | **required** |
-| `REPORT_NOTIFY_EMAIL` | optional (default `abuse@periodictable.lol`) | optional (default = the abuse address the legal pages print) |
+| `REPORT_NOTIFY_EMAIL` | optional (default `info@periodictable.lol`) | optional (default = the address the legal pages print) |
 | `PAYMENTS_LIVE` / `NEXT_PUBLIC_PAYMENTS_LIVE` | default live (simulator) | **fail-closed**: payments run only when explicitly `"true"` **and** both Stripe keys are set |
 
 Validate production config explicitly (used by CI and the deploy runbook):

@@ -162,7 +162,7 @@ describe("requireProdEnv", () => {
       CLICK_SALT: "a-private-random-value",
       CRON_SECRET: "x",
       RESEND_API_KEY: "x",
-      EMAIL_FROM: "hi@periodictable.lol",
+      EMAIL_FROM: "info@periodictable.lol",
       ADMIN_TOKEN: "opaque-admin",
     });
     expect(() => requireProdEnv(good)).not.toThrow();
@@ -181,7 +181,7 @@ describe("getProdConfigReport", () => {
     CLICK_SALT: "a-private-random-value",
     CRON_SECRET: "x",
     RESEND_API_KEY: "x",
-    EMAIL_FROM: "hi@periodictable.lol",
+    EMAIL_FROM: "info@periodictable.lol",
     ADMIN_TOKEN: "opaque-admin",
     UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
     UPSTASH_REDIS_REST_TOKEN: "x",
@@ -189,11 +189,11 @@ describe("getProdConfigReport", () => {
     // R16-5: a *fully configured* production deployment names its operator. The
     // identity variables are advisory (they never fail `ok`), so this fixture
     // states the whole environment rather than only the variables the site
-    // cannot serve without.
+    // cannot serve without. Four of them, and no more: the documents publish no
+    // operator, so the only values left are the ones a receipt has to name.
     OPERATOR_NAME: "Example Media Ltd",
-    OPERATOR_ADDRESS: "1 Example Street, London",
     OPERATOR_COUNTRY: "England and Wales",
-    OPERATOR_LAW: "England and Wales",
+    OPERATOR_TAX_ID: "GB000000000",
     OPERATOR_DESCRIPTOR: "PERIODICTABLE.LOL",
   };
 
@@ -264,18 +264,22 @@ describe("getProdConfigReport", () => {
   it("lists the operator's own gaps, without failing a deployment that serves and takes money (R16-11, R16-12b)", async () => {
     const { getProdConfigReport, requireProdEnv } = await import("./env");
     const anonymous: Env = { ...FULL };
-    for (const key of ["OPERATOR_NAME", "OPERATOR_ADDRESS", "OPERATOR_COUNTRY", "OPERATOR_LAW", "OPERATOR_DESCRIPTOR"]) {
+    for (const key of ["OPERATOR_NAME", "OPERATOR_COUNTRY", "OPERATOR_TAX_ID", "OPERATOR_DESCRIPTOR"]) {
       delete anonymous[key as keyof Env];
     }
 
+    // Two findings for four unset variables, because only two of them reach a
+    // payer: the name and the country are printed on a receipt *if* they exist
+    // and nothing breaks when they do not, so they raise nothing at all.
     const report = getProdConfigReport(fakeEnv(anonymous));
     expect(report.findings.map((f) => [f.key, f.severity])).toEqual([
-      ["OPERATOR_NAME", "operator"],
-      ["OPERATOR_ADDRESS", "operator"],
-      ["OPERATOR_COUNTRY", "operator"],
-      ["OPERATOR_LAW", "operator"],
       ["OPERATOR_DESCRIPTOR", "operator"],
+      ["OPERATOR_TAX_ID", "operator"],
     ]);
+    // A registration number is the one gap whose absence is legally thin, and
+    // the finding has to say so without inventing a number: most sellers in this
+    // position do not have one, and "set this" would be wrong advice for them.
+    expect(report.findings[1].detail).toContain("Nothing is wrong if none exists");
     // The site is anonymous, not broken: it still serves pages and still takes
     // money, so the report stays `ok` and the pinger stays quiet.
     expect(report.ok).toBe(true);

@@ -21,9 +21,9 @@ export type ReceiptTemplateProps = {
    * the mail can state both the charge and the resulting position instead of
    * letting "$3" read as the whole stake. */
   topUpUsd?: number | null;
-  /** The legal block of the receipt (R16-4, R16-5, R16-7): seller, statement
-   * descriptor, tax position and registration, the rules revision the payer
-   * accepted, the payment reference and where to write before disputing.
+  /** The legal block of the receipt: seller, statement descriptor, tax position
+   * and registration, the day the rules were accepted, the payment reference and
+   * where to write before disputing.
    * Optional so a caller that has none of it still renders a receipt, but
    * `lib/email.ts` always supplies it — and `lib/receiptLegal.test.ts` fails if
    * the sent mail loses it. */
@@ -62,7 +62,7 @@ export function receiptHtml(p: ReceiptTemplateProps) {
       ${p.legal.seller ? legalLine("Sold by", esc(p.legal.seller)) : ""}
       ${p.legal.descriptor ? legalLine("Card statement", `your statement shows <strong>${esc(p.legal.descriptor)}</strong>`) : ""}
       ${legalLine("Tax", `${esc(p.legal.taxLine)}${p.legal.taxId ? ` Registration ${esc(p.legal.taxId)}.` : ""}`)}
-      ${legalLine("Rules", `version ${esc(p.legal.rulesVersion)}${p.legal.rulesAcceptedAt ? ` — the revision you accepted at checkout on ${esc(p.legal.rulesAcceptedAt)}` : ""} · <a href="${esc(p.legal.rulesUrl)}">read them</a>`)}
+      ${legalLine("Rules", `${p.legal.rulesAcceptedAt ? `accepted at checkout on ${esc(p.legal.rulesAcceptedAt)} — ` : ""}<a href="${esc(p.legal.rulesUrl)}">read them</a>`)}
       ${p.legal.reference ? legalLine("Payment reference", esc(p.legal.reference)) : ""}
       ${legalLine("Refunds", `a stake buys advertising delivered on settlement, so it is final: no refunds or withdrawals. If something is wrong with this charge, write to <a href="mailto:${esc(p.legal.billing)}">${esc(p.legal.billing)}</a> before disputing it — this reference is what identifies the payment.`)}
     </div>`

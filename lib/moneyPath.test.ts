@@ -62,7 +62,7 @@ const LAUNCHED = shape({
   CLICK_SALT: "a-private-random-salt",
   CRON_SECRET: "cron-secret",
   RESEND_API_KEY: "re_" + "0".repeat(24),
-  EMAIL_FROM: "receipts@periodictable.lol",
+  EMAIL_FROM: "info@periodictable.lol",
 });
 
 /** An environment, with the unstubbed variables explicitly unset. */

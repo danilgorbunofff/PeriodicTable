@@ -23,7 +23,7 @@
 import { MIN_STAKE, TAKEOVER_MARGIN, TIE_CLEARANCE } from "./pricing";
 import { NO_STAKES_YET } from "./activityFace";
 import { OWNERSHIP_SENTENCE, STAKE_SENTENCE } from "./legalDocs";
-import { SUPPORT, SERVICE_TERM, SERVICE_TERM_SENTENCE } from "./legal";
+import { SUPPORT_EMAIL, SERVICE_TERM, SERVICE_TERM_SENTENCE } from "./legal";
 
 export type FaqItem = { q: string; a: string[] };
 
@@ -72,8 +72,8 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     q: "Can I get my money back?",
     a: [
-      "A stake is final. The checkout asks you to acknowledge that before paying, and the reason is in the rules: the slot is delivered the moment the payment settles — your listing appears on the table and in the leaderboards immediately — and it is bought for one named element, so there are no discretionary refunds, cancellations or withdrawals, including if you are outbid or change your mind.",
-      `If something went wrong with a payment, write to ${SUPPORT.hi} before disputing it — the receipt carries the reference needed to sort it out. If a payment is refunded, the stake behind it is reversed with it: the listing falls back to the previous holder and any position it bought is lost. Nothing on this page removes a refund right the law gives you and that cannot be waived.`,
+      "No. Every stake is final, and the checkout asks you to acknowledge that before paying. The slot is delivered the moment the payment settles — your listing appears on the table and in the leaderboards immediately — and it is bought for one named element, so there are no refunds, cancellations, withdrawals, credits or transfers: not if you are outbid, not if you change your mind, and not for a listing removed for breaking the rules.",
+      `If something went wrong with a charge, write to ${SUPPORT_EMAIL} before disputing it — the receipt carries the reference needed to identify it, and almost every dispute starts as a charge nobody recognised. A dispute opened without writing first is a breach of the rules: the listings can be removed and further stakes refused. Nothing in the rules removes a refund right the law gives you and that cannot be waived.`,
     ],
   },
   {
@@ -92,8 +92,8 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     q: "Something is wrong with a listing — who do I write to?",
     a: [
-      `Report it from the listing's own row on the board, or write to ${SUPPORT.abuse}. Reports are acted on; a listing that breaks the rules is removed.`,
-      `${SUPPORT.hi} reaches a person for everything else, and replying to any mail this site sent you — a receipt, an outbid notice, a confirmation link — arrives in the same inbox.`,
+      `Report it from the listing's own row on the board, or write to ${SUPPORT_EMAIL}. Reports are acted on; a listing that breaks the rules is removed.`,
+      `That one mailbox is the only way to reach the site — there is no telephone number, postal address or ticket system. Replying to any mail this site sent you — a receipt, an outbid notice, a confirmation link — arrives in the same inbox.`,
     ],
   },
   {

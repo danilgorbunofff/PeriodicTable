@@ -15,7 +15,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { receiptHtml, type ReceiptTemplateProps } from "@/emails/receipt";
 import * as operator from "@/lib/operator";
-import { RECEIPT_TAX_LINE, SUPPORT, type ReceiptLegal } from "@/lib/legal";
+import { RECEIPT_TAX_LINE, SUPPORT_EMAIL, type ReceiptLegal } from "@/lib/legal";
 
 const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 
@@ -29,8 +29,8 @@ const BASE: ReceiptTemplateProps = {
   unsubUrl: "https://www.periodictable.lol/api/unsubscribe?token=x",
 };
 
-/* A deployment that knows everything — the same configuration the About page,
-   the rules page and the advisories read (`lib/operator.ts`).
+/* A deployment that knows everything — the configuration the receipt reads and
+   the advisories report on (`lib/operator.ts`). No page prints any of it.
 
    `NodeJS.ProcessEnv` demands `NODE_ENV` (`next-env.d.ts` augments the global),
    so a partial snapshot needs one cast: the adapter is where it happens. */
@@ -67,24 +67,28 @@ describe("the receipt's legal block (R16-4, R16-5, R16-7)", () => {
     expect(html).toContain("pi_123");
   });
 
-  it("names the revision of the rules the payer accepted, which is the one checkout recorded", () => {
+  it("names the day the rules were accepted, and no version of them", () => {
     const html = render(full({ rulesAcceptedAt: "2026-09-16" }));
     expect(html).toContain("Rules");
-    expect(html).toContain("version 2026-09-16");
-    expect(html).toContain("the revision you accepted at checkout on 2026-09-16");
+    // The date is the consent record, not a revision stamp: the documents are
+    // not versioned, so the receipt must not imply a numbered set.
+    expect(html).toContain("accepted at checkout on 2026-09-16");
+    expect(html).not.toMatch(/version \d/);
     // The link is the document itself, not a promise that one exists.
     expect(html).toContain('href="https://www.periodictable.lol/legal/rules"');
   });
 
   it("claims no consent date for a payment that predates the record (R16-6)", () => {
     const html = render(full({ rulesAcceptedAt: null }));
-    expect(html).toContain("version 2026-09-16");
-    expect(html).not.toContain("you accepted at checkout on");
+    expect(html).toContain("Rules");
+    expect(html).toContain("read them");
+    expect(html).not.toContain("accepted at checkout on");
+    expect(html).not.toMatch(/version \d/);
   });
 
   it("tells the payer where to write before disputing, at the billing mailbox", () => {
     const html = render(full());
-    expect(html).toContain(`mailto:${SUPPORT.billing}`);
+    expect(html).toContain(`mailto:${SUPPORT_EMAIL}`);
     expect(html).toContain("before disputing it");
   });
 
@@ -94,10 +98,10 @@ describe("the receipt's legal block (R16-4, R16-5, R16-7)", () => {
     expect(html).not.toContain("Card statement");
     expect(html).not.toContain("Registration");
     expect(html).not.toContain("Payment reference");
-    // Still a document: the tax position, the revision and the mailbox remain.
+    // Still a document: the tax position, the rules link and the mailbox remain.
     expect(html).toContain(RECEIPT_TAX_LINE);
-    expect(html).toContain("version 2026-09-16");
-    expect(html).toContain(`mailto:${SUPPORT.billing}`);
+    expect(html).toContain("read them");
+    expect(html).toContain(`mailto:${SUPPORT_EMAIL}`);
     expect(html).not.toContain("not published in this deployment");
   });
 

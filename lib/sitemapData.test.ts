@@ -3,7 +3,7 @@
    not pass it, which is exactly why crawlers discount `lastmod`. */
 import { describe, it, expect } from "vitest";
 import { ELEMENTS } from "./elements";
-import { LEGAL_REVISIONS, LEGAL_SLUGS } from "./legal";
+import { LEGAL_SLUGS, LEGAL_UPDATED } from "./legal";
 import { FAQ_PATH, FAQ_REVISED } from "./faq";
 import { buildSitemapEntries, type ElementStamp } from "./sitemapData";
 
@@ -39,8 +39,8 @@ describe("buildSitemapEntries", () => {
       { symbol: "H", updatedAt: null },
       { symbol: "He", updatedAt: null },
     ]);
-    // Stakes and elements only: the legal entries and `/faq` always carry their
-    // revision date, which is a real write to that URL rather than a render-time
+    // Stakes and elements only: the legal entries and `/faq` always carry a
+    // release date, which is a real write to that URL rather than a render-time
     // stamp, so only the head of the list can be undated.
     expect(cold.slice(0, 3).some((e) => "lastModified" in e)).toBe(false);
   });
@@ -65,14 +65,17 @@ describe("buildSitemapEntries", () => {
     }
   });
 
-  it("lists every legal document, dated by its own revision (R16-13)", () => {
+  it("lists every legal document, dated by the day its words last changed (R16-13)", () => {
     const base = "https://www.periodictable.lol";
     const entries = buildSitemapEntries(base, []);
     expect(entries).toHaveLength(1 + LEGAL_SLUGS.length + 1);
     for (const slug of LEGAL_SLUGS) {
       const entry = entries.find((e) => e.url === `${base}/legal/${slug}`);
       expect(entry, `/legal/${slug} missing from the sitemap`).toBeDefined();
-      expect(entry?.lastModified).toEqual(new Date(`${LEGAL_REVISIONS[slug]}T00:00:00.000Z`));
+      // One date for the whole corpus: the documents are not versioned, so
+      // there is no per-document revision to read, only the day the block was
+      // last written — which is what a crawler is being told about that URL.
+      expect(entry?.lastModified).toEqual(new Date(`${LEGAL_UPDATED}T00:00:00.000Z`));
     }
     expect(entries[0].url).toBe(`${base}/`);
     expect(entries[1].url).toBe(`${base}/legal/about`);

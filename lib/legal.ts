@@ -1,17 +1,17 @@
-/* The legal corpus' browser-facing half (R16-1, R16-6, R16-11).
+/* The legal corpus' browser-facing half.
  *
  * The four documents themselves are prose and live in `lib/legalDocs.ts`, which
  * only the legal route and the test suite import. What is here is the handful of
- * facts a *client* component legitimately needs — the slugs, each document's
- * revision, the nav links, and the sentence the checkout checkbox affirms — kept
- * in a module small enough that importing it does not pull the whole corpus into
- * a browser bundle.
+ * facts a *client* component legitimately needs — the slugs, the one contact
+ * mailbox, the nav links, the service term the rules and the price ladder both
+ * quote, and the sentence the checkout checkbox affirms — kept in a module small
+ * enough that importing it does not pull the whole corpus into a browser bundle.
  *
- * The split exists for one reason: the version a payer agreed to has to be the
- * version the document printed, and the words recorded have to be the words
- * shown. Both are only true if there is exactly one definition of each, shared
- * by the server that records it, the page that prints it, and the modal that
- * displays it.
+ * Nothing here is printed as a revision. The documents have no version stamp and
+ * no change log; what remains is the *record*: the words shown at checkout are
+ * displayed from this module and hashed on the server, and the date below is what
+ * a recorded consent is measured against, so a payment can be tied to the wording
+ * it was made under without any page telling a visitor which revision they read.
  */
 
 export const LEGAL_SLUGS = ["about", "rules", "contact", "privacy"] as const;
@@ -45,43 +45,20 @@ export const SERVICE_TERM = {
 export const SERVICE_TERM_SENTENCE = `Stakes never expire, and the board is committed to run at least until ${SERVICE_TERM.until}.`;
 
 /**
- * The revision of each document, as it appears in the printed stamp, the
- * revision log and the consent record. Bump it whenever the copy changes: the
- * digest in `lib/legalContent.test.ts` fails the suite if you don't, and the
- * checkout refuses an attestation that quotes an older revision (R16-7).
+ * The date the published documents last changed.
+ *
+ * Nothing prints this. It exists for the two places that genuinely need to know
+ * the wording moved without publishing a revision log: the sitemap's `lastmod`,
+ * and `CONSENT_VERSION`, which is stored on a payment so the checkout can refuse
+ * an attestation quoting older words. Bump it whenever a publishable word in
+ * `lib/legalDocs.ts` changes — the digest in `lib/legalContent.test.ts` fails the
+ * suite if you forget.
  */
-export const LEGAL_REVISIONS: Record<LegalSlug, string> = {
-  about: "2026-09-16",
-  rules: "2026-09-16",
-  contact: "2026-09-16",
-  privacy: "2026-09-16",
-};
+export const LEGAL_UPDATED = "2026-09-16";
 
-/** The revision a stake is bought under — the value printed next to the
- * checkbox, sent with the payment, stored on it and printed on the receipt. */
-export const CONSENT_VERSION = LEGAL_REVISIONS.rules;
-
-/** Dated revision log per document — the only announcement surface there was
- * (§5.7 found none). A material change is a new entry here plus a bumped
- * `LEGAL_REVISIONS` value, which the checkout's version check then enforces. */
-export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: string }[]> = {
-  about: [
-    { version: "2026-09-16", note: "The independence clause stopped describing seeded listings as \u201cdemo\u201d, because the site no longer marks them: a seat the operator opens before launch is stated as inventory, never paid for or approved by the company named on it, beatable for a dollar over what it holds, and releasable by the operator." },
-    { version: "2026-09-16", note: "The data paragraph was corrected: it described a city/country we never collect, and listed one processor out of seven. The independence clause now says the seeded inventory listings were never paid for, so neither their stake nor their city is real." },
-  ],
-  rules: [
-    { version: "2026-09-16", note: "Revised the same day to publish a minimum service term (R20-15): the board is committed to run at least until 9 September 2027, a later date is published here rather than assumed, a stop gets 30 days' notice on this page and by mail to every current holder with the checkout switched off, and the stakes already taken are not refunded. The same section states the permanence the design always assumed and no page said (R20-14): a stake never expires, and an outbid holder's value does not expire with it." },
-    { version: "2026-09-16", note: "Named the seller and the statement descriptor, published the tax position, defined what a stake buys, and versioned the document." },
-  ],
-  contact: [
-    { version: "2026-09-16", note: "Revised the same day to publish hi@periodictable.lol, the address this site's own mail is sent from: the sender header, the receipts and the outbid notices all used it while no page named it, so a reply had nowhere to land (R19-7)." },
-    { version: "2026-09-16", note: "Replaced the copyright/DMCA heading with the process that actually runs, and said what a billing request must contain." },
-  ],
-  privacy: [
-    { version: "2026-09-16", note: "Stopped describing a city on a seeded inventory row: the launch inventory writes no city at all now, so no row carries one and there is nothing to explain." },
-    { version: "2026-09-16", note: "First published. Every category, processor and retention period was taken from the schema and the writers, not from intent. Revised the same day to describe the analytics consent gate (R18-13): the switch used to be the same thing as the collection, and it now says the script loads only after a notice is accepted, so a visitor who never answers makes no request to Plausible." },
-  ],
-};
+/** The wording a stake is bought under — stored with a payment, sent by the
+ * checkout modal, and compared by the checkout route. Never rendered. */
+export const CONSENT_VERSION = LEGAL_UPDATED;
 
 /** Every legal document, in the order the nav lists them. `components/FooterBar.tsx`,
  * the 404/error chrome (`lib/boundaries.ts`) and the document footers all render
@@ -97,20 +74,12 @@ export const LEGAL_LINKS = [
   { href: "/legal/contact", label: "Contact", short: "Contact" },
 ] as const;
 
-/** The mailboxes the product publishes (R19-7). They are constants because the
- * receipt has to name the same billing address the contact page does — a
- * mismatch there is how a payer ends up disputing a charge instead of asking
- * about it. `hi` is the odd one out and is listed here on purpose: it is the
- * address outbound mail is sent from, and until phase 19 it was published
- * nowhere, so a recipient reading the `From:` line had no page telling them
- * what it was. The legal corpus now names it and `/faq` repeats it. */
-export const SUPPORT = {
-  billing: "payments@periodictable.lol",
-  abuse: "abuse@periodictable.lol",
-  privacy: "privacy@periodictable.lol",
-  hello: "hello@periodictable.lol",
-  hi: "hi@periodictable.lol",
-} as const;
+/** The only published mailbox. It is a constant because five surfaces have to
+ * name the same address: the contact page, the privacy page's controller line,
+ * the receipt's billing line, the `From:` header on outbound mail, and the
+ * fallback recipient for a report notification. A mismatch between any two of
+ * them is how a payer ends up disputing a charge instead of asking about it. */
+export const SUPPORT_EMAIL = "info@periodictable.lol";
 
 /** The receipt's tax line (R16-4). The checkout adds no tax — prices are the
  * full amount charged — so this is a statement of fact, not a preference.
@@ -122,13 +91,13 @@ export const SUPPORT = {
  * database does not have. */
 export const RECEIPT_TAX_LINE = "No tax was added to this charge.";
 
-/** Everything the receipt says about the transaction as a legal document
- * (R16-4, R16-5, R16-7, R16-11): who sold it, what the card statement shows,
- * the tax position and registration, which revision of the rules the payer
- * accepted and when, the payment reference, and where to write before
- * disputing. Assembled by `receiptLegal()` in `lib/operator.ts`, which is where
- * the deployment's configured values enter; every field is nullable because a
- * receipt must omit an unknown value rather than print a blank as a fact. */
+/** Everything the receipt says about the transaction as a legal document: who
+ * sold it, what the card statement shows, the tax position, the day the rules
+ * were accepted and where to read them, the payment reference, and where to
+ * write before disputing. Assembled by `receiptLegal()` in `lib/operator.ts`,
+ * which is where the deployment's configured values enter; every field is
+ * nullable because a receipt must omit an unknown value rather than print a
+ * blank as a fact. */
 export type ReceiptLegal = {
   /** "Legal entity, established in X" — omitted when the operator is unset. */
   seller: string | null;
@@ -138,10 +107,9 @@ export type ReceiptLegal = {
   descriptor: string | null;
   taxLine: string;
   taxId: string | null;
-  rulesVersion: string;
   rulesUrl: string;
   /** The day consent was recorded, or null for a payment that predates the
-   * record (R16-6) — in which case the receipt does not claim one. */
+   * record — in which case the receipt does not claim one. */
   rulesAcceptedAt: string | null;
   reference: string | null;
   billing: string;

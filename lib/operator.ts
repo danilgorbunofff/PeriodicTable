@@ -1,63 +1,39 @@
-/* Operator identity, configured or explicitly blank (R16-11).
+/* The little of the operator's identity this product is willing to hold.
  *
- * Doc 16 §5.8 found zero hits for the operator's identity, address, company
- * number or jurisdiction anywhere in the product, and §3.2 A27 found the one
- * sentence that came close ("operated as an independent project; postal address
- * available on request"). This module is the single place those values can come
- * from, and the rule it enforces is that an unset value renders as a labelled
- * blank rather than as a plausible-sounding invention:
+ * The published posture is deliberately minimal: the four documents name no
+ * operator, no company, no postal address and no jurisdiction, and the only
+ * contact point anywhere is `SUPPORT_EMAIL` in `lib/legal.ts`. What is left here
+ * is the handful of values a *receipt* cannot do without, read from the server
+ * environment — never `NEXT_PUBLIC_`, so none of them can be shipped to a browser
+ * as an empty string:
  *
- *   OPERATOR_NAME        legal entity or person operating the site
- *   OPERATOR_ADDRESS     postal address for legal correspondence / service
- *   OPERATOR_COUNTRY     country (or state) of establishment
- *   OPERATOR_LAW         governing law and venue for disputes
- *   OPERATOR_TAX_ID      VAT / company / registration number, if any
+ *   OPERATOR_NAME        a seller name, for a deployment that has a registered entity
+ *   OPERATOR_COUNTRY     the country that entity is established in
+ *   OPERATOR_TAX_ID      VAT / company / registration number, if one exists
  *   OPERATOR_DESCRIPTOR  the descriptor Stripe prints on card statements
  *
- * The same values drive the About page (identity), the rules page and the
- * receipt (descriptor), the contact page (where to write) and the operator
- * advisories in `lib/env.ts` — so the site cannot print one descriptor while the
- * payment provider prints another, and a missing identity shows up in the same
- * status report the operator already reads (R16-12d).
- *
- * Deliberately server-side only: nothing here is `NEXT_PUBLIC_`, so a blank
- * cannot be silently shipped to browsers as an empty string.
+ * Both halves of the rule are load-bearing: an unset value is omitted from the
+ * mail rather than rendered as a labelled blank (a payer cannot act on "not
+ * published in this deployment"), and no page prints any of these at all — the
+ * receipt is the only surface where a payer has to be able to recognise the
+ * charge and the seller behind it.
  */
 
-import { CONSENT_VERSION, RECEIPT_TAX_LINE, SUPPORT, type ReceiptLegal } from "./legal";
+import { RECEIPT_TAX_LINE, SUPPORT_EMAIL, type ReceiptLegal } from "./legal";
 
 export type OperatorInfo = {
   name: string | null;
-  address: string | null;
   country: string | null;
-  law: string | null;
   taxId: string | null;
   descriptor: string | null;
 };
 
-export type OperatorLine = { label: string; value: string; text: string; configured: boolean };
-
 export const OPERATOR_ENV = {
   name: "OPERATOR_NAME",
-  address: "OPERATOR_ADDRESS",
   country: "OPERATOR_COUNTRY",
-  law: "OPERATOR_LAW",
   taxId: "OPERATOR_TAX_ID",
   descriptor: "OPERATOR_DESCRIPTOR",
 } as const;
-
-/** Rendered wherever a configured value is missing: an explicit blank is a
- * statement, a guess is a false claim. */
-export const OPERATOR_UNPUBLISHED = "not published in this deployment";
-
-export const OPERATOR_LABELS: Record<keyof OperatorInfo, string> = {
-  name: "Operator",
-  address: "Postal address",
-  country: "Country of establishment",
-  law: "Governing law and venue",
-  taxId: "Tax / company registration",
-  descriptor: "Card statement descriptor",
-};
 
 function read(env: NodeJS.ProcessEnv, key: string): string | null {
   const raw = env[key];
@@ -69,9 +45,7 @@ function read(env: NodeJS.ProcessEnv, key: string): string | null {
 export function operatorInfo(env: NodeJS.ProcessEnv = process.env): OperatorInfo {
   return {
     name: read(env, OPERATOR_ENV.name),
-    address: read(env, OPERATOR_ENV.address),
     country: read(env, OPERATOR_ENV.country),
-    law: read(env, OPERATOR_ENV.law),
     taxId: read(env, OPERATOR_ENV.taxId),
     descriptor: read(env, OPERATOR_ENV.descriptor),
   };
@@ -90,34 +64,15 @@ export function descriptorIsValid(descriptor: string | null): boolean {
   return /^[A-Z0-9][A-Z0-9 .*-]{4,21}$/.test(descriptor);
 }
 
-/** The About page's operator section, and the input to the acceptance check that
- * every one of these is either published or flagged. */
-export function operatorLines(env: NodeJS.ProcessEnv = process.env): OperatorLine[] {
-  const info = operatorInfo(env);
-  const keys = Object.keys(OPERATOR_LABELS) as (keyof OperatorInfo)[];
-  return keys.map((key) => {
-    const value = info[key];
-    const label = OPERATOR_LABELS[key];
-    return {
-      label,
-      value: value ?? OPERATOR_UNPUBLISHED,
-      text: `${label}: ${value ?? OPERATOR_UNPUBLISHED}`,
-      configured: value !== null,
-    };
-  });
-}
-
 /**
- * The receipt's legal block (R16-4, R16-5, R16-7), assembled from the same
- * configuration the pages print — so the descriptor a payer compares against
- * their statement is the one the rules page published, and the rules version on
- * the receipt is the one the checkout recorded.
+ * The receipt's legal block, assembled from the deployment's configuration.
  *
- * Nulls are deliberate: an unset operator name, descriptor or tax id is omitted
- * from the mail rather than rendered as `OPERATOR_UNPUBLISHED`. A payer cannot
- * act on "not published in this deployment", and a receipt is the wrong place to
- * teach them the deployment's gaps — the About page and the operator advisories
- * are where those show up.
+ * Nulls are deliberate. An unset seller name, country, descriptor or tax id is
+ * omitted from the mail rather than rendered as a placeholder: the block exists
+ * to let a payer recognise a charge, and a line that says nothing is worse than
+ * no line. There is no rules *version* on it either — the documents are not
+ * versioned — only the day the wording was accepted and where to read it, which
+ * is what a dispute over "what did I agree to" turns on.
  */
 export function receiptLegal(opts: {
   rulesUrl: string;
@@ -132,28 +87,29 @@ export function receiptLegal(opts: {
     descriptor: descriptorIsValid(info.descriptor) ? info.descriptor : null,
     taxLine: RECEIPT_TAX_LINE,
     taxId: info.taxId,
-    rulesVersion: CONSENT_VERSION,
     rulesUrl: opts.rulesUrl,
-    // Day precision on purpose: the record exists to identify the revision
+    // Day precision on purpose: the record exists to identify the wording
     // accepted, and a receipt that prints a time in the deployment's zone
     // invites a dispute about the clock instead of the charge.
     rulesAcceptedAt: opts.consentAt ? opts.consentAt.toISOString().slice(0, 10) : null,
     reference: opts.reference ?? null,
-    billing: SUPPORT.billing,
+    billing: SUPPORT_EMAIL,
   };
 }
 
-/** The operator-facing gaps, phrased as advisories for `lib/env.ts` (R16-12b).
- * Only the fields a buyer or a regulator needs are listed here; the legal text
- * itself is versioned in `lib/legalDocs.ts`. */
+/** The operator-facing gaps, phrased as advisories for `lib/env.ts`.
+ *
+ * Only two things are listed, because only two things in this module reach a
+ * payer: the statement descriptor (without it a charge cannot be recognised, and
+ * an invalid one is refused or rewritten by Stripe) and a registration number
+ * (which a receipt legally has to name where one exists). The published pages
+ * name neither, so a missing value breaks nothing a visitor can see — which is
+ * why these are advisories in a status report rather than a startup failure. */
 export function operatorAdvisories(env: NodeJS.ProcessEnv = process.env): { key: string; reason: string }[] {
   const info = operatorInfo(env);
   const out: { key: string; reason: string }[] = [];
-  if (!info.name) out.push({ key: OPERATOR_ENV.name, reason: "the site names no operator; the About page prints a blank. Configure a legal entity or person." });
-  if (!info.address) out.push({ key: OPERATOR_ENV.address, reason: "no postal address for legal correspondence or service of process. Configure one, or accept that complaints have no address to be served on." });
-  if (!info.country) out.push({ key: OPERATOR_ENV.country, reason: "the country of establishment is unset, so the governing-law statement on the About page is incomplete." });
-  if (!info.law) out.push({ key: OPERATOR_ENV.law, reason: "no governing law or venue is published for disputes." });
-  if (!info.descriptor) out.push({ key: OPERATOR_ENV.descriptor, reason: "no card-statement descriptor is published, so a charge cannot be recognised from the site or the receipt. Set the value Stripe prints." });
+  if (!info.descriptor) out.push({ key: OPERATOR_ENV.descriptor, reason: "no card-statement descriptor is configured, so a charge cannot be recognised from the receipt. Set the value Stripe prints." });
   else if (!descriptorIsValid(info.descriptor)) out.push({ key: OPERATOR_ENV.descriptor, reason: `descriptor "${info.descriptor}" is not a valid statement descriptor (5–22 characters, A–Z 0–9 space . * -); Stripe will reject or rewrite it.` });
+  if (!info.taxId) out.push({ key: OPERATOR_ENV.taxId, reason: "no tax or company registration number is configured. Nothing is wrong if none exists — but where one does, the receipt has to name it, and until this is set no receipt does." });
   return out;
 }

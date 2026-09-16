@@ -95,7 +95,11 @@ describe("the route is wired to it (R02-7)", () => {
       const page = LEGAL_PAGES[slug];
       expect(page.desc.length).toBeGreaterThan(60);
       expect(page.sections.length).toBeGreaterThan(0);
-      expect(page.sections.every((sec) => sec.ps.length > 0 || sec.h === "Operator")).toBe(true);
+      // Every section carries content, of whichever shape it declared: prose,
+      // bullets or a table. (A section with none is a heading over a blank.)
+      const filled = (sec: (typeof page.sections)[number]) =>
+        (sec.ps?.length ?? 0) + (sec.bullets?.length ?? 0) + (sec.table?.length ?? 0) > 0;
+      expect(page.sections.every(filled)).toBe(true);
     }
   });
 
