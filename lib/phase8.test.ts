@@ -30,7 +30,8 @@ import {
   ABANDON_MAX_BATCH,
 } from "./abandonedCheckouts";
 
-const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8");
+const read = (...p: string[]) =>
+  readFileSync(join(__dirname, "..", ...p), "utf8");
 const E = ProviderEventOutcome;
 
 describe("a decision on file is never rewritten (R08-1)", () => {
@@ -44,12 +45,16 @@ describe("a decision on file is never rewritten (R08-1)", () => {
   ] as const;
 
   it("writes the first delivery for an event id", () => {
-    expect(providerEventUpdate(null, { outcome: E.APPLIED, detail: "settled" })).toEqual({
+    expect(
+      providerEventUpdate(null, { outcome: E.APPLIED, detail: "settled" }),
+    ).toEqual({
       outcome: E.APPLIED,
       detail: "settled",
     });
     // No detail is a valid record of a delivery that carries none.
-    expect(providerEventUpdate(null, { outcome: E.IGNORED, detail: null })).toEqual({
+    expect(
+      providerEventUpdate(null, { outcome: E.IGNORED, detail: null }),
+    ).toEqual({
       outcome: E.IGNORED,
       detail: null,
     });
@@ -59,21 +64,41 @@ describe("a decision on file is never rewritten (R08-1)", () => {
     // The exact regression: an APPLIED row, then the same event id again.
     // Nothing is written — not the outcome, not the detail.
     for (const outcome of terminal) {
-      expect(providerEventUpdate({ outcome: E.APPLIED, detail: "settled" }, { outcome, detail: "duplicate" })).toBeNull();
-      expect(providerEventUpdate({ outcome, detail: null }, { outcome: E.APPLIED, detail: "settled" })).toBeNull();
+      expect(
+        providerEventUpdate(
+          { outcome: E.APPLIED, detail: "settled" },
+          { outcome, detail: "duplicate" },
+        ),
+      ).toBeNull();
+      expect(
+        providerEventUpdate(
+          { outcome, detail: null },
+          { outcome: E.APPLIED, detail: "settled" },
+        ),
+      ).toBeNull();
     }
   });
 
   it("lets a later attempt replace a failed one", () => {
     // The one non-terminal outcome: the row says "this attempt failed", and the
     // duplicate guards skip an ERROR row for that same reason.
-    expect(providerEventUpdate({ outcome: E.ERROR, detail: "amount-mismatch" }, { outcome: E.APPLIED, detail: "settled" })).toEqual({
+    expect(
+      providerEventUpdate(
+        { outcome: E.ERROR, detail: "amount-mismatch" },
+        { outcome: E.APPLIED, detail: "settled" },
+      ),
+    ).toEqual({
       outcome: E.APPLIED,
       detail: "settled",
     });
     // Now that it succeeded, the rejection text must not follow it into a row
     // that claims the money applied cleanly.
-    expect(providerEventUpdate({ outcome: E.ERROR, detail: "amount-mismatch" }, { outcome: E.APPLIED, detail: null })).toEqual({
+    expect(
+      providerEventUpdate(
+        { outcome: E.ERROR, detail: "amount-mismatch" },
+        { outcome: E.APPLIED, detail: null },
+      ),
+    ).toEqual({
       outcome: E.APPLIED,
       detail: null,
     });
@@ -82,16 +107,28 @@ describe("a decision on file is never rewritten (R08-1)", () => {
   it("never erases the explanation of a failed attempt", () => {
     // A retry that fails again without stating a reason keeps the reason: the
     // detail is the only thing an operator has to act on.
-    expect(providerEventUpdate({ outcome: E.ERROR, detail: "amount-mismatch" }, { outcome: E.ERROR, detail: null })).toEqual({
+    expect(
+      providerEventUpdate(
+        { outcome: E.ERROR, detail: "amount-mismatch" },
+        { outcome: E.ERROR, detail: null },
+      ),
+    ).toEqual({
       outcome: E.ERROR,
       detail: "amount-mismatch",
     });
-    expect(providerEventUpdate({ outcome: E.ERROR, detail: "amount-mismatch" }, { outcome: E.ERROR, detail: "reference-claimed:cs_1" })).toEqual({
+    expect(
+      providerEventUpdate(
+        { outcome: E.ERROR, detail: "amount-mismatch" },
+        { outcome: E.ERROR, detail: "reference-claimed:cs_1" },
+      ),
+    ).toEqual({
       outcome: E.ERROR,
       detail: "reference-claimed:cs_1",
     });
     // A first failure with no detail stays a row with no detail.
-    expect(providerEventUpdate(null, { outcome: E.ERROR, detail: null })).toEqual({ outcome: E.ERROR, detail: null });
+    expect(
+      providerEventUpdate(null, { outcome: E.ERROR, detail: null }),
+    ).toEqual({ outcome: E.ERROR, detail: null });
   });
 });
 
@@ -105,10 +142,16 @@ describe("one writer for the register (R08-1, R08-7)", () => {
       "lib/abandonedCheckouts.ts",
       "lib/outbox.ts",
     ];
-    const writers = files.filter((f) => read(f).includes("providerEvent.upsert("));
+    const writers = files.filter((f) =>
+      read(f).includes("providerEvent.upsert("),
+    );
     expect(writers).toEqual(["lib/settle.ts"]);
-    expect(read("lib/settle.ts")).toContain("export async function recordProviderEvent(");
-    expect(read("lib/settle.ts")).toContain("export function providerEventUpdate(");
+    expect(read("lib/settle.ts")).toContain(
+      "export async function recordProviderEvent(",
+    );
+    expect(read("lib/settle.ts")).toContain(
+      "export function providerEventUpdate(",
+    );
   });
 
   it("records every delivery the webhook route decides on", () => {
@@ -140,17 +183,24 @@ describe("one writer for the register (R08-1, R08-7)", () => {
 
   it("keeps the register's attribution columns on the row, not behind the FK (R08-7)", () => {
     const schema = read("prisma/schema.prisma");
-    const model = schema.slice(schema.indexOf("model ProviderEvent"), schema.indexOf("model ProviderEvent") + 1200);
+    const model = schema.slice(
+      schema.indexOf("model ProviderEvent"),
+      schema.indexOf("model ProviderEvent") + 1200,
+    );
     expect(model).toContain("elementId");
     expect(model).toContain("startupId");
     expect(model).toContain("@@index([outcome, createdAt])");
     // The index is what the reconcile report scans; the columns must not be
     // relations, because a relation is exactly what nulls out on delete.
     expect(model).not.toMatch(/elementId\s+Int\?.*@relation/);
-    const migration = read("prisma/migrations/0007_provider_event_attribution/migration.sql");
+    const migration = read(
+      "prisma/migrations/0007_provider_event_attribution/migration.sql",
+    );
     expect(migration).toContain('ADD COLUMN     "elementId" INTEGER');
     expect(migration).toContain('ADD COLUMN     "startupId" TEXT');
-    expect(migration).toContain('CREATE INDEX "ProviderEvent_outcome_createdAt_idx"');
+    expect(migration).toContain(
+      'CREATE INDEX "ProviderEvent_outcome_createdAt_idx"',
+    );
   });
 });
 
@@ -177,7 +227,9 @@ describe("the buyer is told their money came back (R08-2)", () => {
 
   it("quotes the provider reference only when there is one", () => {
     expect(refundHtml(base)).not.toContain("reference ");
-    expect(refundHtml({ ...base, providerRef: "cs_test_123" })).toContain("reference cs_test_123");
+    expect(refundHtml({ ...base, providerRef: "cs_test_123" })).toContain(
+      "reference cs_test_123",
+    );
   });
 
   it("does not sell anything to someone whose money was just returned", () => {
@@ -191,7 +243,9 @@ describe("the buyer is told their money came back (R08-2)", () => {
     // The domain is user-supplied at checkout; the two other templates that
     // print it escape it, and a mail body is the one place an operator cannot
     // fix a rendering surprise.
-    expect(refundHtml({ ...base, domain: '<img src=x onerror="alert(1)">' })).not.toContain("<img");
+    expect(
+      refundHtml({ ...base, domain: '<img src=x onerror="alert(1)">' }),
+    ).not.toContain("<img");
   });
 
   it("is delivered as its own outbox type, inside the reversing transaction", () => {
@@ -229,20 +283,33 @@ describe("the buyer is told their money came back (R08-2)", () => {
 
 describe("a declined attempt is not noise (R08-6)", () => {
   it("classifies a single declined card attempt", () => {
-    expect(stripePayloadIsDeclined({ type: "payment_intent.payment_failed", data: {} })).toBe(true);
+    expect(
+      stripePayloadIsDeclined({
+        type: "payment_intent.payment_failed",
+        data: {},
+      }),
+    ).toBe(true);
   });
 
   it("does not confuse it with a failure, a payment, or a reversal", () => {
-    expect(stripePayloadIsDeclined({ type: "checkout.session.expired", data: {} })).toBe(false);
-    expect(stripePayloadIsDeclined({ type: "checkout.session.completed", data: {} })).toBe(false);
-    expect(stripePayloadIsDeclined({ type: "charge.refunded", data: {} })).toBe(false);
+    expect(
+      stripePayloadIsDeclined({ type: "checkout.session.expired", data: {} }),
+    ).toBe(false);
+    expect(
+      stripePayloadIsDeclined({ type: "checkout.session.completed", data: {} }),
+    ).toBe(false);
+    expect(stripePayloadIsDeclined({ type: "charge.refunded", data: {} })).toBe(
+      false,
+    );
     expect(stripePayloadIsDeclined({})).toBe(false);
     expect(stripePayloadIsDeclined(null)).toBe(false);
   });
 
   it("reaches the register as a declined attempt, with the payment untouched", () => {
     const route = read("app/api/webhooks/stripe/route.ts");
-    expect(route).toContain('detail: stripePayloadIsDeclined(payload) ? "declined-attempt" : "unrelated-event"');
+    expect(route).toContain(
+      'detail: stripePayloadIsDeclined(payload) ? "declined-attempt" : "unrelated-event"',
+    );
     // Status quo kept: a declined attempt must not cancel the session.
     expect(route).toContain('outcome: "ignored"');
   });
@@ -260,9 +327,15 @@ describe("an abandoned checkout stops being pending (R08-5)", () => {
   it("requires pending, no provider session, and age", () => {
     expect(isAbandonable(row())).toBe(true);
     // Too young: the create response may still be in flight for this one.
-    expect(isAbandonable(row({ createdAt: new Date(Date.now() - 60_000) }))).toBe(false);
+    expect(
+      isAbandonable(row({ createdAt: new Date(Date.now() - 60_000) })),
+    ).toBe(false);
     // A buyer can still be at a page we already opened.
-    expect(isAbandonable(row({ providerCheckoutUrl: "https://checkout.stripe.com/c/pay/cs_1" }))).toBe(false);
+    expect(
+      isAbandonable(
+        row({ providerCheckoutUrl: "https://checkout.stripe.com/c/pay/cs_1" }),
+      ),
+    ).toBe(false);
     // A reference means a charge exists or may exist; never silently closed.
     expect(isAbandonable(row({ providerRef: "cs_1" }))).toBe(false);
   });
@@ -280,22 +353,35 @@ describe("an abandoned checkout stops being pending (R08-5)", () => {
 
   it("is strictly older than the horizon, not equal to it", () => {
     const now = new Date("2026-01-02T00:00:00Z");
-    expect(abandonCutoff(now).getTime()).toBe(now.getTime() - CHECKOUT_ABANDON_TTL_MS);
+    expect(abandonCutoff(now).getTime()).toBe(
+      now.getTime() - CHECKOUT_ABANDON_TTL_MS,
+    );
     const atCutoff = new Date(abandonCutoff(now));
     expect(isAbandonable(row({ createdAt: atCutoff }), now)).toBe(false);
-    expect(isAbandonable(row({ createdAt: new Date(atCutoff.getTime() - 1) }), now)).toBe(true);
+    expect(
+      isAbandonable(row({ createdAt: new Date(atCutoff.getTime() - 1) }), now),
+    ).toBe(true);
   });
 
   it("is exposed as an authenticated, bounded job", () => {
     const route = read("app/api/jobs/abandoned-checkouts/route.ts");
     expect(route).toContain("jobGate");
     expect(route).toContain("ABANDON_MAX_BATCH");
-    // Exactly these two verbs, both through the route boundary that fills in
-    // the 405/OPTIONS answers and the request id (R11-3).
-    expect(route).toMatch(/apiRoute\(\{ GET: \w+, POST: \w+ \}\)/);
+    // Both verbs through the route boundary that fills in the 405/OPTIONS
+    // answers and the request id (R11-3). Every route destructures all seven
+    // verb names since R11-3 — the boundary is what answers the ones a route
+    // does not implement — so what this pins is that two are implemented.
+    expect(route).toMatch(
+      /export const \{ GET, POST, PUT, PATCH, DELETE, OPTIONS \} = apiRoute\(\{/,
+    );
+    expect(route).toMatch(/^ {2}GET: \w+,$/m);
+    expect(route).toMatch(/^ {2}POST: \w+,$/m);
+    expect(route).not.toMatch(/^ {2}(PUT|PATCH|DELETE): /m);
     // The status it writes has to be reachable and auditable, or CANCELED is
     // still a state nothing produces.
-    expect(read("lib/abandonedCheckouts.ts")).toContain("status: PaymentStatus.CANCELED");
+    expect(read("lib/abandonedCheckouts.ts")).toContain(
+      "status: PaymentStatus.CANCELED",
+    );
     expect(read("lib/audit.ts")).toContain('"CHECKOUT_ABANDONED"');
     expect(ABANDON_MAX_BATCH).toBeGreaterThan(0);
   });
@@ -305,13 +391,22 @@ describe("money that contradicts itself reaches a human (R08-3)", () => {
   it("answers 503 for the three findings that can only mean a real defect", () => {
     const route = read("app/api/jobs/reconcile/route.ts");
     // Three since R12-2 added `aggregate`: a drifted stored aggregate is the
-    // same class of claim as the other two — it cannot be a quiet week.
-    expect(route).toContain(
-      "const failing = divergentRows.length > 0 || unappliedRows.length > 0 || aggregateRows.length > 0;"
-    );
-    expect(route).toContain("status: failing ? 503 : 200");
+    // same class of claim as the other two — it cannot be a quiet week. The
+    // expression is read out of the source rather than matched as one line, so
+    // a reformat cannot pass for a change of policy.
+    const failing = /const failing =([\s\S]*?);/.exec(route)?.[1] ?? "";
+    expect(failing).not.toBe("");
+    for (const arm of [
+      "divergentRows.length > 0",
+      "unappliedRows.length > 0",
+      "aggregateRows.length > 0",
+    ]) {
+      expect(failing).toContain(arm);
+    }
     // The advisory findings must not be in that expression: a report that pages
     // on them is muted before the money case ever fires.
+    expect(failing).not.toContain("stale");
+    expect(route).toContain("status: failing ? 503 : 200");
     expect(route).toContain("unapplied: {");
     expect(route).toContain("stale: {");
   });
@@ -325,7 +420,9 @@ describe("money that contradicts itself reaches a human (R08-3)", () => {
     // PENDING = captured and never applied; PAID past its paidAt = a reversal
     // that never unwound. Both are the money case.
     expect(route).toContain('if (p.status === "PENDING") return true;');
-    expect(route).toContain('return p.status === "PAID" && p.paidAt !== null && r.createdAt > p.paidAt;');
+    expect(route).toContain(
+      'return p.status === "PAID" && p.paidAt !== null && r.createdAt > p.paidAt;',
+    );
   });
 
   it("is polled every ten minutes, and the money step runs first", () => {
@@ -352,7 +449,9 @@ describe("money that contradicts itself reaches a human (R08-3)", () => {
     expect(wf.slice(config)).toContain("if: ${{ !cancelled() }}");
     expect(wf).toContain("jq -r '.divergent.count // 0'");
     expect(wf).toContain("jq -r '.unapplied.count // 0'");
-    expect(wf).toContain('if [ "$code" != "200" ] || [ "$div" != "0" ] || [ "$un" != "0" ]; then');
+    expect(wf).toContain(
+      'if [ "$code" != "200" ] || [ "$div" != "0" ] || [ "$un" != "0" ]; then',
+    );
     expect(wf).toContain("::error::/api/jobs/reconcile HTTP $code");
     expect(wf).toContain('echo "::error::/api/jobs/config answered $code');
   });

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobGate } from "@/lib/jobs";
 import {
+  heartbeatReport,
+  stampHeartbeat,
+  type HeartbeatRouteStatus,
+} from "@/lib/jobHeartbeat";
+import {
   configFindingsOk,
   credentialFinding,
   getAppEnv,
@@ -13,7 +18,10 @@ import { failedMailHealth } from "@/lib/outbox";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
-export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getConfig, POST: updateConfig });
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
+  GET: getConfig,
+  POST: updateConfig,
+});
 
 /**
  * Production config report (Phase 0 surface, non-fatal).
@@ -54,7 +62,11 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getCon
  * variables are missing.
  */
 async function getConfig(req: NextRequest) {
-  const denied = await jobGate(req, "jobs/config", req.nextUrl.searchParams.get("secret"));
+  const denied = await jobGate(
+    req,
+    "jobs/config",
+    req.nextUrl.searchParams.get("secret"),
+  );
   if (denied) return denied;
 
   const { findings } = getProdConfigReport();
@@ -76,17 +88,39 @@ async function getConfig(req: NextRequest) {
   // mail does not make the deployment unservable, and the endpoint must keep
   // meaning "config" for the pinger. Read-only and best-effort — a database
   // that cannot answer reports null rather than turning this into a 500.
-  let mail: { failedCount: number; oldestUnretriedKey: string | null } | null = null;
+  let mail: { failedCount: number; oldestUnretriedKey: string | null } | null =
+    null;
   try {
     const health = await failedMailHealth();
     mail = { failedCount: health.failed, oldestUnretriedKey: health.oldestKey };
   } catch {
     mail = null;
   }
+  // R13-3: whether the workers that keep every other number here current are
+  // still running. Read *before* this route stamps itself, so a report that says
+  // "config last ran three days ago" is the report telling you nobody has been
+  // reading reports. Both the findings and the ages ride along: the finding says
+  // something is wrong, the ages say which route and since when, and neither is
+  // `required` — an unattended job is operator work, not an unservable
+  // deployment. Best-effort like `mail`: a database that cannot answer this
+  // leaves it null rather than turning the report into a 500.
+  let heartbeats: HeartbeatRouteStatus[] | null = null;
+  try {
+    const report = await heartbeatReport();
+    findings.push(...report.findings);
+    heartbeats = report.routes;
+  } catch {
+    heartbeats = null;
+  }
+  await stampHeartbeat(
+    "/api/jobs/config",
+    configFindingsOk(findings) ? null : "report not ok",
+  );
+
   const ok = configFindingsOk(findings);
   return NextResponse.json(
-    { ok, env: getAppEnv(), findings, stripeKey, mail },
-    { status: ok ? 200 : 503 }
+    { ok, env: getAppEnv(), findings, stripeKey, mail, heartbeats },
+    { status: ok ? 200 : 503 },
   );
 }
 

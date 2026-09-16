@@ -462,3 +462,19 @@ model Report {
   @@index([status, createdAt])
   @@index([createdAt(sort: Desc)])
 }
+
+// Phase 13, R13-3: proof that a scheduled worker ran, written by the worker.
+// The outbox being empty and the scheduler being dead produced the same
+// healthy-looking answer from /api/jobs/config, and the review had to measure
+// the tick's cadence from GitHub's own run list because the app kept no record
+// of it. One row per route, refreshed on every run; /api/jobs/config compares
+// the ages against the bounds in lib/jobHeartbeat.ts. `runs` distinguishes a
+// route invoked on schedule from one called once by hand, and `lastError` keeps
+// the last failure's reason next to the timestamp that outlived it.
+model JobHeartbeat {
+  key       String   @id // the job route path, "/api/jobs/config" included
+  lastRunAt DateTime @default(now())
+  runs      Int      @default(1)
+  lastError String?  @db.VarChar(280)
+  updatedAt DateTime @default(now()) @updatedAt
+}

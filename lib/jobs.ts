@@ -5,7 +5,17 @@
  * (preferred) or matching body secret. No body-shape bypasses: an invalid
  * secret is rejected for EVERY payload. Missing CRON_SECRET in production
  * rejects everything (fail closed; lib/env.ts already requires it).
- * Non-production allows unauthenticated local/cron rehearsal.
+ *
+ * R13-2: the rehearsal exemption used to be decided by the framework's
+ * environment string, so anything that did not call itself "production" — a
+ * preview deployment, a laptop running `next start` with the production `.env`
+ * loaded — answered an unauthenticated worker call, and the queue it drains is
+ * the same queue. The exemption is now decided by *which database this process
+ * would touch*: with no credential, a call is answered only when DATABASE_URL is
+ * loopback-local (isLocalDatabase(), lib/env.ts), whatever NODE_ENV or
+ * VERCEL_ENV say. The two failing arms fail the same way — 401 — so there is no
+ * shape in which a remote database is reachable unauthenticated, and a local
+ * rehearsal still needs no secret.
  *
  * Phase 11 (R11-4) added the two gates below. The credential check alone left
  * every operator and job surface unmetered: the review sent fifty consecutive
@@ -17,7 +27,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
-import { isProduction } from "./env";
+import { isLocalDatabase, isProduction } from "./env";
 import { rateLimitAsync } from "./rateStore";
 import { apiError } from "./route";
 
@@ -27,15 +37,25 @@ function safeEqual(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
-export function jobAuth(req: NextRequest, bodySecret?: string | null): NextResponse | null {
+export function jobAuth(
+  req: NextRequest,
+  bodySecret?: string | null,
+): NextResponse | null {
   const secret = process.env.CRON_SECRET;
-  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
-  const ok = !!secret && ((!!bearer && safeEqual(bearer, secret)) || (!!bodySecret && safeEqual(bodySecret, secret)));
+  const bearer =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
+  const ok =
+    !!secret &&
+    ((!!bearer && safeEqual(bearer, secret)) ||
+      (!!bodySecret && safeEqual(bodySecret, secret)));
   if (ok) return null;
-  if (isProduction()) {
+  // Local rehearsal: this working tree's own database, no secret, and a queue
+  // nobody else can see. Everywhere else — including a "development" string
+  // pointing at a remote DATABASE_URL — this is a 401.
+  if (isProduction() || !isLocalDatabase()) {
     return apiError("unauthorized", { status: 401, code: "UNAUTHORIZED" });
   }
-  return null; // dev/test rehearsal without secrets
+  return null;
 }
 
 /** Operator endpoints (moderation triage, outbox retry). ADMIN_TOKEN bearer,
@@ -43,7 +63,8 @@ export function jobAuth(req: NextRequest, bodySecret?: string | null): NextRespo
  * leaked dev database is never one missing header from mutation. */
 export function adminAuth(req: NextRequest): NextResponse | null {
   const token = process.env.ADMIN_TOKEN;
-  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
+  const bearer =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
   if (!token || !bearer || !safeEqual(bearer, token)) {
     return apiError("forbidden", { status: 403, code: "FORBIDDEN" });
   }
@@ -78,9 +99,19 @@ export const ADMIN_WINDOW_MS = 60_000;
  * platform we do not own, and the token is the thing that must not appear in
  * one. The route is in the key so a busy endpoint cannot exhaust the others.
  */
-function callerKey(prefix: string, route: string, req: NextRequest, extra: string | null): string {
-  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
-  const credential = bearer ?? extra ?? req.nextUrl.searchParams.get("secret") ?? "unauthenticated";
+function callerKey(
+  prefix: string,
+  route: string,
+  req: NextRequest,
+  extra: string | null,
+): string {
+  const bearer =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
+  const credential =
+    bearer ??
+    extra ??
+    req.nextUrl.searchParams.get("secret") ??
+    "unauthenticated";
   const digest = createHash("sha256")
     .update(`${credential}:${process.env.CLICK_SALT ?? "ptl-dev-salt"}`)
     .digest("hex")
@@ -94,12 +125,18 @@ async function throttle(
   req: NextRequest,
   limit: number,
   windowMs: number,
-  extra: string | null
+  extra: string | null,
 ): Promise<NextResponse | null> {
   // Fail-open by design (lib/rateStore): a limiter outage must not take the
   // outbox down with it.
-  if (await rateLimitAsync(callerKey(prefix, route, req, extra), limit, windowMs)) return null;
-  return apiError("Too many requests. Try again later.", { status: 429, code: "RATE_LIMITED" });
+  if (
+    await rateLimitAsync(callerKey(prefix, route, req, extra), limit, windowMs)
+  )
+    return null;
+  return apiError("Too many requests. Try again later.", {
+    status: 429,
+    code: "RATE_LIMITED",
+  });
 }
 
 /**
@@ -108,15 +145,29 @@ async function throttle(
  * is what `lib/contracts.test.ts` asserts — a route that calls `adminAuth()`
  * directly is unmetered and fails the suite.
  */
-export async function adminGate(req: NextRequest, route: string): Promise<NextResponse | null> {
+export async function adminGate(
+  req: NextRequest,
+  route: string,
+): Promise<NextResponse | null> {
   const denied = adminAuth(req);
   if (denied) return denied;
   return throttle("admin", route, req, ADMIN_LIMIT, ADMIN_WINDOW_MS, null);
 }
 
 /** The job gate: `jobAuth` (Bearer, body or query secret) plus metering. */
-export async function jobGate(req: NextRequest, route: string, bodySecret?: string | null): Promise<NextResponse | null> {
+export async function jobGate(
+  req: NextRequest,
+  route: string,
+  bodySecret?: string | null,
+): Promise<NextResponse | null> {
   const denied = jobAuth(req, bodySecret);
   if (denied) return denied;
-  return throttle("job", route, req, JOB_LIMIT, JOB_WINDOW_MS, bodySecret ?? null);
+  return throttle(
+    "job",
+    route,
+    req,
+    JOB_LIMIT,
+    JOB_WINDOW_MS,
+    bodySecret ?? null,
+  );
 }

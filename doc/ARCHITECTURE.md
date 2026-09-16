@@ -106,10 +106,24 @@ redeploy + reseed (idempotent seeds).
 Financial txs enqueue `RECEIPT_EMAIL / OUTBID_EMAIL / PREVIEW_GENERATE /
 STAKE_ANALYTICS` with dedupe keys. Delivery: post-commit inline `drainDue`
 (best-effort) + authenticated workers (`/api/jobs/outbox`, `/api/jobs/screenshot`):
-atomic `SKIP LOCKED` claims, bounded batches, 20s deadlines, per-target
-timeouts, exponential backoff, persisted `lastError`, operator retry at
-`POST /api/admin/outbox/retry`. Previews are remote URLs of public listings
-(retained until hide clears them); rows keep id + source URL only.
+atomic `SKIP LOCKED` claims, bounded batches, per-target timeouts, exponential
+backoff, persisted `lastError`, operator retry at
+`POST /api/admin/outbox/retry`. Batch bounds and deadlines are declared in
+`lib/jobBudget.ts`: a 24s work budget + 6s response slack = the 30s
+`maxDuration` each worker exports, and no row starts unless a 10s row ceiling
+still fits — both statements are asserted against the route sources by
+`lib/jobsAndCron.test.ts` rather than restated in prose. Workers are scheduled
+with an explicit batch size (`vercel.json`: `/api/jobs/outbox?limit=25`,
+`/api/jobs/screenshot?limit=10`) and the GitHub tick re-loops on the `remaining`
+each call reports; every drain answers what it could not finish
+(`errors / skipped / deferred / batches / remaining`), and a batch that never
+started is a 500 with the counts rather than a silent zero. Each job route
+stamps `JobHeartbeat` (`lib/jobHeartbeat.ts`) and `GET /api/jobs/config` returns
+the ages as `operator` findings — advisory, so a stalled schedule never refuses
+a deploy. Previews are remote URLs of public listings (retained until hide
+clears them); rows keep id + source URL only. A sixth route,
+`/api/jobs/abandoned-checkouts`, rides the tick rather than a cron entry (Hobby
+allows two, both used).
 
 ## 8. Abuse controls & moderation
 

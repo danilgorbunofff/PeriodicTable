@@ -4,8 +4,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { clientIp } from "./ip";
 import { normalizeUrl, isPublicHost, domainFromUrl } from "./validate";
-import { rateLimitAsync, setSharedRateLimitStore, type RateLimitStore } from "./rateStore";
-import { jobAuth, adminAuth, adminGate, jobGate, ADMIN_LIMIT, JOB_LIMIT } from "./jobs";
+import {
+  rateLimitAsync,
+  setSharedRateLimitStore,
+  type RateLimitStore,
+} from "./rateStore";
+import {
+  jobAuth,
+  adminAuth,
+  adminGate,
+  jobGate,
+  ADMIN_LIMIT,
+  JOB_LIMIT,
+} from "./jobs";
 import { isDiscoverable, isDirectVisible } from "./moderation";
 
 type Env = Record<string, string | undefined>;
@@ -16,8 +27,36 @@ function set(k: string, v: string | undefined) {
   if (v === undefined) delete env[k];
   else env[k] = v;
 }
+/** A loopback database URL for the tests that exercise the local-rehearsal arm
+ * of jobAuth: the live test database when the suite has one, an unlistened
+ * loopback port otherwise. Either way the gate reads the host, and the
+ * heartbeat read behind it is best-effort. Never the ambient value — this suite
+ * is DB-less by design and .env holds the production URL (R13-2). */
+const LOCAL_DB =
+  process.env.TEST_DATABASE_URL ??
+  "postgresql://postgres:postgres@127.0.0.1:55433/periodictable_test";
+const REMOTE_DB =
+  "postgresql://u:p@ep-remote-pooler.us-east-2.aws.neon.tech/db";
+
+/* This suite is DB-less by design (no ./testDb import), so the ambient
+ * DATABASE_URL is whatever .env holds — the production URL. Two things read it:
+ * the R13-2 gate, which the tests below move per case through set()/restore, and
+ * Prisma itself, which captures the URL when the config route's module graph
+ * first imports lib/prisma.ts. Pin the process to a loopback database here, at
+ * module scope and before any test body, so no assertion in this file can reach
+ * the production queue; nothing in the static imports above loads lib/prisma.ts,
+ * so this pin is the one the client is built from. */
+process.env.DATABASE_URL = LOCAL_DB;
+
 beforeEach(() => {
-  for (const k of ["NODE_ENV", "VERCEL_ENV", "VITEST", "CRON_SECRET", "ADMIN_TOKEN"]) {
+  for (const k of [
+    "NODE_ENV",
+    "VERCEL_ENV",
+    "VITEST",
+    "CRON_SECRET",
+    "ADMIN_TOKEN",
+    "DATABASE_URL",
+  ]) {
     if (!(k in saved)) saved[k] = env[k];
   }
   setSharedRateLimitStore(null);
@@ -33,9 +72,23 @@ const headers = (h: Record<string, string>) => new Headers(h);
 
 describe("clientIp trust order", () => {
   it("prefers cf-connecting-ip, then x-real-ip, then xff, then default", () => {
-    expect(clientIp(headers({ "cf-connecting-ip": "1.1.1.1", "x-real-ip": "2.2.2.2", "x-forwarded-for": "3.3.3.3" }))).toBe("1.1.1.1");
-    expect(clientIp(headers({ "x-real-ip": "2.2.2.2", "x-forwarded-for": "3.3.3.3" }))).toBe("2.2.2.2");
-    expect(clientIp(headers({ "x-forwarded-for": "3.3.3.3, 4.4.4.4" }))).toBe("3.3.3.3");
+    expect(
+      clientIp(
+        headers({
+          "cf-connecting-ip": "1.1.1.1",
+          "x-real-ip": "2.2.2.2",
+          "x-forwarded-for": "3.3.3.3",
+        }),
+      ),
+    ).toBe("1.1.1.1");
+    expect(
+      clientIp(
+        headers({ "x-real-ip": "2.2.2.2", "x-forwarded-for": "3.3.3.3" }),
+      ),
+    ).toBe("2.2.2.2");
+    expect(clientIp(headers({ "x-forwarded-for": "3.3.3.3, 4.4.4.4" }))).toBe(
+      "3.3.3.3",
+    );
     expect(clientIp(headers({}))).toBe("0.0.0.0");
   });
 });
@@ -43,14 +96,27 @@ describe("clientIp trust order", () => {
 describe("isPublicHost + normalizeUrl (SSRF-adjacent inputs)", () => {
   it("accepts ordinary public DNS names", () => {
     expect(isPublicHost("acme.dev")).toBe(true);
-    expect(normalizeUrl("https://Acme-Startup.COM/launch?x=1")).toBe("https://acme-startup.com/launch?x=1");
+    expect(normalizeUrl("https://Acme-Startup.COM/launch?x=1")).toBe(
+      "https://acme-startup.com/launch?x=1",
+    );
   });
   it("rejects credentials in URLs", () => {
     expect(normalizeUrl("https://user:pass@acme.dev/")).toBeNull();
     expect(normalizeUrl("https://user@acme.dev/")).toBeNull();
   });
   it("rejects IPs, localhost, and obfuscations", () => {
-    for (const h of ["127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.9", "169.254.169.254", "0.0.0.0", "localhost", "[::1]", "2130706433", "0177.0.0.1"]) {
+    for (const h of [
+      "127.0.0.1",
+      "10.0.0.5",
+      "192.168.1.1",
+      "172.16.0.9",
+      "169.254.169.254",
+      "0.0.0.0",
+      "localhost",
+      "[::1]",
+      "2130706433",
+      "0177.0.0.1",
+    ]) {
       expect(isPublicHost(h)).toBe(false);
     }
     expect(normalizeUrl("http://169.254.169.254/latest/meta-data/")).toBeNull();
@@ -97,17 +163,51 @@ describe("rateLimitAsync", () => {
     expect(await rateLimitAsync("x", 1, 1000)).toBe(false);
   });
   it("fails open when the store throws", async () => {
-    setSharedRateLimitStore({ incr: async () => { throw new Error("redis down"); } });
+    setSharedRateLimitStore({
+      incr: async () => {
+        throw new Error("redis down");
+      },
+    });
     expect(await rateLimitAsync("x", 1, 1000)).toBe(true);
   });
 });
 
 describe("jobAuth", () => {
   const req = (bearer?: string) =>
-    new Request("http://localhost/api/jobs/outbox", bearer ? { headers: { authorization: `Bearer ${bearer}` } } : ({} as RequestInit));
+    new Request(
+      "http://localhost/api/jobs/outbox",
+      bearer
+        ? { headers: { authorization: `Bearer ${bearer}` } }
+        : ({} as RequestInit),
+    );
   it("allows with a matching secret outside production", () => {
     set("CRON_SECRET", "s3cr3t");
     expect(jobAuth(req("s3cr3t") as never, null)).toBeNull();
+  });
+  it("still honours the secret against a remote database — the tick is not a rehearsal", () => {
+    set("CRON_SECRET", "s3cr3t");
+    set("DATABASE_URL", REMOTE_DB);
+    expect(jobAuth(req("s3cr3t") as never, null)).toBeNull();
+    expect(jobAuth(req() as never, "s3cr3t")).toBeNull();
+  });
+  it("answers an unauthenticated call only while the database is on this machine (R13-2)", () => {
+    // The finding: the exemption was decided by the environment string, so a
+    // preview deployment — or `next start` on a laptop with the production
+    // .env loaded — answered an unauthenticated worker call, and the queue it
+    // drains is the same queue.
+    set("VITEST", "true");
+    set("NODE_ENV", "test");
+    set("CRON_SECRET", "s3cr3t");
+    set("DATABASE_URL", LOCAL_DB);
+    expect(jobAuth(req() as never, null)).toBeNull();
+    set("DATABASE_URL", REMOTE_DB);
+    expect(jobAuth(req() as never, null)?.status).toBe(401);
+    // Unparsable and unset both fail closed: the credential check is the only
+    // thing left when we cannot say where the data is.
+    set("DATABASE_URL", "not a url");
+    expect(jobAuth(req() as never, null)?.status).toBe(401);
+    set("DATABASE_URL", undefined);
+    expect(jobAuth(req() as never, null)?.status).toBe(401);
   });
   it("rejects everything in production without a valid secret", () => {
     set("VITEST", undefined);
@@ -126,15 +226,25 @@ describe("config report route", () => {
   it("gates like the other job endpoints and never echoes values", async () => {
     const { GET } = await import("../app/api/jobs/config/route");
     const call = (h?: Record<string, string>) =>
-      GET(new NextRequest("http://localhost/api/jobs/config", { headers: h }) as never);
+      GET(
+        new NextRequest("http://localhost/api/jobs/config", {
+          headers: h,
+        }) as never,
+      );
 
     set("CRON_SECRET", "s3cr3t");
+    // R13-2: the unauthenticated arm of jobAuth is now decided by the database
+    // host, and R13-3 made this route read the job heartbeats behind it. Pin
+    // both, or the gate answer — and the query — come from .env's production
+    // URL.
+    set("DATABASE_URL", LOCAL_DB);
     // Outside production jobAuth permits the local rehearsal shape.
     const local = await call();
     const body = (await local.json()) as {
       ok: boolean;
       env: string;
       stripeKey: string;
+      heartbeats: unknown;
       findings: { key: string; severity: string; detail: string }[];
     };
     expect(body.env).toBe("test");
@@ -151,6 +261,12 @@ describe("config report route", () => {
       expect(["required", "operator", "degraded"]).toContain(f.severity);
       expect(typeof f.detail).toBe("string");
     }
+    // R13-3: the ages the heartbeat findings were drawn from, or null when the
+    // report could not read them. Best-effort either way — a database that
+    // cannot answer this must not turn the report into a 500.
+    expect(body.heartbeats === null || Array.isArray(body.heartbeats)).toBe(
+      true,
+    );
     // Findings describe configuration shape, never the configured values.
     expect(JSON.stringify(body.findings)).not.toContain("s3cr3t");
     // R07-4: the live key check is a production-only probe — a rehearsal must
@@ -188,7 +304,8 @@ describe("config report route", () => {
     // block. Nothing would ever prove a healthy deployment reports healthy.
     const { REQUIRED_PROD_ENV } = await import("./env");
     const { GET } = await import("../app/api/jobs/config/route");
-    const call = () => GET(new NextRequest("http://localhost/api/jobs/config") as never);
+    const call = () =>
+      GET(new NextRequest("http://localhost/api/jobs/config") as never);
 
     // Pin the environment rather than inheriting it: all required variables are
     // about to be set, and in a production process that would let the S4 probe
@@ -200,24 +317,37 @@ describe("config report route", () => {
     for (const k of REQUIRED_PROD_ENV) set(k, "x");
     set("NEXT_PUBLIC_APP_URL", "https://periodictable.lol");
     set("CLICK_SALT", "a-private-random-value");
+    // DATABASE_URL is one of the required variables the loop just set to "x",
+    // and the R13-2 gate reads it: an unauthenticated call is answered only
+    // from a loopback database, so "x" would 401 before health was ever read.
+    set("DATABASE_URL", LOCAL_DB);
 
     const healthy = await call();
     const healthyBody = (await healthy.json()) as {
       ok: boolean;
       stripeKey: string;
+      heartbeats: unknown;
       findings: { key: string; severity: string }[];
     };
     expect(healthy.status).toBe(200);
     expect(healthyBody.ok).toBe(true);
     expect(healthyBody.stripeKey).toBe("not-checked");
+    expect(
+      healthyBody.heartbeats === null || Array.isArray(healthyBody.heartbeats),
+    ).toBe(true);
     // Advisories may or may not be present depending on the host environment;
     // what must be absent is anything that blocks serving.
-    expect(healthyBody.findings.filter((f) => f.severity === "required")).toEqual([]);
+    expect(
+      healthyBody.findings.filter((f) => f.severity === "required"),
+    ).toEqual([]);
 
     // One required variable gone is exactly the failure the pinger must see.
     set("TURNSTILE_SECRET", undefined);
     const gap = await call();
-    const gapBody = (await gap.json()) as { ok: boolean; findings: { key: string; severity: string }[] };
+    const gapBody = (await gap.json()) as {
+      ok: boolean;
+      findings: { key: string; severity: string }[];
+    };
     expect(gap.status).toBe(503);
     expect(gapBody.ok).toBe(false);
     expect(gapBody.findings.map((f) => f.key)).toContain("TURNSTILE_SECRET");
@@ -226,7 +356,12 @@ describe("config report route", () => {
 
 describe("adminAuth", () => {
   const req = (bearer?: string) =>
-    new Request("http://localhost/api/admin/x", bearer ? { headers: { authorization: `Bearer ${bearer}` } } : ({} as RequestInit));
+    new Request(
+      "http://localhost/api/admin/x",
+      bearer
+        ? { headers: { authorization: `Bearer ${bearer}` } }
+        : ({} as RequestInit),
+    );
   it("403s when unset or mismatched, passes on match", () => {
     set("ADMIN_TOKEN", undefined);
     expect(adminAuth(req("anything") as never)?.status).toBe(403);
@@ -240,9 +375,15 @@ describe("adminAuth", () => {
 describe("adminGate / jobGate — the metered gates (R11-4)", () => {
   const withBearer = (token: string) => ({ authorization: `Bearer ${token}` });
   const adminReq = (token?: string, route = "admin/probe") =>
-    new NextRequest(`http://localhost/api/${route}`, token ? { headers: withBearer(token) } : undefined);
+    new NextRequest(
+      `http://localhost/api/${route}`,
+      token ? { headers: withBearer(token) } : undefined,
+    );
   const jobReq = (token?: string, route = "jobs/probe") =>
-    new NextRequest(`http://localhost/api/${route}`, token ? { headers: withBearer(token) } : undefined);
+    new NextRequest(
+      `http://localhost/api/${route}`,
+      token ? { headers: withBearer(token) } : undefined,
+    );
 
   it("checks the credential before it spends budget, so probing is free", async () => {
     set("ADMIN_TOKEN", "gate-a");
@@ -260,7 +401,9 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
   it(`meters allowed admin calls per credential per route (${ADMIN_LIMIT}/window)`, async () => {
     set("ADMIN_TOKEN", "gate-b");
     for (let i = 0; i < ADMIN_LIMIT; i++) {
-      expect(await adminGate(adminReq("gate-b"), "admin/probe-limit")).toBeNull();
+      expect(
+        await adminGate(adminReq("gate-b"), "admin/probe-limit"),
+      ).toBeNull();
     }
     const over = await adminGate(adminReq("gate-b"), "admin/probe-limit");
     expect(over?.status).toBe(429);
@@ -275,9 +418,15 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
 
   it("refusals use the shared envelope: code, message, request id", async () => {
     set("ADMIN_TOKEN", undefined);
-    const noToken = await adminGate(adminReq("anything"), "admin/probe-envelope");
+    const noToken = await adminGate(
+      adminReq("anything"),
+      "admin/probe-envelope",
+    );
     expect(noToken?.status).toBe(403);
-    expect((await noToken!.json()) as unknown).toEqual({ error: "forbidden", code: "FORBIDDEN" });
+    expect((await noToken!.json()) as unknown).toEqual({
+      error: "forbidden",
+      code: "FORBIDDEN",
+    });
     // In production the job failure is an authentication failure, not a
     // permissions one, and it says so in the same shape.
     set("CRON_SECRET", "gate-secret");
@@ -286,19 +435,44 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
     set("VERCEL_ENV", "production");
     const unauth = await jobGate(jobReq("wrong"), "jobs/probe-envelope", null);
     expect(unauth?.status).toBe(401);
-    expect((await unauth!.json()) as unknown).toEqual({ error: "unauthorized", code: "UNAUTHORIZED" });
+    expect((await unauth!.json()) as unknown).toEqual({
+      error: "unauthorized",
+      code: "UNAUTHORIZED",
+    });
   });
 
   it(`meters job calls per credential, including the body/query secret path (${JOB_LIMIT}/window)`, async () => {
     set("CRON_SECRET", "gate-secret");
+    // The calls below carry no credential at all — they rely on the local
+    // rehearsal arm of jobAuth, which R13-2 now decides by the database host.
+    // (`?secret=` only names the budget; it never authenticates.)
+    set("DATABASE_URL", LOCAL_DB);
     for (let i = 0; i < JOB_LIMIT; i++) {
-      expect(await jobGate(jobReq(undefined, "jobs/probe-limit?secret=gate-secret"), "jobs/probe-limit", null)).toBeNull();
+      expect(
+        await jobGate(
+          jobReq(undefined, "jobs/probe-limit?secret=gate-secret"),
+          "jobs/probe-limit",
+          null,
+        ),
+      ).toBeNull();
     }
-    const over = await jobGate(jobReq(undefined, "jobs/probe-limit?secret=gate-secret"), "jobs/probe-limit", null);
+    const over = await jobGate(
+      jobReq(undefined, "jobs/probe-limit?secret=gate-secret"),
+      "jobs/probe-limit",
+      null,
+    );
     expect(over?.status).toBe(429);
-    expect(((await over!.json()) as { code: string }).code).toBe("RATE_LIMITED");
+    expect(((await over!.json()) as { code: string }).code).toBe(
+      "RATE_LIMITED",
+    );
     // Same secret, different endpoint: its own budget.
-    expect(await jobGate(jobReq(undefined, "jobs/probe-limit-2?secret=gate-secret"), "jobs/probe-limit-2", null)).toBeNull();
+    expect(
+      await jobGate(
+        jobReq(undefined, "jobs/probe-limit-2?secret=gate-secret"),
+        "jobs/probe-limit-2",
+        null,
+      ),
+    ).toBeNull();
   });
 });
 

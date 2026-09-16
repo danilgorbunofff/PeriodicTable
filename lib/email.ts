@@ -5,7 +5,7 @@
  * The stored status vocabulary is `EmailLogStatus`, not a bare string (R12-3):
  * only `sent` means the vendor accepted the message.
  *
- * Three rules hold for every send (R10-1, R10-5, R10-7, R10-11):
+ * Four rules hold for every send (R10-1, R10-5, R10-7, R10-11, R13-8):
  * - The suppression list is consulted before the provider. An address that
  *   asked us to stop is never handed over, and the refusal is logged — a
  *   silent skip would be indistinguishable from a delivery.
@@ -14,8 +14,12 @@
  *   stamping a failed mail delivered.
  * - Every row carries the outbox dedupe key it was sent for, and the provider's
  *   receipt when there is one, so the log and the queue can be reconciled.
+ * - The message's identity is asserted to the *provider*, not only to our own
+ *   register: the same dedupe key travels as Resend's Idempotency-Key (R13-8),
+ *   so a send whose response was lost to a timeout is retried without a second
+ *   copy reaching the buyer.
  */
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "./prisma";
 import { joinMin } from "./pricing";
 import { outbidHtml, outbidSubject } from "../emails/outbid";
@@ -57,19 +61,34 @@ export type SendOutcome = {
  * three say stop talking about listings. `suppressEmail` keeps the stronger of
  * a new and a recorded reason for that reason.
  */
-export type SuppressionReason = "unsubscribe" | "invalid" | "bounce" | "complaint" | "manual";
-const SUPPRESSION_REASONS: readonly SuppressionReason[] = ["unsubscribe", "invalid", "bounce", "complaint", "manual"];
+export type SuppressionReason =
+  "unsubscribe" | "invalid" | "bounce" | "complaint" | "manual";
+const SUPPRESSION_REASONS: readonly SuppressionReason[] = [
+  "unsubscribe",
+  "invalid",
+  "bounce",
+  "complaint",
+  "manual",
+];
 
 /** The two reasons that block every kind of message, not only list mail. */
-const UNDELIVERABLE_REASONS: readonly SuppressionReason[] = ["bounce", "invalid"];
+const UNDELIVERABLE_REASONS: readonly SuppressionReason[] = [
+  "bounce",
+  "invalid",
+];
 const isUndeliverable = (reason: SuppressionReason | null): boolean =>
-  reason !== null && (UNDELIVERABLE_REASONS as readonly string[]).includes(reason);
+  reason !== null &&
+  (UNDELIVERABLE_REASONS as readonly string[]).includes(reason);
 
 /** A reason as stored, coerced to this module's union — an unknown string was
  *  put on the table by hand, which is what `manual` means. */
-function storedReason(raw: string | null | undefined): SuppressionReason | null {
+function storedReason(
+  raw: string | null | undefined,
+): SuppressionReason | null {
   if (!raw) return null;
-  return (SUPPRESSION_REASONS as readonly string[]).includes(raw) ? (raw as SuppressionReason) : "manual";
+  return (SUPPRESSION_REASONS as readonly string[]).includes(raw)
+    ? (raw as SuppressionReason)
+    : "manual";
 }
 
 /** What kind of message a send is — the only thing that decides whether a
@@ -77,8 +96,9 @@ function storedReason(raw: string | null | undefined): SuppressionReason | null 
 export type MailKind = "list" | "account" | "internal";
 
 /** The EmailLog status that records a refusal, distinct from every send. */
-export const suppressionStatus = (reason: SuppressionReason): `suppressed:${SuppressionReason}` =>
-  `suppressed:${reason}`;
+export const suppressionStatus = (
+  reason: SuppressionReason,
+): `suppressed:${SuppressionReason}` => `suppressed:${reason}`;
 
 /**
  * Everything `EmailLog.status` may hold, and nothing else (R12-3).
@@ -95,7 +115,8 @@ export const suppressionStatus = (reason: SuppressionReason): `suppressed:${Supp
  * building, and `error` was refused. Keep the distinction readable at the call
  * site rather than in a comment (schema.prisma, model EmailLog).
  */
-export type EmailLogStatus = DeliveryResult["status"] | ReturnType<typeof suppressionStatus>;
+export type EmailLogStatus =
+  DeliveryResult["status"] | ReturnType<typeof suppressionStatus>;
 
 export function normalizeRecipient(raw: string): string {
   return raw.trim().toLowerCase();
@@ -108,7 +129,9 @@ export function normalizeRecipient(raw: string): string {
  * asks — "may we mail this" and "which link stops it" — are answered by one
  * lookup keyed on the thing a person actually controls.
  */
-export async function suppressionFor(email: string): Promise<SuppressionReason | null> {
+export async function suppressionFor(
+  email: string,
+): Promise<SuppressionReason | null> {
   const row = await prisma.emailAddress.findUnique({
     where: { email: normalizeRecipient(email) },
     select: { reason: true },
@@ -152,15 +175,22 @@ export type UnsubTarget =
   | { kind: "address"; email: string }
   | { kind: "startup"; startupId: string; email: string | null };
 
-export async function resolveUnsubTarget(token: string): Promise<UnsubTarget | null> {
+export async function resolveUnsubTarget(
+  token: string,
+): Promise<UnsubTarget | null> {
   if (!token) return null;
-  const address = await prisma.emailAddress.findUnique({ where: { token }, select: { email: true } });
+  const address = await prisma.emailAddress.findUnique({
+    where: { token },
+    select: { email: true },
+  });
   if (address) return { kind: "address", email: address.email };
   const startup = await prisma.startup.findUnique({
     where: { unsubToken: token },
     select: { id: true, email: true },
   });
-  return startup ? { kind: "startup", startupId: startup.id, email: startup.email } : null;
+  return startup
+    ? { kind: "startup", startupId: startup.id, email: startup.email }
+    : null;
 }
 
 /**
@@ -190,13 +220,14 @@ export async function suppressEmail(p: {
         where: { email },
         select: { reason: true },
       })
-    )?.reason
+    )?.reason,
   );
   // A person's own request and an operator's are both weaker than evidence that
   // nothing can be delivered: an unsubscribe arriving after a permanent bounce
   // keeps the bounce, because the attempt would only produce a provider error.
   let reason = p.reason;
-  if (existing && isUndeliverable(existing) && !isUndeliverable(p.reason)) reason = existing;
+  if (existing && isUndeliverable(existing) && !isUndeliverable(p.reason))
+    reason = existing;
   const data = { reason, source: p.source ?? null, detail: p.detail ?? null };
   await prisma.emailAddress.upsert({
     where: { email },
@@ -250,7 +281,7 @@ function timingSafeBase64Equal(expected: Buffer, candidate: string): boolean {
 export function verifyResendWebhook(
   rawBody: string,
   headers: Headers,
-  nowSeconds: number = Math.floor(Date.now() / 1000)
+  nowSeconds: number = Math.floor(Date.now() / 1000),
 ): boolean {
   const secret = process.env.RESEND_WEBHOOK_SECRET;
   const id = headers.get("svix-id");
@@ -259,19 +290,23 @@ export function verifyResendWebhook(
   if (!secret || !id || !stamp || !signature) return false;
   const timestamp = Number.parseInt(stamp, 10);
   if (!Number.isFinite(timestamp)) return false;
-  if (Math.abs(nowSeconds - timestamp) > WEBHOOK_TOLERANCE_SECONDS) return false;
+  if (Math.abs(nowSeconds - timestamp) > WEBHOOK_TOLERANCE_SECONDS)
+    return false;
 
   const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
   if (key.length === 0) return false;
-  const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${rawBody}`, "utf8").digest();
-  return signature
-    .split(" ")
-    .some((entry) => {
-      const comma = entry.indexOf(",");
-      if (comma < 0) return false;
-      const version = entry.slice(0, comma).trim();
-      return version === "v1" && timingSafeBase64Equal(expected, entry.slice(comma + 1).trim());
-    });
+  const expected = createHmac("sha256", key)
+    .update(`${id}.${timestamp}.${rawBody}`, "utf8")
+    .digest();
+  return signature.split(" ").some((entry) => {
+    const comma = entry.indexOf(",");
+    if (comma < 0) return false;
+    const version = entry.slice(0, comma).trim();
+    return (
+      version === "v1" &&
+      timingSafeBase64Equal(expected, entry.slice(comma + 1).trim())
+    );
+  });
 }
 
 /** Event types Resend sends today. A delivery carrying anything else is
@@ -307,14 +342,17 @@ export const RESEND_EVENT_TYPES = [
  */
 export function resendEventEffect(
   type: string,
-  bounceType?: string | null
+  bounceType?: string | null,
 ): { suppress: SuppressionReason | null; note: string } {
   switch (type) {
     case "email.bounced": {
       const kind = (bounceType ?? "").trim() || "unspecified";
       return kind.toLowerCase() === "permanent"
         ? { suppress: "bounce", note: `bounced (${kind.toLowerCase()})` }
-        : { suppress: null, note: `bounced (${kind.toLowerCase()}) — not permanent, not suppressed` };
+        : {
+            suppress: null,
+            note: `bounced (${kind.toLowerCase()}) — not permanent, not suppressed`,
+          };
     }
     case "email.complained":
       return { suppress: "complaint", note: "marked as spam" };
@@ -423,7 +461,13 @@ async function sendMessage(p: {
     });
     return { status: "suppressed", emailLogId };
   }
-  const result = await deliver(to, p.subject, p.html, p.unsubUrl ?? null);
+  const result = await deliver(
+    to,
+    p.subject,
+    p.html,
+    p.unsubUrl ?? null,
+    p.dedupeKey,
+  );
   const emailLogId = await logEmail({
     to,
     template: p.template,
@@ -439,11 +483,23 @@ async function sendMessage(p: {
   return { status: result.status, emailLogId, error: result.error };
 }
 
+/** Resend caps Idempotency-Key at 256 characters. A longer dedupe key is
+ *  hashed rather than truncated, so two long keys can never collide by sharing
+ *  a prefix — and the `pt_mail_` prefix keeps our keys distinguishable from any
+ *  other caller's if the account is ever shared. */
+export function mailIdempotencyKey(dedupeKey: string): string {
+  const key = `pt_mail_${dedupeKey}`;
+  return key.length <= 256
+    ? key
+    : `pt_mail_sha256_${createHash("sha256").update(dedupeKey).digest("hex")}`;
+}
+
 async function deliver(
   to: string,
   subject: string,
   html: string,
-  unsubUrl: string | null
+  unsubUrl: string | null,
+  dedupeKey?: string | null,
 ): Promise<DeliveryResult> {
   if (!process.env.RESEND_API_KEY) return { status: "logged" };
   try {
@@ -460,9 +516,21 @@ async function deliver(
               "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
             }
           : {}),
+        // R13-8: the provider is keyed by the same string our own register is
+        // keyed by. `dedupeKey` is exactly "which logical message is this" — it
+        // is unique per OutboxEvent row and stable across that row's attempts —
+        // so a retry after a timed-out send (the response was lost, the mail
+        // was not) returns the first response instead of mailing twice, and the
+        // operator reading a dedupe key in /api/admin/outbox/retry is reading
+        // the provider's key too. No key, no header: an inline send with nothing
+        // to identify it must not borrow another message's identity.
+        ...(dedupeKey
+          ? { "Idempotency-Key": mailIdempotencyKey(dedupeKey) }
+          : {}),
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM ?? "periodictable.lol <hi@periodictable.lol>",
+        from:
+          process.env.EMAIL_FROM ?? "periodictable.lol <hi@periodictable.lol>",
         to,
         subject,
         html,
@@ -481,10 +549,19 @@ async function deliver(
     }
     // Resend answers 200 with the message id; a body we cannot parse is still
     // a successful send, just one with no provider receipt on file.
-    const receipt = (await res.json().catch(() => null)) as { id?: string } | null;
-    return { status: "sent", providerStatus: res.status, providerMessageId: receipt?.id };
+    const receipt = (await res.json().catch(() => null)) as {
+      id?: string;
+    } | null;
+    return {
+      status: "sent",
+      providerStatus: res.status,
+      providerMessageId: receipt?.id,
+    };
   } catch (e) {
-    return { status: "error", error: e instanceof Error ? e.message : String(e) };
+    return {
+      status: "error",
+      error: e instanceof Error ? e.message : String(e),
+    };
   }
 }
 
@@ -506,7 +583,9 @@ export type OutbidEmailParams = {
   dedupeKey?: string | null;
 };
 
-export async function sendOutbidEmail(p: OutbidEmailParams): Promise<SendOutcome> {
+export async function sendOutbidEmail(
+  p: OutbidEmailParams,
+): Promise<SendOutcome> {
   const reclaim = Math.max(1, p.winnerAmount + 1 - p.victimTotal);
   const subject = outbidSubject({ elementSymbol: p.elementSymbol });
   const unsubUrl = await unsubUrlFor(p.to);
@@ -560,8 +639,14 @@ export type ReceiptEmailParams = {
   dedupeKey?: string | null;
 };
 
-export async function sendReceiptEmail(p: ReceiptEmailParams): Promise<SendOutcome> {
-  const subject = receiptSubject({ elementSymbol: p.elementSymbol, elementName: p.elementName, rank: p.rank });
+export async function sendReceiptEmail(
+  p: ReceiptEmailParams,
+): Promise<SendOutcome> {
+  const subject = receiptSubject({
+    elementSymbol: p.elementSymbol,
+    elementName: p.elementName,
+    rank: p.rank,
+  });
   const unsubUrl = await unsubUrlFor(p.to);
   const html = receiptHtml({
     elementSymbol: p.elementSymbol,
@@ -603,8 +688,13 @@ export type RefundEmailParams = {
  *  delivery — a refund the buyer never hears about is the one mail in this
  *  system that cannot be left to best-effort. It is `account` mail for the
  *  suppression check for the same reason: it survives an unsubscribe. */
-export async function sendRefundEmail(p: RefundEmailParams): Promise<SendOutcome> {
-  const subject = refundSubject({ elementSymbol: p.elementSymbol, amountUsd: p.amountUsd });
+export async function sendRefundEmail(
+  p: RefundEmailParams,
+): Promise<SendOutcome> {
+  const subject = refundSubject({
+    elementSymbol: p.elementSymbol,
+    amountUsd: p.amountUsd,
+  });
   const unsubUrl = await unsubUrlFor(p.to);
   const html = refundHtml({
     elementSymbol: p.elementSymbol,
@@ -641,7 +731,9 @@ export type ReportEmailParams = {
 /** Operator notification for a new report (R05-7). No unsubscribe header: this
  *  is a one-off operational message to the moderation inbox, not a list — a
  *  list preference has nothing to say about it (see `refuses`). */
-export async function sendReportEmail(p: ReportEmailParams): Promise<SendOutcome> {
+export async function sendReportEmail(
+  p: ReportEmailParams,
+): Promise<SendOutcome> {
   const subject = reportSubject({ domain: p.domain });
   const html = reportHtml({
     id: p.id,
@@ -651,7 +743,14 @@ export async function sendReportEmail(p: ReportEmailParams): Promise<SendOutcome
     createdAt: `${p.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC`,
     queueUrl: `${APP_URL}/api/admin/reports`,
   });
-  return sendMessage({ to: p.to, template: "report", subject, html, kind: "internal", dedupeKey: p.dedupeKey });
+  return sendMessage({
+    to: p.to,
+    template: "report",
+    subject,
+    html,
+    kind: "internal",
+    dedupeKey: p.dedupeKey,
+  });
 }
 
 export type WaitlistEmailParams = {
@@ -667,7 +766,9 @@ export type WaitlistEmailParams = {
  *  R10-6: the waitlist confirmation was the one mail with no way out — no
  *  unsubscribe header and no link, only "reply and we'll remove you". The
  *  footer now carries the address's own handle, minted at send time (R10-5). */
-export async function sendWaitlistEmail(p: WaitlistEmailParams): Promise<SendOutcome> {
+export async function sendWaitlistEmail(
+  p: WaitlistEmailParams,
+): Promise<SendOutcome> {
   const subject = waitlistSubject();
   const unsubUrl = await unsubUrlFor(p.to);
   const html = waitlistHtml({ domain: p.domain, tableUrl: APP_URL, unsubUrl });

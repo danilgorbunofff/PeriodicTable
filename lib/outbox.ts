@@ -18,6 +18,7 @@ import {
   type SendOutcome,
 } from "./email";
 import { persistPreview } from "./screenshots";
+import { canStartRow } from "./jobBudget";
 
 export const OUTBOX_MAX_ATTEMPTS = 5;
 
@@ -68,7 +69,12 @@ export type OutbidPayload = {
 };
 
 export type PreviewPayload = { startupId: string; url: string };
-export type AnalyticsPayload = { paymentId: string; elementSymbol: string; amountUsd: number; kind: string };
+export type AnalyticsPayload = {
+  paymentId: string;
+  elementSymbol: string;
+  amountUsd: number;
+  kind: string;
+};
 /** R05-7 intake mail: the operator report notice and the waitlist confirmation. */
 export type ReportEmailPayload = {
   to: string;
@@ -100,7 +106,7 @@ export type WaitlistEmailPayload = {
  */
 export async function enqueueOutbox(
   db: Prisma.TransactionClient,
-  event: { type: OutboxType; payload: object; dedupeKey: string }
+  event: { type: OutboxType; payload: object; dedupeKey: string },
 ): Promise<void> {
   const dedupeKey = event.dedupeKey.trim();
   if (!dedupeKey) throw new Error(`${event.type} needs a dedupe key`);
@@ -140,11 +146,17 @@ export function attachPreview(startupId: string, previewImgUrl: string) {
  */
 function assertDelivered(outcome: SendOutcome): void {
   if (outcome.status === "error") {
-    throw new Error(outcome.error ?? `email delivery failed (${outcome.status})`);
+    throw new Error(
+      outcome.error ?? `email delivery failed (${outcome.status})`,
+    );
   }
 }
 
-async function handleOne(row: { type: string; payload: Record<string, unknown>; dedupeKey: string }): Promise<void> {
+async function handleOne(row: {
+  type: string;
+  payload: Record<string, unknown>;
+  dedupeKey: string;
+}): Promise<void> {
   // The dedupe key travels into the log so a failed row and its attempts can be
   // reconciled afterwards (R10-11).
   const key = row.dedupeKey;
@@ -166,7 +178,13 @@ async function handleOne(row: { type: string; payload: Record<string, unknown>; 
     }
     case "REPORT_EMAIL": {
       const p = row.payload as unknown as ReportEmailPayload;
-      assertDelivered(await sendReportEmail({ ...p, createdAt: new Date(p.createdAt), dedupeKey: key }));
+      assertDelivered(
+        await sendReportEmail({
+          ...p,
+          createdAt: new Date(p.createdAt),
+          dedupeKey: key,
+        }),
+      );
       return;
     }
     case "WAITLIST_EMAIL": {
@@ -200,7 +218,9 @@ async function handleOne(row: { type: string; payload: Record<string, unknown>; 
  * retry, named by that key. Deliberately bounded (the newest `limit` failures
  * are examined): this is a health number, not an audit export.
  */
-export async function failedMailHealth(limit = 500): Promise<{ failed: number; oldestKey: string | null }> {
+export async function failedMailHealth(
+  limit = 500,
+): Promise<{ failed: number; oldestKey: string | null }> {
   const errors = await prisma.emailLog.findMany({
     where: { status: "error" },
     orderBy: { createdAt: "desc" },
@@ -208,7 +228,9 @@ export async function failedMailHealth(limit = 500): Promise<{ failed: number; o
     select: { dedupeKey: true },
   });
   if (errors.length === 0) return { failed: 0, oldestKey: null };
-  const keys = [...new Set(errors.map((e) => e.dedupeKey).filter((k): k is string => !!k))];
+  const keys = [
+    ...new Set(errors.map((e) => e.dedupeKey).filter((k): k is string => !!k)),
+  ];
   const recovered = keys.length
     ? await prisma.emailLog.findMany({
         where: { dedupeKey: { in: keys }, status: { in: ["sent", "logged"] } },
@@ -216,22 +238,35 @@ export async function failedMailHealth(limit = 500): Promise<{ failed: number; o
       })
     : [];
   const delivered = new Set(recovered.map((r) => r.dedupeKey));
-  const unresolved = errors.filter((e) => !e.dedupeKey || !delivered.has(e.dedupeKey));
+  const unresolved = errors.filter(
+    (e) => !e.dedupeKey || !delivered.has(e.dedupeKey),
+  );
   // The list is newest-first, so the last entry is the oldest failure. A row
   // with no key cannot be named — only keys are actionable, so the oldest
   // *named* key is what the operator is given.
-  const oldestKey = unresolved.filter((e) => !!e.dedupeKey).pop()?.dedupeKey ?? null;
+  const oldestKey =
+    unresolved.filter((e) => !!e.dedupeKey).pop()?.dedupeKey ?? null;
   return { failed: unresolved.length, oldestKey };
 }
 
 /** Process a single row by id (shared by inline drain + job worker).
  * Returns "completed" | "failed" | "skipped" (already done/gone). Never throws. */
-export async function processOutboxRowById(id: string): Promise<"completed" | "failed" | "skipped"> {
+export async function processOutboxRowById(
+  id: string,
+): Promise<"completed" | "failed" | "skipped"> {
   const row = await prisma.outboxEvent.findUnique({ where: { id } });
-  if (!row || row.completedAt || row.attempts >= OUTBOX_MAX_ATTEMPTS) return "skipped";
+  if (!row || row.completedAt || row.attempts >= OUTBOX_MAX_ATTEMPTS)
+    return "skipped";
   try {
-    await handleOne({ type: row.type, payload: row.payload as Record<string, unknown>, dedupeKey: row.dedupeKey });
-    await prisma.outboxEvent.update({ where: { id: row.id }, data: { completedAt: new Date() } });
+    await handleOne({
+      type: row.type,
+      payload: row.payload as Record<string, unknown>,
+      dedupeKey: row.dedupeKey,
+    });
+    await prisma.outboxEvent.update({
+      where: { id: row.id },
+      data: { completedAt: new Date() },
+    });
     return "completed";
   } catch (e) {
     await prisma.outboxEvent
@@ -240,7 +275,10 @@ export async function processOutboxRowById(id: string): Promise<"completed" | "f
         data: {
           attempts: row.attempts + 1,
           nextAttemptAt: new Date(Date.now() + backoffMs(row.attempts)),
-          lastError: e instanceof Error ? e.message.slice(0, 500) : String(e).slice(0, 500),
+          lastError:
+            e instanceof Error
+              ? e.message.slice(0, 500)
+              : String(e).slice(0, 500),
         },
       })
       .catch(() => undefined);
@@ -257,11 +295,13 @@ export async function processOutboxRowById(id: string): Promise<"completed" | "f
 export async function claimDueOutbox(
   limit: number,
   leaseMs = 5 * 60_000,
-  types?: OutboxType[]
+  types?: OutboxType[],
 ): Promise<{ id: string }[]> {
   // "type" is cast to text so the parameterised list works whether the column
   // is a Postgres enum or a plain string.
-  const typeFilter = types?.length ? Prisma.sql`AND "type"::text IN (${Prisma.join(types)})` : Prisma.empty;
+  const typeFilter = types?.length
+    ? Prisma.sql`AND "type"::text IN (${Prisma.join(types)})`
+    : Prisma.empty;
   return prisma.$queryRaw<{ id: string }[]>`
     UPDATE "OutboxEvent" SET "nextAttemptAt" = NOW() + (${leaseMs} * INTERVAL '1 millisecond')
     WHERE id IN (
@@ -273,11 +313,117 @@ export async function claimDueOutbox(
     RETURNING id`;
 }
 
-/** Process due events (bounded). Returns {completed, failed}. Never throws.
+/** Process due events in bounded batches (R13-5). Returns per-batch counts plus
+ * the number of rows still due, so a caller with a request budget — the
+ * ten-minute tick, the daily Vercel cron — can finish a backlog in one
+ * invocation instead of draining a single batch and waiting for a scheduler
+ * that may be three hours late.
+ *
+ * Each iteration *claims*; it never re-uses an earlier claim. claimDueOutbox
+ * pushes each claimed row's nextAttemptAt out by the lease, so a second claim
+ * returns new rows or nothing — never a row this call is already holding.
+ * Rows claimed but not started (the budget ran out) keep that lease and are
+ * re-claimed when it expires: slower than starting them, never delivered twice.
+ *
+ * Nothing is swallowed (R13-6). The claim runs *inside* the try, so a claim that
+ * fails outright is counted in `errors` instead of being indistinguishable from
+ * an empty queue; `remaining` is measured after the loop from the same
+ * predicate the claim uses, so "the queue emptied" and "the batch was short"
+ * stop being the same answer; and `deferred` names rows this call started
+ * paying for and could not start.
+ */
+export type OutboxBatchOutcome = {
+  claimed: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  /** Claimed, left unstarted: no room left for another row's ceiling. */
+  deferred: number;
+  batches: number;
+  /** Hard failures — a claim or a batch that threw. One per failed iteration. */
+  errors: number;
+  /** Rows still due after the loop, or null when the count itself failed. */
+  remaining: number | null;
+};
+
+export async function drainInBatches(opts: {
+  limit: number;
+  types?: OutboxType[];
+  budgetMs: number;
+  /** Injection points for tests: a claim that throws must be *reported*. */
+  claim?: typeof claimDueOutbox;
+  now?: () => number;
+}): Promise<OutboxBatchOutcome> {
+  const claim = opts.claim ?? claimDueOutbox;
+  const now = opts.now ?? Date.now;
+  const out: OutboxBatchOutcome = {
+    claimed: 0,
+    completed: 0,
+    failed: 0,
+    skipped: 0,
+    deferred: 0,
+    batches: 0,
+    errors: 0,
+    remaining: null,
+  };
+  const deadline = now() + opts.budgetMs;
+  try {
+    for (;;) {
+      const batch = await claim(opts.limit, undefined, opts.types);
+      out.batches++;
+      out.claimed += batch.length;
+      let started = 0;
+      for (const row of batch) {
+        if (!canStartRow(deadline, now())) break;
+        started++;
+        const result = await processOutboxRowById(row.id);
+        if (result === "completed") out.completed++;
+        else if (result === "failed") out.failed++;
+        else out.skipped++;
+      }
+      out.deferred += batch.length - started;
+      // A short batch means nothing else was claimable. A full one only means
+      // "there may be more" — the next claim is what answers that question.
+      if (batch.length < opts.limit) break;
+      if (!canStartRow(deadline, now())) break;
+    }
+  } catch (e) {
+    out.errors++;
+    console.error("outbox batch failed (claim or batch loop):", e);
+  }
+  out.remaining = await dueOutboxCount(opts.types).catch(() => null);
+  return out;
+}
+
+/** Rows the next claim would return, by the claim's own predicate. Bounded work
+ *  (`count` over the partial index the claim scans), so it is safe to answer on
+ *  every worker call — that number is how a caller knows whether to loop. */
+export async function dueOutboxCount(types?: OutboxType[]): Promise<number> {
+  const typeFilter = types?.length
+    ? Prisma.sql`AND "type"::text IN (${Prisma.join(types)})`
+    : Prisma.empty;
+  const rows = await prisma.$queryRaw<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM "OutboxEvent"
+    WHERE "completedAt" IS NULL AND "nextAttemptAt" <= NOW() AND attempts < ${OUTBOX_MAX_ATTEMPTS}
+      ${typeFilter}`;
+  return rows[0]?.count ?? 0;
+}
+
+/** Process one bounded batch of due events, inline. Returns
+ *  {completed, failed, errors}. Never throws.
  * Claims first so the inline post-settle drain honours the same lease as the
  * job worker: reading without claiming would let a row this drain is holding
- * be delivered a second time by a worker that claims it mid-flight. */
-export async function drainDue(limit = 10, types?: OutboxType[]): Promise<{ completed: number; failed: number }> {
+ * be delivered a second time by a worker that claims it mid-flight.
+ *
+ * One batch on purpose: the callers here (settle, waitlist, report) have just
+ * enqueued the rows they are draining, so there is no backlog to loop over —
+ * lib/jobsAndCron's `drainInBatches` is the backlog path. `errors` is 1 when the
+ * batch could not be claimed at all, which used to be reported as a drain that
+ * found nothing to do. */
+export async function drainDue(
+  limit = 10,
+  types?: OutboxType[],
+): Promise<{ completed: number; failed: number; errors: number }> {
   let completed = 0;
   let failed = 0;
   try {
@@ -289,8 +435,9 @@ export async function drainDue(limit = 10, types?: OutboxType[]): Promise<{ comp
     }
   } catch (e) {
     console.error("outbox drain failed (non-blocking):", e);
+    return { completed, failed, errors: 1 };
   }
-  return { completed, failed };
+  return { completed, failed, errors: 0 };
 }
 
 /**
@@ -302,19 +449,31 @@ export async function drainDue(limit = 10, types?: OutboxType[]): Promise<{ comp
  * external tick picked it up. Bounded so a slow delivery cannot stall the
  * webhook response — rows unfinished at the deadline keep their lease and are
  * retried by the authenticated worker, exactly as before.
+ *
+ * `timedOut` and `errors` are separate on purpose: the first says the rows are
+ * still moving, the second says the batch never started. A deadline reached
+ * before a failure could be observed reports `errors: 0` and `timedOut: true`,
+ * which is true — the drain is still running — and the caller's next tick
+ * re-claims whatever it left.
  */
 export async function drainDueWithin(
   budgetMs: number,
   limit = 10,
-  types?: OutboxType[]
-): Promise<{ completed: number; failed: number; timedOut: boolean }> {
+  types?: OutboxType[],
+): Promise<{
+  completed: number;
+  failed: number;
+  errors: number;
+  timedOut: boolean;
+}> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const deadline = new Promise<"deadline">((resolve) => {
       timer = setTimeout(() => resolve("deadline"), budgetMs);
     });
     const outcome = await Promise.race([drainDue(limit, types), deadline]);
-    if (outcome === "deadline") return { completed: 0, failed: 0, timedOut: true };
+    if (outcome === "deadline")
+      return { completed: 0, failed: 0, errors: 0, timedOut: true };
     return { ...outcome, timedOut: false };
   } finally {
     if (timer) clearTimeout(timer);

@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobGate } from "@/lib/jobs";
 import { prisma } from "@/lib/prisma";
+import { stampHeartbeat } from "@/lib/jobHeartbeat";
 import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/money";
 import { aggregateDrift } from "@/lib/recompute";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
-export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getReconcileStatus, POST: postReconcile });
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
+  GET: getReconcileStatus,
+  POST: postReconcile,
+});
 
 /** A rejected delivery younger than this may still be a retry in flight: the
  *  webhook answers 5xx for retryable failures and Stripe redelivers on its own
@@ -87,12 +91,22 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  * would be muted before the money case ever fired.
  */
 async function getReconcileStatus(req: NextRequest) {
-  const denied = await jobGate(req, "jobs/reconcile", req.nextUrl.searchParams.get("secret"));
+  const denied = await jobGate(
+    req,
+    "jobs/reconcile",
+    req.nextUrl.searchParams.get("secret"),
+  );
   if (denied) return denied;
 
   const paidRows = await prisma.payment.findMany({
     where: { status: "PAID" },
-    select: { id: true, amountUsd: true, providerAmount: true, providerCurrency: true, paidAt: true },
+    select: {
+      id: true,
+      amountUsd: true,
+      providerAmount: true,
+      providerCurrency: true,
+      paidAt: true,
+    },
     orderBy: { paidAt: "desc" },
   });
 
@@ -100,12 +114,15 @@ async function getReconcileStatus(req: NextRequest) {
   // size would understate exactly the problem this report exists to surface.
   const divergentRows = paidRows.filter(
     (r) =>
-      (r.providerAmount !== null && !providerAmountAgrees(r.amountUsd, r.providerAmount)) ||
-      !providerCurrencyAgrees(r.providerCurrency)
+      (r.providerAmount !== null &&
+        !providerAmountAgrees(r.amountUsd, r.providerAmount)) ||
+      !providerCurrencyAgrees(r.providerCurrency),
   );
 
   const unverifiedWhere = { status: "PAID" as const, providerAmount: null };
-  const unverifiedCount = await prisma.payment.count({ where: unverifiedWhere });
+  const unverifiedCount = await prisma.payment.count({
+    where: unverifiedWhere,
+  });
   const unverifiedByProvider = await prisma.payment.groupBy({
     by: ["provider"],
     where: unverifiedWhere,
@@ -125,7 +142,10 @@ async function getReconcileStatus(req: NextRequest) {
   const errorRows = await prisma.providerEvent.findMany({
     where: {
       outcome: "ERROR",
-      createdAt: { lt: new Date(Date.now() - UNAPPLIED_GRACE_MS), gt: new Date(Date.now() - UNAPPLIED_LOOKBACK_MS) },
+      createdAt: {
+        lt: new Date(Date.now() - UNAPPLIED_GRACE_MS),
+        gt: new Date(Date.now() - UNAPPLIED_LOOKBACK_MS),
+      },
       paymentId: { not: null },
     },
     select: {
@@ -134,7 +154,15 @@ async function getReconcileStatus(req: NextRequest) {
       eventType: true,
       detail: true,
       createdAt: true,
-      payment: { select: { id: true, status: true, amountUsd: true, provider: true, paidAt: true } },
+      payment: {
+        select: {
+          id: true,
+          status: true,
+          amountUsd: true,
+          provider: true,
+          paidAt: true,
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
     take: UNAPPLIED_SCAN_LIMIT,
@@ -165,18 +193,34 @@ async function getReconcileStatus(req: NextRequest) {
   const staleCount = await prisma.payment.count({ where: staleWhere });
   const staleSamples = await prisma.payment.findMany({
     where: staleWhere,
-    select: { id: true, amountUsd: true, provider: true, providerCheckoutUrl: true, createdAt: true },
+    select: {
+      id: true,
+      amountUsd: true,
+      provider: true,
+      providerCheckoutUrl: true,
+      createdAt: true,
+    },
     orderBy: { createdAt: "asc" },
     take: 5,
   });
 
-  const failing = divergentRows.length > 0 || unappliedRows.length > 0 || aggregateRows.length > 0;
+  const failing =
+    divergentRows.length > 0 ||
+    unappliedRows.length > 0 ||
+    aggregateRows.length > 0;
+  // R13-3: the report is read-only *of the ledger* — this row is its own
+  // bookkeeping, and it is what lets /api/jobs/config notice that the tick which
+  // calls this route stopped running. Stamped on both answers: a 503 is a run.
+  await stampHeartbeat("/api/jobs/reconcile", failing ? "report not ok" : null);
 
   return NextResponse.json(
     {
       ok: !failing,
       paidTotal: paidRows.length,
-      divergent: { count: divergentRows.length, samples: divergentRows.slice(0, 5) },
+      divergent: {
+        count: divergentRows.length,
+        samples: divergentRows.slice(0, 5),
+      },
       unapplied: {
         count: unappliedRows.length,
         scanned: errorRows.length,
@@ -197,7 +241,10 @@ async function getReconcileStatus(req: NextRequest) {
       },
       unverified: {
         count: unverifiedCount,
-        byProvider: unverifiedByProvider.map((r) => ({ provider: r.provider, count: r._count._all })),
+        byProvider: unverifiedByProvider.map((r) => ({
+          provider: r.provider,
+          count: r._count._all,
+        })),
         samples: unverifiedSamples,
         note: "Paid on our own checkout figure alone: the provider's delivery stated no amount, so nothing could be cross-checked.",
       },
@@ -207,7 +254,7 @@ async function getReconcileStatus(req: NextRequest) {
         note: "Pending past the provider session's own lifetime, so no delivery is coming. Rows with no session at all are cancelled by /api/jobs/abandoned-checkouts; these carry one and are operator work.",
       },
     },
-    { status: failing ? 503 : 200 }
+    { status: failing ? 503 : 200 },
   );
 }
 

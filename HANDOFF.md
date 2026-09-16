@@ -132,15 +132,23 @@ observed is ~4 h 38 m of retry latency, with the daily `vercel.json` backstop
 skipping it is a defensible choice, not a risk.
 
 **Fix (one dashboard action, user-side):** a free 10-minute pinger such as
-cron-job.org. All four job paths accept a plain **GET** with header
+cron-job.org. All five job paths accept a plain **GET** with header
 `Authorization` set to a bearer token taken from the `CRON_SECRET` env var
 (older pingers can use `?secret=<CRON_SECRET>` on the URL instead) and need no
 body:
 
-- `https://www.periodictable.lol/api/jobs/outbox`
-- `https://www.periodictable.lol/api/jobs/screenshot`
+- `https://www.periodictable.lol/api/jobs/outbox?limit=25`
+- `https://www.periodictable.lol/api/jobs/screenshot?limit=10`
 - `https://www.periodictable.lol/api/jobs/config`
 - `https://www.periodictable.lol/api/jobs/reconcile`
+- `https://www.periodictable.lol/api/jobs/abandoned-checkouts`
+
+The `?limit=` is a batch suggestion, not a requirement — a bare path gets the
+route's own default (the Vercel crons pass it so the batch is readable in the
+schedule). `config`'s `200` body also carries a `heartbeats` block with each
+route's age against its own staleness bound; a stale route is an **`operator`**
+finding and does **not** move the status code — only a missing/invalid
+`required` variable or a money contradiction does.
 
 **Read the status code this way** (verified over real HTTP in production
 semantics on 2026-09-11):

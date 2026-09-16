@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobGate } from "@/lib/jobs";
-import { ABANDON_MAX_BATCH, sweepAbandonedCheckouts } from "@/lib/abandonedCheckouts";
+import { stampHeartbeat } from "@/lib/jobHeartbeat";
+import {
+  ABANDON_MAX_BATCH,
+  sweepAbandonedCheckouts,
+} from "@/lib/abandonedCheckouts";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getAbandonedStatus, POST: runAbandonedCheckouts });
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
+  GET: getAbandonedStatus,
+  POST: runAbandonedCheckouts,
+});
 
 /**
  * Abandoned checkout sweep (R08-5): cancels PENDING payments that never reached
@@ -26,11 +33,24 @@ async function runAbandonedCheckouts(req: NextRequest) {
   } catch {
     body = {};
   }
-  const denied = await jobGate(req, "jobs/abandoned-checkouts", body.secret ?? null);
+  const denied = await jobGate(
+    req,
+    "jobs/abandoned-checkouts",
+    body.secret ?? null,
+  );
   if (denied) return denied;
 
-  const { canceled, cutoff, candidates } = await sweepAbandonedCheckouts({ limit: body.limit ?? ABANDON_MAX_BATCH });
-  return NextResponse.json({ ok: true, canceled: canceled.length, candidates, cutoff, ids: canceled.slice(0, 10) });
+  const { canceled, cutoff, candidates } = await sweepAbandonedCheckouts({
+    limit: body.limit ?? ABANDON_MAX_BATCH,
+  });
+  await stampHeartbeat("/api/jobs/abandoned-checkouts");
+  return NextResponse.json({
+    ok: true,
+    canceled: canceled.length,
+    candidates,
+    cutoff,
+    ids: canceled.slice(0, 10),
+  });
 }
 
 /** Same auth, same sweep — GET so a pinger or cron can reach it without a body. */

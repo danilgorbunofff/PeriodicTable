@@ -28,6 +28,16 @@ jobs:
     env:
       BASE_URL: https://www.periodictable.lol
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      # The recorded reading of the reconcile report's advisory `unverified.count`
+      # (doc 13 R13-9). It was 0 on 2026-09-16 (run 35065018318, paidTotal 3), so
+      # every unverified charge so far is accounted for by hand and anything above
+      # this number is new: the step annotates the run with ::warning:: instead of
+      # the old behaviour, where the only copy of that number was a log line nobody
+      # read. Raise it in the same commit as the manual cross-check that accounts
+      # for the new rows, and note the reading in doc/PROD-READINESS-CHECKLIST.md.
+      # It is a warning and not a failure on purpose: an `unverified` row is PAID
+      # and correct, so it is a coverage gap in this report, not money loss.
+      RECONCILE_UNVERIFIED_BASELINE: "0"
     steps:
       - name: Fail loudly when CRON_SECRET is missing
         run: |
@@ -49,17 +59,39 @@ jobs:
 
       - name: Drain email outbox
         run: |
-          curl -fsS -X POST "$BASE_URL/api/jobs/outbox" \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            -H "Content-Type: application/json" \
-            -d '{"limit":25}'
+          # Re-loops while the route still reports `remaining > 0` (R13-5): a
+          # backlog larger than one batch used to wait for the next ten-minute
+          # tick, so a 300-row queue took over two hours to clear. Four calls is
+          # the cap — 100 rows a tick, ~600 an hour — because the tick's own
+          # timeout is five minutes and each call can hold the route's 24 s work
+          # budget; a queue deeper than that still drains, just more slowly, and
+          # every call prints its own counts.
+          for i in 1 2 3 4; do
+            body=$(curl -fsS -X POST "$BASE_URL/api/jobs/outbox" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "Content-Type: application/json" \
+              -d '{"limit":25}') || exit 1
+            echo "$body"
+            # `remaining` is absent on a pre-R13-5 deployment and unreadable in a
+            # truncated body; both mean "stop looping", not "fail the tick".
+            remaining=$(printf '%s' "$body" | jq -r '.remaining // 0' 2>/dev/null || echo 0)
+            case "$remaining" in ''|*[!0-9]*) remaining=0 ;; esac
+            [ "$remaining" -gt 0 ] || break
+          done
 
       - name: Generate due previews
         run: |
-          curl -fsS -X POST "$BASE_URL/api/jobs/screenshot" \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            -H "Content-Type: application/json" \
-            -d '{"limit":10}'
+          # The same bounded re-loop, the same reason, a smaller batch (R13-5).
+          for i in 1 2 3 4; do
+            body=$(curl -fsS -X POST "$BASE_URL/api/jobs/screenshot" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "Content-Type: application/json" \
+              -d '{"limit":10}') || exit 1
+            echo "$body"
+            remaining=$(printf '%s' "$body" | jq -r '.remaining // 0' 2>/dev/null || echo 0)
+            case "$remaining" in ''|*[!0-9]*) remaining=0 ;; esac
+            [ "$remaining" -gt 0 ] || break
+          done
 
       - name: Abandon stale checkouts (never reached a provider)
         run: |
@@ -101,6 +133,21 @@ jobs:
           if [ "$code" != "200" ] || [ "$div" != "0" ] || [ "$un" != "0" ]; then
             echo "::error::/api/jobs/reconcile HTTP $code — divergent=${div:-?} unapplied=${un:-?}. Real money: read the body above, settle a captured-but-unapplied charge by hand and correct any divergent PAID row (doc/review/08-settlement-and-ledger-integrity.md)."
             exit 1
+          fi
+          # The third failing block needs no check here: `aggregate` drift fails
+          # `ok` and answers 503, so the arm above already pages on it (R12-2).
+          #
+          # Advisory findings answer 200 by design, which is why the one that
+          # matters got no attention (R13-9): `unverified.count` was only ever
+          # visible in this log. It is compared against its recorded baseline and
+          # annotated — a warning, not a failure, and it keeps the previous
+          # number in the run summary so a rise is visible without opening a log.
+          unv=$(jq -r '.unverified.count // 0' "$RUNNER_TEMP/reconcile.json" 2>/dev/null || echo 0)
+          case "$unv" in ''|*[!0-9]*) unv=0 ;; esac
+          if [ "$unv" -gt "$RECONCILE_UNVERIFIED_BASELINE" ]; then
+            echo "::warning::/api/jobs/reconcile unverified=${unv}, above the recorded baseline ${RECONCILE_UNVERIFIED_BASELINE}. A captured payment that no longer cross-checks to a provider figure: the row is PAID and correct, the report's coverage is what shrank. Read the samples in the body above, cross-check them against the provider dashboard by hand, and raise RECONCILE_UNVERIFIED_BASELINE in .github/workflows/outbox-tick.yml in the same commit as the note that accounts for them."
+          else
+            echo "unverified=${unv} (baseline ${RECONCILE_UNVERIFIED_BASELINE})"
           fi
       - name: Config gaps — a required prod secret is missing
         if: ${{ !cancelled() }}

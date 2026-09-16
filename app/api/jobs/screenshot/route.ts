@@ -1,12 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jobGate } from "@/lib/jobs";
-import { claimDueOutbox, processOutboxRowById } from "@/lib/outbox";
-import { apiRoute } from "@/lib/route";
+import { drainInBatches } from "@/lib/outbox";
+import { JOB_WORK_BUDGET_MS, jobLimit } from "@/lib/jobBudget";
+import { stampHeartbeat } from "@/lib/jobHeartbeat";
+import { apiJson, apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getScreenshotStatus, POST: runScreenshot });
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
+  GET: getScreenshotStatus,
+  POST: runScreenshot,
+});
 
 /**
  * Preview worker (Phase 6, P1-14/P1-15): persists Startup.previewImgUrl from
@@ -14,10 +19,16 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getScr
  *
  * - Authenticated on every production invocation (P1-15) — no body-shape
  *   bypasses.
- * - Bounded: at most 10 targets per invocation, 20s global deadline,
- *   10s per-target probe (inside persistPreview; a cold Microlink render of an
- *   uncached site takes ~4s, a cached one ~0.1s, so a batch drains over a few
- *   invocations and lease-release handles anything the deadline cut off).
+ * - Bounded: at most 10 targets per invocation, a 24 s work budget of the 30 s
+ *   `maxDuration` (lib/jobBudget.ts), 10 s per-target probe (inside
+ *   persistPreview; a cold Microlink render of an uncached site takes ~4 s, a
+ *   cached one ~0.1 s, so a batch drains over a few batches and lease-release
+ *   handles anything the budget cut off).
+ * - Claims PREVIEW_GENERATE rows only (R13-7). The claim predicate already
+ *   filtered types, and the review watched this worker claim an unrelated row,
+ *   re-read it, skip it and still count it in `checked` — which made "checked"
+ *   untrue and left the row's lease held by a worker that had decided not to
+ *   touch it.
  * - Retry state lives on the outbox row (attempts/nextAttemptAt/lastError).
  * - `backfill: true` enqueues rows for preview-less startups (bounded 50),
  *   then processes the due batch. Because this is an explicit operator action,
@@ -49,30 +60,57 @@ async function runScreenshot(req: NextRequest) {
     for (const s of missing) {
       await prisma.outboxEvent.upsert({
         where: { dedupeKey: `preview-${s.id}` },
-        create: { type: "PREVIEW_GENERATE", dedupeKey: `preview-${s.id}`, payload: { startupId: s.id, url: s.url } },
-        update: { attempts: 0, nextAttemptAt: new Date(), lastError: null, completedAt: null },
+        create: {
+          type: "PREVIEW_GENERATE",
+          dedupeKey: `preview-${s.id}`,
+          payload: { startupId: s.id, url: s.url },
+        },
+        update: {
+          attempts: 0,
+          nextAttemptAt: new Date(),
+          lastError: null,
+          completedAt: null,
+        },
       });
     }
   }
 
-  const deadline = Date.now() + 20_000;
-  const limit = Math.min(Math.max(body.limit ?? 5, 1), 10);
-  const claimed = await claimDueOutbox(limit);
-  let updated = 0;
-  let failed = 0;
-  for (const { id } of claimed) {
-    if (Date.now() >= deadline) break;
-    // Preview rows only — other types belong to the outbox worker.
-    const row = await prisma.outboxEvent.findUnique({ where: { id } });
-    if (!row || row.type !== "PREVIEW_GENERATE") continue;
-    const out = await processOutboxRowById(id);
-    if (out === "completed") updated++;
-    else if (out === "failed") failed++;
+  const limit = jobLimit(req, body, 5, 10);
+  const out = await drainInBatches({
+    limit,
+    types: ["PREVIEW_GENERATE"],
+    budgetMs: JOB_WORK_BUDGET_MS,
+  });
+  await stampHeartbeat(
+    "/api/jobs/screenshot",
+    out.errors ? "batch failed" : null,
+  );
+
+  const counts = {
+    checked: out.claimed,
+    updated: out.completed,
+    failed: out.failed,
+    deferred: out.deferred,
+    batches: out.batches,
+    remaining: out.remaining,
+  };
+  if (out.errors > 0) {
+    return apiJson(
+      {
+        ok: false,
+        error: "preview batch failed",
+        code: "INTERNAL",
+        errors: out.errors,
+        ...counts,
+      },
+      { status: 500 },
+    );
   }
-  return NextResponse.json({ ok: true, checked: claimed.length, updated, failed });
+  return apiJson({ ok: true, errors: 0, ...counts });
 }
 
-/** Vercel Cron invokes the path with GET (see vercel.json); same auth, default bounds. */
+/** Vercel Cron invokes the path with GET (see vercel.json): same auth, and the
+ *  batch comes from `?limit=` because a GET carries no body. */
 async function getScreenshotStatus(req: NextRequest) {
   return runScreenshot(req);
 }

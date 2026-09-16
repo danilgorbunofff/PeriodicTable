@@ -23,7 +23,11 @@ export type AppEnv = "development" | "test" | "preview" | "production";
 export function getAppEnv(): AppEnv {
   if (process.env.NODE_ENV === "test" || process.env.VITEST) return "test";
   const vercel = process.env.VERCEL_ENV;
-  if (vercel === "production" || vercel === "preview" || vercel === "development") {
+  if (
+    vercel === "production" ||
+    vercel === "preview" ||
+    vercel === "development"
+  ) {
     return vercel;
   }
   if (process.env.NODE_ENV === "production") return "production";
@@ -36,6 +40,38 @@ export function isProduction(): boolean {
 
 export function isBuildPhase(): boolean {
   return process.env.NEXT_PHASE === "phase-production-build";
+}
+
+/**
+ * Is the database this process would talk to on this machine? (Phase 13, R13-2.)
+ *
+ * The one honest answer to "is this a rehearsal?", because the framework's
+ * environment string is not: a preview deployment, a `next start` on a laptop
+ * with the production `.env` loaded, and a test run all look like "not
+ * production" while only one of them is harmless to leave unauthenticated.
+ * Anything that cannot be parsed, and anything whose host is not a loopback
+ * literal, counts as remote — the caller is deciding whether to fail *closed*.
+ *
+ * Deliberately a host test and not a DNS lookup: no network call, no cached
+ * answer, and `localhost`/`127.0.0.1`/`[::1]` are exactly the shapes
+ * lib/testDb.ts pins and doc/ARCHITECTURE.md's runbook uses (`ptl-local`
+ * :55440, `ptl-fix08-pg` :55433, `localhost` on a CI runner).
+ */
+export function isLocalDatabase(
+  url: string | undefined = process.env.DATABASE_URL,
+): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "[::1]" ||
+      host === "::1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 export const REQUIRED_PROD_ENV = [
@@ -51,7 +87,12 @@ export const REQUIRED_PROD_ENV = [
   "EMAIL_FROM",
 ] as const;
 
-const DEV_SALT_VALUES = new Set(["", "ptl-dev-salt", "change-me-in-prod", "change-me"]);
+const DEV_SALT_VALUES = new Set([
+  "",
+  "ptl-dev-salt",
+  "change-me-in-prod",
+  "change-me",
+]);
 
 function isHttpsAppUrl(v: string | undefined): boolean {
   if (!v) return false;
@@ -79,33 +120,51 @@ const PROD_ENV_REASONS: Record<RequiredProdEnvKey, string> = {
   // itself behind adminAuth(), so without this the deployment could be locked
   // out of the one endpoint that explains what else is missing — and the
   // operator's only other symptom is a 403 on every moderation action.
-  ADMIN_TOKEN: "ADMIN_TOKEN is required in production (adminAuth() fails closed: moderation triage and outbox retry must stay reachable)",
-  NEXT_PUBLIC_APP_URL: "NEXT_PUBLIC_APP_URL must be an https URL in production (no localhost)",
-  TURNSTILE_SECRET: "TURNSTILE_SECRET is required in production (bot checks must not bypass)",
+  ADMIN_TOKEN:
+    "ADMIN_TOKEN is required in production (adminAuth() fails closed: moderation triage and outbox retry must stay reachable)",
+  NEXT_PUBLIC_APP_URL:
+    "NEXT_PUBLIC_APP_URL must be an https URL in production (no localhost)",
+  TURNSTILE_SECRET:
+    "TURNSTILE_SECRET is required in production (bot checks must not bypass)",
   CLICK_SALT: "CLICK_SALT must be set to a private random value in production",
-  CRON_SECRET: "CRON_SECRET is required in production (job endpoints must authenticate)",
-  RESEND_API_KEY: "RESEND_API_KEY is required in production (receipts/outbid must deliver)",
+  CRON_SECRET:
+    "CRON_SECRET is required in production (job endpoints must authenticate)",
+  RESEND_API_KEY:
+    "RESEND_API_KEY is required in production (receipts/outbid must deliver)",
   EMAIL_FROM: "EMAIL_FROM is required in production",
 };
 
 /** Entries whose presence alone does not make them valid. */
-const PROD_ENV_VALIDATORS: Partial<Record<RequiredProdEnvKey, (env: NodeJS.ProcessEnv) => boolean>> = {
+const PROD_ENV_VALIDATORS: Partial<
+  Record<RequiredProdEnvKey, (env: NodeJS.ProcessEnv) => boolean>
+> = {
   NEXT_PUBLIC_APP_URL: (env) => isHttpsAppUrl(env.NEXT_PUBLIC_APP_URL),
   CLICK_SALT: (env) => !DEV_SALT_VALUES.has(env.CLICK_SALT ?? ""),
 };
 
-function prodEnvSatisfied(key: RequiredProdEnvKey, env: NodeJS.ProcessEnv): boolean {
+function prodEnvSatisfied(
+  key: RequiredProdEnvKey,
+  env: NodeJS.ProcessEnv,
+): boolean {
   const validate = PROD_ENV_VALIDATORS[key];
   return validate ? validate(env) : !!env[key];
 }
 
 /** Returns human-readable descriptions of missing/invalid prod config. */
-export function getMissingProdEnv(env: NodeJS.ProcessEnv = process.env): string[] {
-  return REQUIRED_PROD_ENV.filter((key) => !prodEnvSatisfied(key, env)).map((key) => PROD_ENV_REASONS[key]);
+export function getMissingProdEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  return REQUIRED_PROD_ENV.filter((key) => !prodEnvSatisfied(key, env)).map(
+    (key) => PROD_ENV_REASONS[key],
+  );
 }
 
 export type ProdConfigSeverity = "required" | "operator" | "degraded";
-export type ProdConfigFinding = { key: string; severity: ProdConfigSeverity; detail: string };
+export type ProdConfigFinding = {
+  key: string;
+  severity: ProdConfigSeverity;
+  detail: string;
+};
 
 /**
  * The single definition of `ok`: "would requireProdEnv() refuse to serve?".
@@ -139,7 +198,10 @@ export type CredentialHealth =
  * an unreachable provider is a `degraded` advisory: a network blip must not
  * raise an alert.
  */
-export function credentialFinding(key: string, health: CredentialHealth): ProdConfigFinding | null {
+export function credentialFinding(
+  key: string,
+  health: CredentialHealth,
+): ProdConfigFinding | null {
   if (health.status === "absent") return null;
   if (health.status === "valid") return null;
   if (health.status === "invalid") {
@@ -149,7 +211,11 @@ export function credentialFinding(key: string, health: CredentialHealth): ProdCo
       detail: `${key} is present but the provider rejects it (${health.detail}): every checkout would fail`,
     };
   }
-  return { key, severity: "degraded", detail: `could not verify ${key}: ${health.detail}` };
+  return {
+    key,
+    severity: "degraded",
+    detail: `could not verify ${key}: ${health.detail}`,
+  };
 }
 
 /**
@@ -166,8 +232,10 @@ const PROD_ENV_ADVISORIES: {
   {
     key: "UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN",
     severity: "degraded",
-    satisfied: (env) => !!env.UPSTASH_REDIS_REST_URL && !!env.UPSTASH_REDIS_REST_TOKEN,
-    detail: "Upstash is unconfigured: rate limits fall back to per-instance memory and fail open (lib/rateStore.ts)",
+    satisfied: (env) =>
+      !!env.UPSTASH_REDIS_REST_URL && !!env.UPSTASH_REDIS_REST_TOKEN,
+    detail:
+      "Upstash is unconfigured: rate limits fall back to per-instance memory and fail open (lib/rateStore.ts)",
   },
   {
     // R10-7: without this secret the Resend webhook refuses every delivery
@@ -201,15 +269,24 @@ const PROD_ENV_ADVISORIES: {
  * with its severity. /api/jobs/reconcile draws the identical line, keeping its
  * advisory `unverified` block out of `ok` while `divergent` fails it.
  */
-export function getProdConfigReport(
-  env: NodeJS.ProcessEnv = process.env
-): { ok: boolean; findings: ProdConfigFinding[] } {
-  const findings: ProdConfigFinding[] = REQUIRED_PROD_ENV.filter((key) => !prodEnvSatisfied(key, env)).map(
-    (key) => ({ key, severity: "required" as const, detail: PROD_ENV_REASONS[key] })
-  );
+export function getProdConfigReport(env: NodeJS.ProcessEnv = process.env): {
+  ok: boolean;
+  findings: ProdConfigFinding[];
+} {
+  const findings: ProdConfigFinding[] = REQUIRED_PROD_ENV.filter(
+    (key) => !prodEnvSatisfied(key, env),
+  ).map((key) => ({
+    key,
+    severity: "required" as const,
+    detail: PROD_ENV_REASONS[key],
+  }));
   for (const advisory of PROD_ENV_ADVISORIES) {
     if (!advisory.satisfied(env)) {
-      findings.push({ key: advisory.key, severity: advisory.severity, detail: advisory.detail });
+      findings.push({
+        key: advisory.key,
+        severity: advisory.severity,
+        detail: advisory.detail,
+      });
     }
   }
   return { ok: configFindingsOk(findings), findings };
@@ -228,13 +305,15 @@ export function getProdConfigReport(
  * serving, exactly as it did before, and money paths stay closed by
  * paymentsLiveServer() in the meantime.
  */
-export function reportProdEnvAtStartup(env: NodeJS.ProcessEnv = process.env): string[] {
+export function reportProdEnvAtStartup(
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
   if (!isProduction() || isBuildPhase()) return [];
   const missing = getMissingProdEnv(env);
   if (missing.length > 0) {
     console.error(
       `startup: production configuration is incomplete (${missing.length} required) — ` +
-        `GET /api/jobs/config reports the same list to an authenticated caller:\n- ${missing.join("\n- ")}`
+        `GET /api/jobs/config reports the same list to an authenticated caller:\n- ${missing.join("\n- ")}`,
     );
   }
   return missing;
@@ -250,6 +329,8 @@ export function requireProdEnv(env: NodeJS.ProcessEnv = process.env): void {
   if (isBuildPhase()) return;
   const missing = getMissingProdEnv(env);
   if (missing.length > 0) {
-    throw new Error(`Missing production configuration:\n- ${missing.join("\n- ")}`);
+    throw new Error(
+      `Missing production configuration:\n- ${missing.join("\n- ")}`,
+    );
   }
 }
