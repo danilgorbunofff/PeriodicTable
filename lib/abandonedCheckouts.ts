@@ -21,6 +21,7 @@
  * mid-payment is the one mistake this sweep must not make.
  */
 import { PaymentStatus } from "@prisma/client";
+import { logInfo } from "./log";
 import { prisma } from "./prisma";
 import { audit } from "./audit";
 
@@ -104,7 +105,7 @@ export async function sweepAbandonedCheckouts(
   }
 
   if (canceled.length > 0) {
-    console.log(JSON.stringify({ scope: "jobs", msg: "abandoned-checkouts", canceled: canceled.length, cutoff }));
+    logInfo("jobs", "abandoned-checkouts", { canceled: canceled.length, cutoff });
   }
   return { canceled, cutoff, candidates: rows.length };
 }

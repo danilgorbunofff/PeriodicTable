@@ -21,6 +21,8 @@
  */
 import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "./prisma";
+import { hashIp } from "./clicks";
+import { logError } from "./log";
 import { joinMin } from "./pricing";
 import { outbidHtml, outbidSubject } from "../emails/outbid";
 import { outbidReclaimUrl } from "./links";
@@ -469,18 +471,33 @@ async function sendMessage(p: {
     p.unsubUrl ?? null,
     p.dedupeKey,
   );
+  const failed = result.status === "error";
   const emailLogId = await logEmail({
     to,
     template: p.template,
     elementSymbol: p.elementSymbol,
     amountUsd: p.amountUsd,
     status: result.status,
-    detail,
+    detail: failed ? failureDetail(detail, result) : detail,
     dedupeKey: p.dedupeKey,
     providerMessageId: result.providerMessageId,
     providerStatus: result.providerStatus,
     error: result.error,
   });
+  if (failed) {
+    // R18-3: the row is durable and the line is what is visible while it is
+    // happening. `error`, not `warn`: this message did not arrive, which is an
+    // outcome, not a caveat. The address is a person, so it rides as a salted
+    // digest (the waitlist route's convention) — enough to correlate with the
+    // register row, useless outside it.
+    logError("mail", "send-failed", {
+      template: p.template,
+      toRef: hashIp(to).slice(0, 16),
+      providerStatus: result.providerStatus ?? null,
+      error: result.error ?? null,
+      dedupeKey: p.dedupeKey ?? null,
+    });
+  }
   return { status: result.status, emailLogId, error: result.error };
 }
 
@@ -503,6 +520,26 @@ export function mailDriver(
   env: NodeJS.ProcessEnv = process.env,
 ): "resend" | "logged" {
   return env.RESEND_API_KEY ? "resend" : "logged";
+}
+
+/**
+ * R18-3: the `detail` of a failed send used to be the subject — the one column
+ * an operator reads first said what the mail was about and nothing about why it
+ * never arrived, while the reason sat in `error` next to it. A failure now
+ * leads its own detail with the cause, so the register's `failures` list reads
+ * as a diagnosis instead of a subject line, and the subject stays where a human
+ * needs it: at the end.
+ */
+const FAILURE_REASON_CHARS = 120;
+
+function failureDetail(detail: string, result: DeliveryResult): string {
+  const cause = result.providerStatus
+    ? `provider ${result.providerStatus}`
+    : "no response";
+  const reason = result.error
+    ? `: ${truncate(result.error).slice(0, FAILURE_REASON_CHARS)}`
+    : "";
+  return `failed (${cause})${reason} — ${detail}`;
 }
 
 async function deliver(

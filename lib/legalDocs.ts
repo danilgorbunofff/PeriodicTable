@@ -122,7 +122,7 @@ export const PRIVACY_PROCESSORS: { name: string; text: string }[] = [
   },
   {
     name: "Plausible",
-    text: "Cookieless, aggregate page analytics. It is disabled unless the operator sets `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`; today it is off, so no analytics script is served.",
+    text: "Cookieless, aggregate page analytics. Disabled twice over: the operator has not set `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`, and if it were set the script would only be injected after you accepted the notice — today it is off, so no analytics script is served and no request reaches them.",
   },
 ];
 
@@ -309,8 +309,8 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
       {
         h: "Cookies, storage and analytics",
         ps: [
-          "This site sets no cookies of its own, uses no local storage to track you, and has no consent banner because there is nothing to consent to. Session state that the product needs (which modal is open, which element you clicked) lives in memory and is gone when you close the tab.",
-          "Analytics is off in production. If the operator enables Plausible it is cookieless and aggregate — no personal identifiers, no cross-site profile — and this paragraph and the processor list below are updated in the same revision, because a disclosure that lags a script is not a disclosure.",
+          "This site sets no cookies of its own and uses no local storage to track you. Session state that the product needs (which modal is open, which element you clicked) lives in memory and is gone when you close the tab.",
+          "Analytics is off in production, and while it is off you are not asked to consent to anything, because there is nothing to consent to: no banner, no script, no request to Plausible. If the operator enables it, it is cookieless and aggregate — no personal identifiers, no cross-site profile — and it still does not load until you say yes: that switch displays a notice, the script is injected only after you accept it, and declining is remembered and loads nothing. A visitor who never answers makes no request to Plausible at all. This paragraph and the processor list below are updated in the same revision as the code, because a disclosure that lags a script is not a disclosure.",
           "Our lawful basis for the analytics processing (which today is nothing, because the script is not served) is legitimate interest in knowing which parts of a small public site are used at all; the data is aggregate and cookieless, so there is no personal identifier to consent to. We would rather not lean on that reading with a script running, so it stays off until the operator decides otherwise and writes the decision here.",
           `If it is ever switched on, this is the complete list of what gets counted, and it is generated from the same constant the code sends (${ANALYTICS_EVENTS.map((e) => `\u201c${e}\u201d`).join(", ")}), plus an aggregate pageview count. Nothing else is sent: no form contents, no email address, no element you did not click.`,
         ],
@@ -319,7 +319,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "Requests your browser makes to other companies",
         ps: [
           "On a normal page view: none. Listing icons are fetched by our server from Google's favicon service and served from this domain, so Google sees our request rather than yours, and it does not learn which pages you read. That fetch is the reason a listing icon cannot finger you: the proxy is the only thing that ever talks to the icon service, and it asks for a domain, never for who is reading it.",
-          "Three exceptions, all deliberate and all conditional. Checkout, when the anti-bot check is enabled, loads Cloudflare's Turnstile widget — a challenge has to run in your browser to work. Paying takes you to Stripe's own checkout page, which is Stripe's product, under Stripe's privacy notice. And analytics, when the operator has enabled it, loads one cookieless script from Plausible — that switch is the `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` build variable, it is unset today, and the section above lists what it would measure. Listing screenshots are captured by our servers, so nothing is loaded from the screenshot provider while you browse.",
+          "Three exceptions, all deliberate and all conditional. Checkout, when the anti-bot check is enabled, loads Cloudflare's Turnstile widget — a challenge has to run in your browser to work. Paying takes you to Stripe's own checkout page, which is Stripe's product, under Stripe's privacy notice. And analytics, when the operator has enabled it *and* you accepted its notice, loads one cookieless script from Plausible — that switch is the `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` build variable, it is unset today, nothing loads without the notice, and the section above lists what it would measure. Listing screenshots are captured by our servers, so nothing is loaded from the screenshot provider while you browse.",
         ],
       },
       {

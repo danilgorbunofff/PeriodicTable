@@ -27,7 +27,18 @@ export function StatsCard({ stats, stale }: { stats?: StatsResponse; stale?: boo
   return (
     <Card className="flex flex-col items-start gap-2.5 px-4 py-4 text-sm leading-none rounded-[15px] shadow-float">
       <div className="whitespace-nowrap font-bold">🧪 <b className="text-ink font-extrabold">{claimed ?? UNKNOWN}</b> <span className="text-mutedink">elements live</span></div>
-      <div className="whitespace-nowrap font-bold">
+      {/* R18-7: this figure is board-scoped — it sums the stakes listed on the
+          board, hidden tiles included — and "in bids" is the wording that keeps
+          it from being read as revenue. The paid-payment total is a different
+          number and lives in the operator dashboard (`/api/admin/ops`). */}
+      <div
+        className="whitespace-nowrap font-bold"
+        title={
+          stats?.moneyScope === "board"
+            ? "Board-scoped: the stakes listed on the board right now, hidden tiles included. Not the paid-payment total."
+            : undefined
+        }
+      >
         💰 <span className="font-extrabold text-moneyink">{staked === undefined ? UNKNOWN : `$${staked.toLocaleString()}`}</span>
         <span className="text-mutedink"> in bids</span>
       </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaymentPath, PaymentProvider, PaymentStatus, ReservationStatus } from "@prisma/client";
+import { logError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { classifyAndValidate, joinMin, validateTake } from "@/lib/pricing";
 import { isEmail, validateCheckoutInput } from "@/lib/validate";
@@ -172,12 +173,10 @@ async function postCheckout(req: NextRequest) {
   // log becomes when someone points a load test at a paused shop.
   if (!partialConfigLogged && stripePartiallyConfigured()) {
     partialConfigLogged = true;
-    console.error(
-      "checkout: partial Stripe configuration (exactly one of STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET is set) — " +
-        (paymentsLiveServer()
-          ? "falling back to the dev simulator (permitted outside production only)"
-          : "payments are paused, and the simulator is unavailable on this deployment")
-    );
+    logError("checkout", "partial-stripe-config", {
+      cause: "exactly one of STRIPE_SECRET_KEY/STRIPE_WEBHOOK_SECRET set",
+      effect: paymentsLiveServer() ? "dev-simulator" : "payments-paused",
+    });
   }
   // R14-1(b): a shop that intends to charge must be able to service the charge
   // (lib/moneyPath.ts). 503 rather than the paused 403 — the deployment wants
@@ -187,11 +186,11 @@ async function postCheckout(req: NextRequest) {
   if (!money.ok) {
     if (!prodConfigRefusedLogged) {
       prodConfigRefusedLogged = true;
-      console.error(
-        "checkout: PAYMENTS_LIVE is set but the production configuration is incomplete — " +
-          `refusing new payments (${money.required.length} required); ` +
-          `GET /api/jobs/config lists them for an authenticated caller:\n- ${money.required.join("\n- ")}`
-      );
+      logError("checkout", "production-incomplete", {
+        effect: "refusing-new-payments",
+        // Names only, never values — same list `/api/jobs/config` reports.
+        vars: money.required,
+      });
     }
     return NextResponse.json(
       { error: "Checkout is temporarily unavailable. Try again shortly." },

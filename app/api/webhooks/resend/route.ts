@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logInfo } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { clientIp } from "@/lib/ip";
@@ -96,7 +97,7 @@ async function postResendWebhook(req: NextRequest) {
     // Not a failure: an event we do not know about was still delivered, and
     // failing it would only make the provider retry something we will never
     // understand.
-    console.log(`[resend-webhook] ignoring unknown event ${type}`);
+    logInfo("resend", "webhook-unknown-event", { type });
     return NextResponse.json({ ok: true, ignored: type });
   }
 
@@ -116,7 +117,7 @@ async function postResendWebhook(req: NextRequest) {
       actorRef: "resend",
       detail: `${type} ${note}${messageId ? ` mid:${messageId}` : ""} (no recipient in payload)`,
     });
-    console.log(`[resend-webhook] ${type} carried no recipient`);
+    logInfo("resend", "webhook-no-recipient", { type });
     return NextResponse.json({ ok: true, acted: false });
   }
 
@@ -143,8 +144,10 @@ async function postResendWebhook(req: NextRequest) {
     actorRef: "resend",
     detail: `${address} ${detail}${messageId ? ` mid:${messageId}` : ""}`,
   });
-  console.log(
-    `[resend-webhook] ${type} ${address}${suppress ? ` → suppressed:${suppress}` : " (no suppression)"}`
-  );
+  logInfo("resend", "webhook-event", {
+    type,
+    address,
+    suppressed: suppress ?? null,
+  });
   return NextResponse.json({ ok: true, acted: !!suppress, suppressed: suppress ?? null });
 }

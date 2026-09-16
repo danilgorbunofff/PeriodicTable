@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
+import { describeError, logWarn } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
@@ -91,6 +92,6 @@ async function notifyOperator(report: {
     await drainDueWithin(3_000, 5, ["REPORT_EMAIL"]);
   } catch (err) {
     // The report is already stored; a failed notice must not fail intake.
-    console.warn("report notify failed", err);
+    logWarn("report", "notify-failed", { error: describeError(err) });
   }
 }

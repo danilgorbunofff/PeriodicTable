@@ -8,6 +8,7 @@
  * back a paid stake — the row stays due with exponential backoff.
  */
 import { Prisma } from "@prisma/client";
+import { describeError, logError, logWarn } from "./log";
 import { prisma } from "./prisma";
 import {
   mailDriver,
@@ -396,7 +397,7 @@ export async function drainInBatches(opts: {
     }
   } catch (e) {
     out.errors++;
-    console.error("outbox batch failed (claim or batch loop):", e);
+    logError("outbox", "batch-failed", { error: describeError(e) });
   }
   out.remaining = await dueOutboxCount(opts.types).catch(() => null);
   return out;
@@ -420,6 +421,22 @@ export type OutboxHealth = {
   driver: "resend" | "logged";
   /** Undelivered rows a worker tick would claim right now. */
   due: number;
+  /** Every undelivered row, whatever its backoff says (R18-8). `due` alone
+   *  cannot answer "is the queue deep": a row at attempt 2 is invisible to it
+   *  for up to five minutes, and `pending` is the number that only goes down by
+   *  delivering something. Compared between consecutive ticks it is the queue's
+   *  trend; `due: 0` with `pending: 40` means waiting, not empty. */
+  pending: number;
+  /** Undelivered rows by kind (R18-8): which *pipeline* is behind — receipts,
+   *  outbid notices, preview renders — because the remedy differs per kind
+   *  (ops/email.md vs a screenshot worker), and a mixed backlog's total says
+   *  nothing about either. Exhausted rows are included; they are the ones a
+   *  person must touch. */
+  pendingByType: { type: string; count: number }[];
+  /** Age of the oldest undelivered row in minutes (R18-8). `oldestDueHours` is
+   *  the same row rounded to hours for a human report; this is the value an
+   *  alarm compares against a threshold, where 90 minutes must not read as 2. */
+  oldestPendingMinutes: number | null;
   /** Undelivered rows that have spent their attempts: the worker will never
    *  touch them again, so a person must. */
   exhausted: number;
@@ -447,10 +464,17 @@ export type OutboxHealth = {
  * customer has been waiting, not how long the backoff has been running.
  */
 export async function outboxHealth(now: Date = new Date()): Promise<OutboxHealth> {
-  const [due, exhausted, oldest, last, mail] = await Promise.all([
+  const [due, exhausted, pending, byType, oldest, last, mail] = await Promise.all([
     dueOutboxCount(),
     prisma.outboxEvent.count({
       where: { completedAt: null, attempts: { gte: OUTBOX_MAX_ATTEMPTS } },
+    }),
+    prisma.outboxEvent.count({ where: { completedAt: null } }),
+    prisma.outboxEvent.groupBy({
+      by: ["type"],
+      where: { completedAt: null },
+      _count: { _all: true },
+      orderBy: { _count: { type: "desc" } },
     }),
     prisma.outboxEvent.findFirst({
       where: { completedAt: null },
@@ -467,6 +491,11 @@ export async function outboxHealth(now: Date = new Date()): Promise<OutboxHealth
   return {
     driver: mailDriver(),
     due,
+    pending,
+    pendingByType: byType.map((row) => ({ type: row.type, count: row._count._all })),
+    oldestPendingMinutes: oldest
+      ? Math.max(0, Math.round((now.getTime() - oldest.createdAt.getTime()) / 60_000))
+      : null,
     exhausted,
     failed: mail.failed,
     oldestKey: mail.oldestKey,
@@ -503,7 +532,7 @@ export async function drainDue(
       else if (out === "failed") failed++;
     }
   } catch (e) {
-    console.error("outbox drain failed (non-blocking):", e);
+    logWarn("outbox", "drain-failed", { error: describeError(e) });
     return { completed, failed, errors: 1 };
   }
   return { completed, failed, errors: 0 };

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { describeError, logError } from "../../../lib/log";
 import { prisma } from "../../../lib/prisma";
 import { ELEMENTS } from "../../../lib/elements";
 import { FAMILY_FILL } from "../../../lib/familyFill";
@@ -54,15 +55,12 @@ async function loadProfile(domain: string) {
 
 /** R15-3: one line naming the page and the subject, never a request value. */
 function logProfileRead(where: string, domain: string, err: unknown) {
-  console.error(
-    JSON.stringify({
-      scope: "page",
-      page: "profile",
-      where,
-      domain,
-      reason: err instanceof Error ? err.message : String(err),
-    })
-  );
+  logError("page", "profile-read-failed", {
+    page: "profile",
+    where,
+    domain,
+    error: describeError(err),
+  });
 }
 
 export async function generateMetadata({ params }: { params: { domain: string } }): Promise<Metadata> {

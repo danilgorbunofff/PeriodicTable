@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { describeError, logError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { ELEMENTS, findElementBySymbol } from "@/lib/elements";
 import { OG_CARD } from "@/lib/ogCard";
@@ -98,14 +99,11 @@ export default async function ElementPage({ params }: { params: { sym: string } 
     // the request) and the shell says which of the two states it is showing.
     element = null;
     dbFailed = true;
-    console.error(
-      JSON.stringify({
-        scope: "page",
-        page: "element",
-        symbol: el.symbol,
-        reason: err instanceof Error ? err.message : String(err),
-      })
-    );
+    logError("page", "element-read-failed", {
+      page: "element",
+      symbol: el.symbol,
+      error: describeError(err),
+    });
   }
   if (!element) {
     // Build-time fallback without DATABASE_URL, or a failed read at request

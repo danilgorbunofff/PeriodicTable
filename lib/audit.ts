@@ -12,47 +12,57 @@
  * "non-blocking" log line. Throwing lets the transaction be retried intact.
  */
 import { Prisma } from "@prisma/client";
+import { describeError, logWarn } from "./log";
 import { prisma } from "./prisma";
 
-export type AuditAction =
-  | "STARTUP_CREATED"
-  | "CHECKOUT_STARTED"
-  | "MANAGE_LINK_REQUESTED"
-  | "MANAGE_LINK_CONSUMED"
-  | "PROFILE_UPDATED"
-  | "WAITLIST_JOINED"
-  | "REPORT_TRIAGED"
-  | "PROFILE_MODERATED"
-  | "PAYMENT_REVERSED"
-  | "CHECKOUT_ABANDONED"
+export const AUDIT_ACTIONS = [
+  "STARTUP_CREATED",
+  "CHECKOUT_STARTED",
+  "MANAGE_LINK_REQUESTED",
+  "MANAGE_LINK_CONSUMED",
+  "PROFILE_UPDATED",
+  "WAITLIST_JOINED",
+  "REPORT_TRIAGED",
+  "PROFILE_MODERATED",
+  "PAYMENT_REVERSED",
+  "CHECKOUT_ABANDONED",
   /** R09-2: a payment whose take quote had expired settled as an ordinary
    *  stake. Reserved for the downgrade itself — the rank it landed at rides in
    *  `detail` as `take-lapsed:<rank>`. */
-  | "TAKE_LAPSED"
+  "TAKE_LAPSED",
   /** R09-7: a dethroned holder could not be told it lost #1 — no address on
    *  the startup and none on the funding payment. */
-  | "OUTBID_UNNOTIFIED"
+  "OUTBID_UNNOTIFIED",
   /** R10-5/R10-6: the person behind an address used an unsubscribe link, or
    *  asked to be mailed again ("leave receipts alone"). The address rides in
    *  `detail`: it is the record of a consent decision, and the row it flips is
    *  the only place that decision lives. */
-  | "EMAIL_UNSUBSCRIBED"
-  | "EMAIL_RESUBSCRIBED"
+  "EMAIL_UNSUBSCRIBED",
+  "EMAIL_RESUBSCRIBED",
   /** R10-7: the provider reported an address it could not deliver to; the
    *  address is now refused for list mail. `detail` carries the provider's
    *  event and reason — a bounce is only actionable with both. */
-  | "EMAIL_UNDELIVERABLE"
+  "EMAIL_UNDELIVERABLE",
   /** R12-4: an operator erased a data subject on request. The action itself is
    *  the record; `detail` carries per-scope counts only, never the address or
    *  the hashed IP that was erased, or the erasure would recreate the data it
    *  removes. */
-  | "SUBJECT_ERASED"
+  "SUBJECT_ERASED",
   /** R14-9: an operator reset a terminally-failed outbox delivery so the next
    *  worker pass resends it. `actorRef` is the operator name (or "operator"
    *  when the caller sent none) and `detail` carries the dedupe key with the
    *  event type, because this route is the one privileged action whose effect
    *  is to make mail go out — it must not be the one that leaves no trace. */
-  | "OUTBOX_RETRY";
+  "OUTBOX_RETRY",
+] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+/** The R11-6 guard, for the same reason: an unknown `?action=` must be a 400,
+ *  not an empty page that is indistinguishable from "nothing happened". */
+export function isAuditAction(value: string): value is AuditAction {
+  return (AUDIT_ACTIONS as readonly string[]).includes(value);
+}
 
 export async function audit(
   entry: {
@@ -80,6 +90,6 @@ export async function audit(
     });
   } catch (e) {
     if (db !== prisma) throw e;
-    console.error("auditLog write failed (non-blocking):", e);
+    logWarn("audit", "write-failed", { action: entry.action, error: describeError(e) });
   }
 }

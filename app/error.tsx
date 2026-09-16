@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { ROUTE_ERROR } from "../lib/boundaries";
 import { BoundaryNotice } from "../lib/boundaryChrome";
+import { reportClientError } from "../lib/clientError";
 
 /**
  * Route-level error boundary (R02-3).
@@ -16,8 +17,14 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
   useEffect(() => {
     // A server-thrown error arrives here with only a digest, and Next's own log
     // is on the server. Log whatever survived so the trace is in the console the
-    // user is already looking at.
+    // user is already looking at, and file it with the sink (R18-1) so the same
+    // failure is countable and attributable to a deploy without a support email.
     console.error("[route error]", error);
+    reportClientError("client", error, {
+      digest: error.digest,
+      kind: "RouteError",
+      route: typeof window === "undefined" ? undefined : window.location.pathname,
+    });
   }, [error]);
 
   return (

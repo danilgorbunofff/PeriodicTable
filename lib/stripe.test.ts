@@ -152,17 +152,20 @@ describe("logCheckoutRejection (R07-4)", () => {
     vi.setSystemTime(new Date("2025-01-01T00:00:00Z"));
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
-      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
-      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
+      const rejected = { providerStatus: 502, keyMode: "sk_test", detail: "bad key" };
+      logCheckoutRejection(rejected);
+      logCheckoutRejection(rejected);
+      logCheckoutRejection(rejected);
       expect(spy).toHaveBeenCalledTimes(1);
 
       vi.setSystemTime(new Date("2025-01-01T00:01:01Z"));
-      logCheckoutRejection("stripe: checkout/sessions rejected (502): bad key");
+      logCheckoutRejection(rejected);
       expect(spy).toHaveBeenCalledTimes(2);
       // The suppressed count is the difference between "one buyer had a bad
-      // time" and "every buyer since the last line had a bad time".
-      expect(spy.mock.calls[1][0]).toContain("+2 more rejected checkouts");
+      // time" and "every buyer since the last line had a bad time" — and since
+      // phase 18 (R18-11) it is a field, so that sum can be queried.
+      expect(spy.mock.calls[1][0]).toContain('"suppressed":2');
+      expect(spy.mock.calls[1][0]).toContain('"msg":"checkout-rejected"');
       expect(spy.mock.calls[1][0]).toContain("bad key");
     } finally {
       spy.mockRestore();

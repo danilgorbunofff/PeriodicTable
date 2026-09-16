@@ -77,10 +77,19 @@ describe("R03-2 both readers use it", () => {
   it("says where it reads which number", () => {
     const api = src("lib/api.ts");
     expect(api).toMatch(/claimedElements`\/`unclaimedElements` count the tiles the board draws as\n \* claimed/);
-    expect(api).toMatch(/every stake row, concealed and reversed\n \* included/);
+    // R18-7 corrected this clause while adding `moneyScope` on the wire:
+    // "concealed and reversed included" described neither reader (a refund
+    // reduces the stake's `amountUsd`, so reversed money is not on the board at
+    // all). The intent stands — the aggregates include concealed rows, say so,
+    // and now name the ledger number they are *not*.
+    expect(api).toMatch(/every stake row, concealed ones included/);
+    expect(api).toMatch(/`money\.paidNetUsd`/);
     // The money aggregates are still hidden-inclusive, and say so.
     expect(src("app/api/elements/route.ts")).toMatch(/Deliberately hidden-inclusive/);
-    expect(src("app/api/stats/route.ts")).toMatch(/remain hidden-inclusive money aggregates/);
+    expect(src("app/api/stats/route.ts")).toMatch(/remain hidden-inclusive board aggregates/);
+    // R18-7 put the scope on the wire, so the reader of a 7-day chart cannot
+    // compare it to the ledger number without the label disagreeing with them.
+    expect(src("app/api/stats/route.ts")).toMatch(/moneyScope: "board"/);
   });
 
   it("counts every element exactly once, claimed or not", () => {

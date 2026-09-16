@@ -155,10 +155,11 @@ describe("route wiring (R11-3, R11-4)", () => {
 
   it("puts every route file behind the shared boundary", () => {
     // 28 at R11-3; +1 for the icon proxy (R16-3); +1 for the operator bulk
-    // moderation route (R17-14). The count is a tripwire, not bookkeeping: a new
-    // route file has to be added here on purpose, so it cannot arrive outside
-    // the boundary unnoticed.
-    expect(routes).toHaveLength(30);
+    // moderation route (R17-14); +2 for the observability pair (R18-9 health,
+    // R18-1 the error sink's write end). The count is a tripwire, not
+    // bookkeeping: a new route file has to be added here on purpose, so it
+    // cannot arrive outside the boundary unnoticed.
+    expect(routes).toHaveLength(34);
     for (const [path, src] of routes) {
       expect(src, `${path} must use apiRoute`).toContain("apiRoute(");
       expect(src, `${path} must not export a raw verb handler`).not.toMatch(
@@ -170,6 +171,8 @@ describe("route wiring (R11-3, R11-4)", () => {
   it("meters every admin and job route, and no route bypasses a gate", () => {
     const gated = routes.filter(([path]) => path.startsWith("admin/") || path.startsWith("jobs/"));
     expect(gated.map(([path]) => path).sort()).toEqual([
+      "admin/audit/route.ts",
+      "admin/ops/route.ts",
       "admin/outbox/retry/route.ts",
       "admin/reports/[id]/route.ts",
       "admin/reports/route.ts",
@@ -265,7 +268,10 @@ describe("fetchJson (P1-07)", () => {
 
 describe("shape guards", () => {
   it("stats requires all five exact fields", () => {
-    expect(isStatsResponse({ elementsTotal: 122, claimedElements: 3, unclaimedElements: 119, stakeCount: 5, totalStakedUsd: 100 })).toBe(true);
+    expect(isStatsResponse({ elementsTotal: 122, claimedElements: 3, unclaimedElements: 119, stakeCount: 5, totalStakedUsd: 100, moneyScope: "board" })).toBe(true);
+    // R18-7: the scope label is part of the shape. A money field without one is
+    // the ambiguity this fix exists to remove.
+    expect(isStatsResponse({ elementsTotal: 122, claimedElements: 3, unclaimedElements: 119, stakeCount: 5, totalStakedUsd: 100 })).toBe(false);
     expect(isStatsResponse({ elementsLive: 122, totalBids: 5, onSale: 3 })).toBe(false);
     expect(isStatsResponse(null)).toBe(false);
   });

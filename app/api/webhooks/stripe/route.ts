@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PaymentStatus } from "@prisma/client";
+import { describeError, logError, logInfo, logWarn } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import {
   verifyStripeSignature,
@@ -38,14 +39,63 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postS
  *   settlement is atomic (settlePayment); unexpected failures get non-2xx so
  *   Stripe redelivers (item 7).
  */
+/**
+ * R18-2: every terminal delivery outcome is recorded in `ProviderEvent` and was
+ * invisible everywhere else — an operator asking "why did the paid webhook
+ * stop applying" had one table and no reader. The row stays the durable record
+ * (and /api/admin/ops counts them); the line is what a deployment log — the
+ * surface actually open at 03:00 — can show. `ERROR` is outcome-changing (a
+ * delivery we refused and that redelivery cannot fix), so it is the level a
+ * monitor may page on; `DUPLICATE` and `IGNORED` are the normal noise of a
+ * webhook stream and log at `info`. Payloads, secrets and buyer data never
+ * appear here: the event id and the payment id are already in the row.
+ */
+async function recordTerminal(event: Parameters<typeof recordProviderEvent>[0]): Promise<void> {
+  await recordProviderEvent(event);
+  const line = {
+    outcome: event.outcome,
+    detail: event.detail,
+    eventType: event.eventType,
+    eventId: event.eventId,
+    paymentId: event.paymentId,
+  };
+  if (event.outcome === "ERROR") logError("stripe", "webhook-terminal", line);
+  else logInfo("stripe", "webhook-terminal", line);
+}
+
+/**
+ * Signatures that failed verification, and when the last line was written.
+ *
+ * R18-2: a 401 per delivery used to be completely silent — Stripe retries for
+ * days and then disables the endpoint, and nothing on our side said why. The
+ * line is throttled rather than per-request because this route is reachable by
+ * anyone: an unauthenticated prober must not be able to fill the log (or page
+ * on it) by guessing, and `suppressed` says how many refusals the line stands
+ * for so a storm is still legible. Per process, like the checkout warning.
+ */
+const SIGNATURE_FAILURE_LOG_INTERVAL_MS = 60_000;
+let signatureFailures = { logged: 0, since: 0 };
+
 async function postStripeWebhook(req: NextRequest) {
   const raw = await req.text();
-  if (!verifyStripeSignature(raw, req.headers.get("stripe-signature"))) {
+  const signatureHeader = req.headers.get("stripe-signature");
+  if (!verifyStripeSignature(raw, signatureHeader)) {
+    // Shape, never value (R14-10): a missing header means the sender or a proxy
+    // never passed it on, a present one means the secret is wrong — two
+    // different operator actions, and neither is answerable from a bare 401.
+    const now = Date.now();
+    if (now - signatureFailures.since >= SIGNATURE_FAILURE_LOG_INTERVAL_MS) {
+      logError("stripe", "webhook-bad-signature", {
+        signatureHeader: signatureHeader ? "present" : "absent",
+        sinceLastLine: signatureFailures.logged,
+      });
+      signatureFailures = { logged: 0, since: now };
+    } else {
+      signatureFailures.logged++;
+    }
     return NextResponse.json({ error: "bad signature" }, { status: 401 });
   }
-  // A silent 401 per delivery is unobservable from our side: Stripe retries for
-  // days and then disables the endpoint.
-  console.log("[stripe-webhook] verified signature");
+  logInfo("stripe", "webhook-verified", {});
 
   let payload: unknown;
   try {
@@ -58,7 +108,7 @@ async function postStripeWebhook(req: NextRequest) {
   const eventType = stripeEventType(payload);
   const paymentId = paymentIdFromStripePayload(payload);
   if (!paymentId) {
-    await recordProviderEvent({
+    await recordTerminal({
       provider: "stripe",
       eventId,
       eventType,
@@ -74,7 +124,7 @@ async function postStripeWebhook(req: NextRequest) {
   if (!payment) {
     // No paymentId on the row: it would violate the foreign key, and the
     // delivery is not about a payment we know. The id is in the payload.
-    await recordProviderEvent({
+    await recordTerminal({
       provider: "stripe",
       eventId,
       eventType,
@@ -107,7 +157,10 @@ async function postStripeWebhook(req: NextRequest) {
         return NextResponse.json({ ok: false, error: outcome.reason }, { status: 200 });
       }
       return NextResponse.json({ ok: true, outcome: outcome.outcome });
-    } catch {
+    } catch (e) {
+      // A failure Stripe will redeliver is a degradation, not an outcome: the
+      // operator sees it, nobody is woken for it (lib/log.ts's level rule).
+      logWarn("stripe", "webhook-retryable", { path: "reverse", paymentId, eventId, error: describeError(e) });
       return NextResponse.json({ ok: false, error: "reverse-retryable" }, { status: 500 });
     }
   }
@@ -125,7 +178,7 @@ async function postStripeWebhook(req: NextRequest) {
       // the register should say a buyer was turned down rather than bury it in
       // the noise — it is the difference between "no signal" and "the buyer
       // could not pay".
-      await recordProviderEvent({
+      await recordTerminal({
         provider: "stripe",
         eventId,
         eventType,
@@ -149,7 +202,7 @@ async function postStripeWebhook(req: NextRequest) {
   const check = validateProviderMoney(payment.amountUsd, money);
   if (check.status === "rejected") {
     const moneyErr = check.reason;
-    await recordProviderEvent({
+    await recordTerminal({
       provider: "stripe",
       eventId,
       eventType,
@@ -164,7 +217,7 @@ async function postStripeWebhook(req: NextRequest) {
   }
   if (money.providerRef && payment.providerRef && money.providerRef !== payment.providerRef) {
     const detail = `reference-mismatch:${money.providerRef}`;
-    await recordProviderEvent({
+    await recordTerminal({
       provider: "stripe",
       eventId,
       eventType,
@@ -181,7 +234,7 @@ async function postStripeWebhook(req: NextRequest) {
     const claimed = await prisma.payment.findUnique({ where: { providerRef: money.providerRef } });
     if (claimed && claimed.id !== paymentId) {
       const detail = `reference-claimed:${money.providerRef}`;
-      await recordProviderEvent({
+      await recordTerminal({
         provider: "stripe",
         eventId,
         eventType,
@@ -194,7 +247,7 @@ async function postStripeWebhook(req: NextRequest) {
     }
   }
   if (payment.status !== PaymentStatus.PENDING) {
-    await recordProviderEvent({
+    await recordTerminal({
       provider: "stripe",
       eventId,
       eventType,
@@ -225,8 +278,9 @@ async function postStripeWebhook(req: NextRequest) {
       return NextResponse.json({ ok: false, error: outcome.reason }, { status: 200 });
     }
     return NextResponse.json({ ok: true, outcome: outcome.outcome });
-  } catch {
+  } catch (e) {
     // Retryable: non-2xx so Stripe redelivers; the event row says ERROR.
+    logWarn("stripe", "webhook-retryable", { path: "settle", paymentId, eventId, error: describeError(e) });
     return NextResponse.json({ ok: false, error: "settle-retryable" }, { status: 500 });
   }
 }

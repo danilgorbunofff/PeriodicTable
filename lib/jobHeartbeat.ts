@@ -25,6 +25,7 @@
  * that only a stopped schedule trips them; see U13-1 for what that costs.
  */
 import type { ProdConfigFinding } from "./env";
+import { describeError, logWarn } from "./log";
 import { prisma } from "./prisma";
 
 /** The five routes the tick (and the two Vercel crons) drive. */
@@ -77,7 +78,7 @@ export async function stampHeartbeat(
       },
     });
   } catch (e) {
-    console.error(`job heartbeat not recorded for ${key}:`, e);
+    logWarn("jobs", "heartbeat-not-recorded", { key, error: describeError(e) });
   }
 }
 

@@ -126,7 +126,11 @@ describe("R05-7 route wiring", () => {
 
   it("never lets a mail failure fail the request", () => {
     for (const [label, s] of routes) {
-      expect(s, label).toMatch(/catch[\s\S]{0,400}console\.warn/);
+      // The failed notice is logged and swallowed (R18-3/R18-11: one line on
+      // the structured sink, never a rethrow) — a queue that would not take the
+      // row must not turn a stored report or join into a 500.
+      expect(s, label).toMatch(/catch \(err\) \{[\s\S]{0,300}logWarn\("/);
+      expect(s, label).toMatch(/error: describeError\(err\)/);
       expect(s, label).toMatch(/return NextResponse\.json\(\{ ok: true/);
     }
   });

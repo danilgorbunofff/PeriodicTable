@@ -107,6 +107,60 @@ npx tsx scripts/backfill-previews.ts --limit=50
 Then let the outbox drain (`ops/email.md`). A restored tile with a stale preview
 is worse than an empty one, so restore in the same order the wave was contained.
 
+## Reading the audit trail (`R18-5`)
+
+Every action in this playbook writes an `AuditLog` row, and before phase 18 those
+rows had no reader: `REPORT_TRIAGED`, `PROFILE_MODERATED`, `PAYMENT_REVERSED` and
+the rest were visible to `psql` and to nobody else. There are now two readers.
+
+**The API**, which needs no SQL and no `DATABASE_URL`:
+
+```sh
+curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "$APP_URL/api/admin/audit?action=PROFILE_MODERATED"
+```
+
+| Parameter | Use |
+| --- | --- |
+| `action=` | One action from `lib/audit.ts`. An unknown value is **400 `BAD_ACTION`** — a typo must not read as "nothing happened". |
+| `startup=` | One listing's rows, for "what happened to this domain". |
+| `payment=` | One payment's rows, for §"Ledger-crossing actions" in `refunds-and-disputes.md`. |
+| `before=` | Cursor: pass the last row's id to get the next 50, newest first. |
+
+Counts come back as headers, so one call answers "what happened" and "how much of
+it": `X-Audit-Window-Days`, `X-Audit-Payment-Reversed`,
+`X-Audit-Profile-Moderated`, `X-Audit-Report-Triaged`, `X-Audit-Operator-Writes`.
+
+**SQL**, when the question is not one of those four. `actorType` is `system` by
+default, so a row with no `actorRef` was written by the product (a webhook, a
+worker, a payment settling) and not by a person:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT \"createdAt\", action, \"actorType\", \"actorRef\", \"startupId\", \"paymentId\", detail FROM \"AuditLog\" WHERE action IN ('PAYMENT_REVERSED','PROFILE_MODERATED','REPORT_TRIAGED') ORDER BY \"createdAt\" DESC LIMIT 50;"
+```
+
+| Question | Action | Extra columns that carry the answer |
+| --- | --- | --- |
+| Who hid or unlisted which domain, and why? | `PROFILE_MODERATED` | `actorRef` (token name, or null with the shared token), `startupId` → domain, `detail` = the reason given |
+| Who read the report queue, and what did they decide? | `REPORT_TRIAGED` | `actorRef` = `reviewedBy`, `detail` = `<status> — <note>` |
+| Why did money move backwards? | `PAYMENT_REVERSED` | `paymentId`, `detail` = `charge.refunded removedUsd=… remainingUsd=…` |
+
+The domain for a listing row comes from the join, not from the row:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT a.\"createdAt\", s.domain, a.\"actorRef\", a.detail FROM \"AuditLog\" a JOIN \"Startup\" s ON s.id = a.\"startupId\" WHERE a.action = 'PROFILE_MODERATED' ORDER BY a.\"createdAt\" DESC LIMIT 20;"
+```
+
+Two readings that are easy to get wrong:
+
+- `PAYMENT_REVERSED` is written by *settlement*, not by the operator: `actorType`
+  is `system` and there is no `actorRef`, because the refund was clicked in
+  Stripe's dashboard and the webhook is what we saw. "Who" lives in Stripe; "what"
+  lives here (`refunds-and-disputes.md` §"Ledger-crossing actions").
+- The trail is the record, not the log. Runtime logs last about an hour
+  (`ops/alerts.md` §"Log retention"); `AuditLog` rows do not expire, so an
+  incident note that has to survive the week quotes these rows.
+
 ## Which public numbers do not change
 Hiding, unlisting and restoring move **visibility only**. Stakes, payments,
 claims, `Element.totalPoolUsd`, `Element.stakeCount` and the leader are all

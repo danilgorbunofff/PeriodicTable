@@ -485,3 +485,33 @@ model JobHeartbeat {
   lastError String?  @db.VarChar(280)
   updatedAt DateTime @default(now()) @updatedAt
 }
+
+// Phase 18, R18-1 and R18-10: the error sink. A 500 or a boundary throw left one
+// platform log line — retention ~1 h on this plan — and nothing durable, so an
+// incident that started at 03:00 could not be read at 04:30. One row per
+// distinct failure: `fingerprint` is a hash of source|kind|message|route, and
+// repeated reports of the same failure inside a minute collapse into the single
+// row's `occurrences` counter instead of filling the table (lib/errorReport.ts).
+// `deploy` and `env` are stamped at write time so a row can always be placed in
+// a deployment; `requestId` pairs the row with the console line and the
+// `x-request-id` header a caller saw. Nothing here is a payload: the body the
+// write route accepts is capped at 4 KB and every field is truncated on the way
+// in, because an error report is untrusted input by construction.
+model ErrorReport {
+  id          String   @id @default(cuid())
+  source      String // api | server | client | process
+  kind        String? // short cause label, e.g. "unhandled-rejection"
+  message     String
+  stack       String?
+  route       String?
+  digest      String? // Next's digest for a server error, when there is one
+  fingerprint String
+  occurrences Int      @default(1)
+  deploy      String?
+  env         String?
+  requestId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([fingerprint, createdAt])
+}

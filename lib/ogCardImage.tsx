@@ -5,6 +5,7 @@
 import React, { type ReactElement } from "react";
 import { ImageResponse } from "next/og";
 import { OG_CARD, OG_SITE, headlineFontSize, type OgCard } from "./ogCard";
+import { describeError, logWarn } from "./log";
 
 /** The card as satori sees it. Inline flex-only styles: next/og renders without
  *  a CSS engine, and the geometry mirrors lib/ogCard.ts:renderOgCardSvg. */
@@ -55,7 +56,7 @@ export async function renderCardPng(card: OgCard): Promise<ArrayBuffer | null> {
   } catch (e) {
     // The SVG fallback is silent by design, so the reason it was needed has to
     // be logged: otherwise a broken renderer looks like a working card route.
-    console.warn(JSON.stringify({ scope: "og", msg: "png-render-failed", error: String(e) }));
+    logWarn("og", "png-render-failed", { error: describeError(e) });
     return null;
   }
 }

@@ -156,16 +156,20 @@ describe("the data-outage answers (R15-3, R15-10)", () => {
     // unknown symbol fell through to the populated shell (ISR kept a copy).
     expect(s).toMatch(/if \(!el\) notFound\(\)/);
     expect(s).toMatch(/Live standings are temporarily unavailable/);
-    expect(s).toMatch(/scope: "page"/);
+    // The outage leaves a line naming the page, through `lib/log.ts` (R18-11).
+    expect(s).toMatch(/logError\("page", "element-read-failed", \{/);
   });
 
   it("logs the failing read with the page and the reason, never silently", () => {
     for (const p of ["app/s/[domain]/page.tsx", "app/elements/[sym]/page.tsx"]) {
       const s = src(p);
-      // console.error with a structured payload: the pass's whole point is that
-      // an outage leaves evidence, not just a different picture.
-      expect(s, p).toMatch(/console\.error\(\s*JSON\.stringify\(\{/);
-      expect(s, p).toMatch(/reason:/);
+      // A structured payload through `lib/log.ts` (R18-11, which replaced the
+      // hand-rolled `console.error(JSON.stringify(…))` this pass first used):
+      // the point is that an outage leaves evidence, not just a different
+      // picture, and the line goes to the structured sink the drain reads.
+      expect(s, p).toContain("lib/log");
+      expect(s, p).toMatch(/logError\("page", "[a-z-]+", \{/);
+      expect(s, p).toMatch(/error: describeError\(err\)/);
     }
   });
 });

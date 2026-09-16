@@ -62,7 +62,7 @@ const DIGESTS: Record<LegalSlug, string> = {
   about: "78df6b30c09b8c39ee749e861373da556cbec00e68bd02451342134020cda1fd",
   rules: "a338b41854e569939324ff77c3e5856461a850800867cddf8c23bf52064b68de",
   contact: "5d621152a09915d6eec4c07b3044450a44af8f5aceb9a4528a91356d2b4a365c",
-  privacy: "3e31cdac9eaa30bc51b8116d659de163461ff60be55e59dbd709efc31d18498a",
+  privacy: "7543e10c8633c3b3b3abafec37e0b056b36104e96649f3f78befe404bda0215d",
 };
 
 describe("legal corpus", () => {
@@ -148,7 +148,11 @@ describe("legal corpus", () => {
     // The switch is named, and the page says it is off. Both are true today:
     // `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` is unset in production (doc 16 §5.1).
     expect(privacy).toContain("NEXT_PUBLIC_PLAUSIBLE_DOMAIN");
-    expect(privacy).toContain("Analytics is off in production.");
+    expect(privacy).toContain("Analytics is off in production");
+    // R18-13: the gate is described in the same paragraph as the switch, so the
+    // page cannot promise a notice the code does not render.
+    expect(privacy).toContain("does not load until you say yes");
+    expect(privacy).toContain("A visitor who never answers makes no request to Plausible at all");
   });
 
   it("names every processor in the processor list, in the page that lists processors (R16-2)", () => {

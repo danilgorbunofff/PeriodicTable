@@ -21,6 +21,7 @@
  */
 import crypto from "crypto";
 import { type CredentialHealth } from "@/lib/env";
+import { logError, logWarn, describeError } from "@/lib/log";
 import { type ProviderMoney } from "@/lib/money";
 
 // The one environment gate for the dev simulator (R07-1/R07-2): false in
@@ -59,6 +60,35 @@ export const getProviderMode = (): ProviderMode => (stripeEnabled() ? "stripe" :
  * until the pair is complete. */
 export const stripePartiallyConfigured = () =>
   !!process.env.STRIPE_SECRET_KEY !== !!process.env.STRIPE_WEBHOOK_SECRET;
+
+/**
+ * Which kind of credential the deployment is holding — never the credential
+ * (R18-4).
+ *
+ * Presence is not validity (R07-4) and it is also not *mode*: a production
+ * deployment holding an `sk_test_` key passes every check in this codebase, the
+ * Stripe probe returns `valid` (the key is a real key — of Stripe's test
+ * environment), and every checkout would then produce a session the buyer's card
+ * cannot pay while a settled delivery from a test-mode endpoint mints a real,
+ * permanent stake on the board. The two modes are distinguishable from the
+ * prefix alone, which is all this returns.
+ *
+ * `unknown` is a set-but-unrecognised key and is deliberately not `live`: this
+ * answers a question asked by an alert, and an alert must fail closed. Absent is
+ * already a `required` finding of its own (REQUIRED_PROD_ENV), so it is separate
+ * here rather than folded into `unknown`.
+ */
+export type StripeKeyMode = "live" | "test" | "unknown" | "unset";
+
+export function stripeKeyMode(
+  env: NodeJS.ProcessEnv = process.env,
+): StripeKeyMode {
+  const key = env.STRIPE_SECRET_KEY ?? "";
+  if (!key) return "unset";
+  if (key.startsWith("sk_live_") || key.startsWith("rk_live_")) return "live";
+  if (key.startsWith("sk_test_") || key.startsWith("rk_test_")) return "test";
+  return "unknown";
+}
 
 const STRIPE_API = "https://api.stripe.com/v1";
 
@@ -130,11 +160,18 @@ export async function probeStripeKey(
  * scrolls past, while a minute is fast enough to see and slow enough to read.
  *
  * Exported for the R07-4 cadence test; the only production caller is
- * createStripeCheckoutSession's failure path. */
+ * createStripeCheckoutSession's failure path. Phase 18 (R18-11) kept the cadence
+ * and moved the count out of the sentence and into `suppressed`, so a log query
+ * can sum it: `detail` is what the provider said, `providerStatus`/`keyMode` are
+ * what was asked. */
 const REJECTION_LOG_INTERVAL_MS = 60_000;
 let rejectionLog = { at: 0, suppressed: 0 };
 
-export function logCheckoutRejection(message: string): void {
+export function logCheckoutRejection(fields: {
+  providerStatus: number;
+  keyMode: string;
+  detail?: string;
+}): void {
   const now = Date.now();
   if (now - rejectionLog.at < REJECTION_LOG_INTERVAL_MS) {
     rejectionLog.suppressed += 1;
@@ -142,7 +179,14 @@ export function logCheckoutRejection(message: string): void {
   }
   const suppressed = rejectionLog.suppressed;
   rejectionLog = { at: now, suppressed: 0 };
-  console.error(`${message}${suppressed > 0 ? ` (+${suppressed} more rejected checkouts since the previous line)` : ""}`);
+  logError("stripe", "checkout-rejected", {
+    providerStatus: fields.providerStatus,
+    keyMode: fields.keyMode,
+    detail: fields.detail,
+    // The difference between "one buyer had a bad time" and "every buyer since
+    // the last line had a bad time" (R07-4).
+    suppressed,
+  });
 }
 
 /** Product tax code attached to every line item.
@@ -176,16 +220,15 @@ export async function createStripeCheckoutSession(params: {
   cancelUrl?: string;
 }): Promise<StripeSession | null> {
   if (!stripeEnabled()) {
-    console.warn(
-      `stripe: checkout session unavailable — missing ${
+    logWarn("stripe", "checkout-session-unavailable", {
+      missing:
         [
           !process.env.STRIPE_SECRET_KEY && "STRIPE_SECRET_KEY",
           !process.env.STRIPE_WEBHOOK_SECRET && "STRIPE_WEBHOOK_SECRET",
         ]
           .filter(Boolean)
-          .join(" + ") || "nothing"
-      }`
-    );
+          .join(" + ") || "nothing",
+    });
     return null;
   }
   try {
@@ -242,28 +285,29 @@ export async function createStripeCheckoutSession(params: {
       const detail = await res.text().catch(() => "");
       const key = process.env.STRIPE_SECRET_KEY ?? "";
       const auth = key.startsWith("sk_live_") ? "sk_live" : key.startsWith("sk_test_") ? "sk_test" : "unexpected-format";
-      logCheckoutRejection(
-        `stripe: checkout/sessions rejected (HTTP ${res.status}, key=${auth})` +
-          (detail ? ` — ${redactSecrets(detail).replace(/\s+/g, " ").slice(0, 300)}` : "")
-      );
+      logCheckoutRejection({
+        providerStatus: res.status,
+        keyMode: auth,
+        detail: detail ? redactSecrets(detail).replace(/\s+/g, " ").slice(0, 300) : undefined,
+      });
       return null;
     }
     const json = await res.json();
     const checkoutUrl: string | undefined = json?.url ?? json?.data?.url;
     const providerRef: string | undefined = json?.id ?? json?.data?.id;
     if (!checkoutUrl || !providerRef) {
-      console.warn(
-        `stripe: checkout/sessions response missing ${[!checkoutUrl && "url", !providerRef && "id"]
-          .filter(Boolean)
-          .join(" + ")} — keys: ${Object.keys(json ?? {}).join(",") || "none"}`
-      );
+      // A response that stopped carrying a field is a provider change, not a
+      // transient failure: the shape is in the line so the next reader does not
+      // have to reproduce it.
+      logWarn("stripe", "checkout-response-malformed", {
+        missing: [!checkoutUrl && "url", !providerRef && "id"].filter(Boolean).join(" + "),
+        keys: Object.keys(json ?? {}).join(",") || "none",
+      });
       return null;
     }
     return { checkoutUrl, providerRef };
   } catch (err) {
-    console.warn(
-      `stripe: checkout/sessions request failed — ${err instanceof Error ? err.message : String(err)}`
-    );
+    logWarn("stripe", "checkout-request-failed", { error: describeError(err) });
     return null;
   }
 }

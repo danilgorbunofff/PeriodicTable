@@ -13,6 +13,7 @@
  *   `onStoreError: "closed"` — see rateLimitAsync() below for why that is a
  *   deliberate split rather than a global inversion.
  */
+import { describeError, logError, logWarn } from "./log";
 import { rateLimit as syncBucket } from "./rateLimit";
 
 export type RateLimitStore = {
@@ -76,7 +77,10 @@ export function sharedRateLimitStore(): RateLimitStore {
     sharedStore = new MemoryStore();
     if (process.env.NODE_ENV === "production" && !warnedNoUpstash) {
       warnedNoUpstash = true;
-      console.warn("rate-limit: no shared store configured (UPSTASH_REDIS_REST_URL/TOKEN) — using instance-local memory");
+      // Once per process, and at `warn`: the limits still hold, they just hold
+      // per instance (R14-2), which is a degraded guarantee rather than a broken
+      // one. Only in production — in dev the memory store is the intended one.
+      logWarn("ratelimit", "no-shared-store", { fallback: "instance-local-memory" });
     }
   }
   return sharedStore;
@@ -140,10 +144,14 @@ export async function rateLimitAsync(
     const policy = opts.onStoreError ?? "open";
     // Only the key's prefix is logged: the rest is a credential hash or an
     // address, and neither belongs in a log line.
-    console.error(
-      `rate-limit: store failed ${failures}x this hour — failing ${policy} for "${key.split(":")[0]}"`,
-      e
-    );
+    logError("ratelimit", "store-failed", {
+      failures,
+      policy,
+      // The key's prefix only: the rest is a credential hash or an address, and
+      // neither belongs in a log line.
+      bucket: key.split(":")[0],
+      error: describeError(e),
+    });
     return policy === "open";
   }
 }

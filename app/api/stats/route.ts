@@ -17,8 +17,14 @@ const TTL = 30_000;
  * `claimedElements` counts the tiles the board actually draws as claimed: the
  * shared face predicate, so hiding a listing cannot make the headline report a
  * stake that `/api/elements` shows as unclaimed (R03-2). `stakeCount` and
- * `totalStakedUsd` remain hidden-inclusive money aggregates — concealed and
- * reversed stakes stay in the totals, as the moderation run documents.
+ * `totalStakedUsd` remain hidden-inclusive board aggregates — concealed stakes
+ * stay in the totals, as the moderation run documents.
+ *
+ * `moneyScope: "board"` is the R18-7 label: these are the stakes standing on
+ * the board, and the launch-day money metric (paid payments, net of reversals)
+ * is a different number with a different owner (`GET /api/admin/ops`, see
+ * `lib/opsMetrics.ts`). Sending the label beats documenting it, because the two
+ * have been compared as if they were the same quantity.
  */
 async function getStats() {
   if (cache && Date.now() - cache.at < TTL) {
@@ -35,6 +41,7 @@ async function getStats() {
     unclaimedElements: elementsTotal - claimedElements,
     stakeCount: pool._count._all,
     totalStakedUsd: pool._sum.amountUsd ?? 0,
+    moneyScope: "board",
   };
   cache = { at: Date.now(), data };
   return apiJson(data);

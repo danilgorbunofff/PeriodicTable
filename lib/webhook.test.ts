@@ -2,7 +2,7 @@
    A provider session id attached to two payments must fail safe (operator
    ERROR), never 500-loop or double-apply. */
 import { hasTestDb, purgeSettledOutbox, testPrisma } from "./testDb"; // must stay first
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "crypto";
 import { POST as webhookPOST } from "../app/api/webhooks/stripe/route";
@@ -376,6 +376,101 @@ describe("stripePayloadReversal", () => {
     ];
     for (const [payload, expected] of cases) {
       expect(stripePayloadReversal(payload), JSON.stringify(payload)).toBe(expected);
+    }
+  });
+});
+
+/* The refused-delivery line (R18-2). The route answered 401 silently before
+   this phase, so a rotated secret or a proxy that strips the header looked, from
+   our side, exactly like a quiet week. Three properties matter and each is
+   asserted against a real request: the line exists at all, it is throttled
+   rather than per-request (this endpoint is reachable by anyone, and an
+   unauthenticated prober must not be able to fill the log or page on it), and it
+   carries the shape of the failure rather than the payload or the secret. The
+   module registry is reset per test so the throttle's process-level state starts
+   at zero — the tests above already trip this path. */
+describe("the refused-delivery line (R18-2)", () => {
+  type Captured = { line: string; level: string; scope: string; msg: string; fields: Record<string, unknown> };
+
+  async function capture(): Promise<{ lines: Captured[]; restore: () => void }> {
+    const lines: Captured[] = [];
+    const real = console.error;
+    console.error = (...args: unknown[]) => {
+      const line = String(args[0] ?? "");
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        lines.push({
+          line,
+          level: String(parsed.level),
+          scope: String(parsed.scope),
+          msg: String(parsed.msg),
+          fields: parsed,
+        });
+      } catch {
+        /* not ours (an eslint note, a prisma warning) */
+      }
+    };
+    return { lines, restore: () => void (console.error = real) };
+  }
+
+  async function postBadSignature(headers: Record<string, string>, body = '{"type":"checkout.session.completed","n":1}') {
+    const { POST } = await import("../app/api/webhooks/stripe/route");
+    return POST(
+      new NextRequest("http://localhost/api/webhooks/stripe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body,
+      })
+    );
+  }
+
+  const badLines = (lines: Captured[]) => lines.filter((l) => l.msg === "webhook-bad-signature");
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("logs one line for a storm, with the shape of the failure and no payload", async () => {
+    const secret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+    const cap = await capture();
+    try {
+      const first = await postBadSignature({ "stripe-signature": `t=${Math.floor(Date.now() / 1000)},v1=deadbeef` });
+      const second = await postBadSignature({ "stripe-signature": `t=${Math.floor(Date.now() / 1000)},v1=deadbeef` });
+      const third = await postBadSignature({ "stripe-signature": `t=${Math.floor(Date.now() / 1000)},v1=deadbeef` });
+      expect([first.status, second.status, third.status]).toEqual([401, 401, 401]);
+
+      const ours = badLines(cap.lines);
+      expect(ours).toHaveLength(1);
+      const line = ours[0];
+      expect(line.level).toBe("error"); // a refused delivery is outcome-changing, not a degradation
+      expect(line.scope).toBe("stripe");
+      // The shape, not the value: "present" and "absent" name two different
+      // operator actions (rotate the secret vs. fix the proxy).
+      expect(line.fields.signatureHeader).toBe("present");
+      expect(line.fields.sinceLastLine).toBe(0);
+      // The third request is inside the throttle window: counted, not printed.
+      expect(line.fields).not.toHaveProperty("body");
+      expect(line.line).not.toContain("checkout.session.completed");
+      expect(line.line).not.toContain("deadbeef");
+      if (secret.length > 0) expect(line.line).not.toContain(secret);
+      // Errors that are never 500s: the provider must keep retrying, so the
+      // answer is the same 401 every time, and the body says nothing extra.
+      expect(await first.json()).toEqual({ error: "bad signature", code: "UNAUTHORIZED" });
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it("distinguishes a missing header from a wrong one", async () => {
+    const cap = await capture();
+    try {
+      const res = await postBadSignature({});
+      expect(res.status).toBe(401);
+      const ours = badLines(cap.lines);
+      expect(ours).toHaveLength(1);
+      expect(ours[0].fields.signatureHeader).toBe("absent");
+    } finally {
+      cap.restore();
     }
   });
 });

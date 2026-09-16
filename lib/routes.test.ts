@@ -495,7 +495,7 @@ describe.skipIf(!hasDb)("audit inside a transaction", () => {
   });
 
   it("a failed audit write outside a transaction is still non-blocking", async () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await expect(audit(bad)).resolves.toBeUndefined();
     } finally {

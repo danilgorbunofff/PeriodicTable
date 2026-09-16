@@ -13,7 +13,7 @@ import {
   isProduction,
   type CredentialHealth,
 } from "@/lib/env";
-import { probeStripeKey } from "@/lib/stripe";
+import { getProviderMode, probeStripeKey, stripeKeyMode } from "@/lib/stripe";
 import { mailDriver, suppressedCount } from "@/lib/email";
 import { dueOutboxCount, failedMailHealth } from "@/lib/outbox";
 import { prisma } from "@/lib/prisma";
@@ -70,12 +70,30 @@ async function getConfig(req: NextRequest) {
 
   const { findings } = getProdConfigReport();
   const probeInProduction = isProduction();
+  const keyMode = stripeKeyMode();
   let stripeKey: CredentialHealth["status"] | "not-checked" = "not-checked";
   if (probeInProduction) {
     const health = await probeStripeKey();
     stripeKey = health.status;
     const finding = credentialFinding("STRIPE_SECRET_KEY", health);
     if (finding) findings.push(finding);
+  }
+  // R18-4: the probe above cannot see this. A test key is a *valid* key, so
+  // `stripeKey` answers "valid" while the deployment is selling sessions no real
+  // card can pay — and a test-mode delivery that reaches the webhook endpoint
+  // settles a payment that never happened, minting a stake on the board out of
+  // nothing. `required`, like a rejected key, for the same reason: the status
+  // code is the only channel the external pinger reads, and this state must not
+  // be green. Gated on production so a laptop and the suite can hold test keys —
+  // which is what they are for. `unknown` is not reported here (it may be a
+  // restricted key of either mode); the mode itself is always in the payload.
+  if (probeInProduction && keyMode === "test") {
+    findings.push({
+      key: "STRIPE_SECRET_KEY",
+      severity: "required",
+      detail:
+        "STRIPE_SECRET_KEY is a test-mode key on a production deployment: no buyer's card can be charged, while a test-mode delivery would settle a real stake. Replace it with the live key (ops/secrets.md)",
+    });
   }
   // R10-1: money bug adjacent — mail that failed and was never delivered is
   // invisible to every existing surface. The outbox row is retried by the
@@ -171,7 +189,23 @@ async function getConfig(req: NextRequest) {
 
   const ok = configFindingsOk(findings);
   return NextResponse.json(
-    { ok, env: getAppEnv(), findings, stripeKey, mail, heartbeats, cost },
+    {
+      ok,
+      env: getAppEnv(),
+      findings,
+      stripeKey,
+      // R18-4: which mode each half of the money path is in. `providerMode` is
+      // the value that decides whether a payment row belongs to Stripe or to the
+      // simulator (Payment.provider); `stripeKeyMode` is the environment the key
+      // belongs to. Read together with `stripeKey` they separate the three
+      // failures that all looked like "payments are down": no key, a rejected
+      // key, and a key of the wrong environment.
+      providerMode: getProviderMode(),
+      stripeKeyMode: keyMode,
+      mail,
+      heartbeats,
+      cost,
+    },
     { status: ok ? 200 : 503 },
   );
 }

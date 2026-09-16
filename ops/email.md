@@ -1,7 +1,10 @@
 # Mail is not arriving
 
 Finding: R17-13. Related: `secrets.md` (`RESEND_API_KEY`), `takedown.md`
-(suppression), `payments-stuck.md` §5 (the receipt-specific path).
+(suppression), `payments-stuck.md` §5 (the receipt-specific path), and
+`alerts.md` for the two queue alarms that fire before anyone opens this file
+(`outbox-depth` at 25 pending rows, `outbox-stale` at 120 minutes) and for
+`mail-not-sending`, which is the alarm form of the `logged` driver below.
 
 Mail never fails loudly on the way out: it is written to a durable outbox row
 first, then delivered by the worker
@@ -34,7 +37,13 @@ curl -sS -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/jobs/reconcile" |
 | `failed` | The count behind `/api/jobs/config`'s failure block, with `oldestKey` naming the worst-offending dedupe key. |
 | `oldestDueHours` / `oldestDueAt` | How long the oldest undelivered row has been waiting. Hours, not minutes, is a stopped clock. |
 | `lastDeliveredAt` | The newest successful delivery. If this is older than `oldestDueAt`, nothing is draining. |
+| `pending` / `pendingByType` | Everything not yet delivered, by job type — `due` says what the worker will claim, this says how much is behind it (`R18-8`). |
+| `oldestPendingMinutes` | The age of the oldest undelivered row, in minutes, which is the unit an alert needs (`outbox-stale`, `alerts.md`). |
 | `driver` | The same reading as `/api/jobs/config`'s `mail.driver` (`R17-13`), repeated here so one call answers both questions. `logged` means every pass below is theatre. |
+
+A single read of all of it, without a bearer token's worth of judgement calls,
+is `GET /api/admin/ops` → `outbox` and `mail`, with the alarm list computed
+for you; `ops/alerts.md` names every code and its threshold.
 
 ## 2. Is the clock even running?
 

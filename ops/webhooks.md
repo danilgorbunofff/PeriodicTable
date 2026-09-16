@@ -1,7 +1,8 @@
 # Webhooks stopped working
 
 Finding: R17-2. Rotation of the secret is `secrets.md`; this file is the
-diagnosis.
+diagnosis. Alarm thresholds and the retention limit that makes a log line a bad
+witness are in `alerts.md` (class 3, and §"Log retention").
 
 One endpoint takes provider deliveries: `POST /api/webhooks/stripe`
 (`app/api/webhooks/stripe/route.ts`). It verifies `stripe-signature`
@@ -100,6 +101,10 @@ safe and always the same operation:
   redelivery loop cannot fix a mismatch, and 200 stops Stripe from trying for
   days while the row routes to a human. Retryable failures answer **5xx** so
   Stripe does retry.
+- Every delivery writes a `ProviderEvent` row, and a bad signature now logs a
+  throttled one-line reason rather than one line per attempt (`R18-2`). The rows,
+  not the lines, are what `alerts.md` class 2/3 counts — the lines expire with
+  the hour.
 
 ## 6. The other webhook
 

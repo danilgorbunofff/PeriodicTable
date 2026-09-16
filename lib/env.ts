@@ -21,6 +21,7 @@
 // lib/operator.ts is dependency-free (it reads the environment and prints it),
 // so the config report can name the operator gaps alongside the rest without
 // pulling anything else into this module's import graph.
+import { logError } from "./log";
 import { operatorAdvisories } from "./operator";
 
 export type AppEnv = "development" | "test" | "preview" | "production";
@@ -345,10 +346,12 @@ export function reportProdEnvAtStartup(
   if (!isProduction() || isBuildPhase()) return [];
   const missing = getMissingProdEnv(env);
   if (missing.length > 0) {
-    console.error(
-      `startup: production configuration is incomplete (${missing.length} required) — ` +
-        `GET /api/jobs/config reports the same list to an authenticated caller:\n- ${missing.join("\n- ")}`,
-    );
+    logError("env", "production-incomplete", {
+      missing: missing.length,
+      // Names only, never values: the same list `/api/jobs/config` reports to an
+      // authenticated caller.
+      vars: missing,
+    });
   }
   return missing;
 }

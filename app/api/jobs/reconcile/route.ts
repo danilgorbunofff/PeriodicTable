@@ -279,7 +279,7 @@ async function getReconcileStatus(req: NextRequest) {
       },
       outbox: {
         ...outbox,
-        note: "Mail and preview work. `due` is what the next worker tick would claim (it clears itself); `exhausted` has spent all 5 attempts and `failed` failed without a later success — those two are operator work, and POST /api/admin/outbox/retry with the dedupe key is the lever. `oldestDueHours` is how long the oldest undelivered row has been waiting, `lastDeliveredAt` says whether the pipeline is moving at all, and `driver: \"logged\"` means RESEND_API_KEY is unset so nothing is leaving the building.",
+        note: "Mail and preview work. `due` is what the next worker tick would claim (it clears itself); `exhausted` has spent all 5 attempts and `failed` failed without a later success — those two are operator work, and POST /api/admin/outbox/retry with the dedupe key is the lever. `pending` is every undelivered row whatever its backoff says, so it is the depth: `due: 0` with a `pending` that does not fall between two reports is a stalled queue, not an empty one (`oldestPendingMinutes` says how stalled, `pendingByType` says which pipeline). `lastDeliveredAt` says whether the pipeline is moving at all, and `driver: \"logged\"` means RESEND_API_KEY is unset so nothing is leaving the building.",
       },
     },
     { status: failing ? 503 : 200 },

@@ -1,7 +1,8 @@
 # The database: migrating, seeding, restoring
 
 Finding: R17-12. Related: `rollback.md` (what to do when a deploy is the
-problem), `secrets.md` (`DATABASE_URL` custody).
+problem), `secrets.md` (`DATABASE_URL` custody), `alerts.md` (the `/api/health`
+contract the monitor reads, and the E1 signal).
 
 ## Which database am I looking at?
 
@@ -136,6 +137,16 @@ Procedure once the window is known (and generally, in this order):
    consistent: `reconcile.ok = true` and `divergent.count = 0`. Anything else is
    a live incident, and `payments-stuck.md` §4 is the recovery for individual
    payments (provider re-delivery) rather than whole-database surgery.
+
+## Is it reachable at all?
+
+`GET /api/health` is the surface for exactly this question, and it is public and
+token-free on purpose: one `SELECT 1` with a 2 s budget, **200**
+`{ok:true,db:"up"}` or **503** `{ok:false,db:"down",timedOut}`, `no-store`, and
+no error text in the body (the reason is one `logWarn` line, `R18-6`). A 503 from
+this route means the database or the network to it — not a bad deploy and not
+a bad token. It is the first URL on the monitor's list (`alerts.md`), and it is
+the reason a database outage no longer looks like any other 500.
 
 ## Housekeeping worth knowing
 

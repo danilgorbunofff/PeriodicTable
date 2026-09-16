@@ -424,6 +424,62 @@ describe("config report route", () => {
     expect(gapBody.ok).toBe(false);
     expect(gapBody.findings.map((f) => f.key)).toContain("TURNSTILE_SECRET");
   });
+
+  it("reports a production deployment running a test key as required (R18-4)", async () => {
+    const { GET } = await import("../app/api/jobs/config/route");
+    const call = () =>
+      GET(
+        new NextRequest("http://localhost/api/jobs/config", {
+          headers: { authorization: "Bearer s3cr3t" },
+        }) as never,
+      );
+    type Body = {
+      ok: boolean;
+      env: string;
+      stripeKey: string;
+      stripeKeyMode: string;
+      findings: { key: string; severity: string; detail: string }[];
+    };
+
+    set("CRON_SECRET", "s3cr3t");
+    set("DATABASE_URL", LOCAL_DB);
+    set("VITEST", undefined);
+    set("NODE_ENV", "production");
+    set("VERCEL_ENV", "production");
+    // The key probe is a real Stripe call in production. A throwing fetch keeps
+    // it out of the network and lands the credential at `unknown`, which is a
+    // different finding — and a valid test key would otherwise probe as
+    // "valid", which is precisely the blindness R18-4 is about.
+    vi.stubGlobal("fetch", () => {
+      throw new Error("the config route must not call out during tests");
+    });
+
+    set("STRIPE_SECRET_KEY", "sk_test_abcdef");
+    const test = await call();
+    const testBody = (await test.json()) as Body;
+    expect(testBody.env).toBe("production");
+    expect(testBody.stripeKeyMode).toBe("test");
+    const modeFinding = testBody.findings.find((f) =>
+      f.detail.includes("test-mode"),
+    );
+    expect(modeFinding?.key).toBe("STRIPE_SECRET_KEY");
+    // `required`, because the status code is the only channel the pinger reads:
+    // a test key sells sessions no real card can pay, and a test-mode delivery
+    // would settle a stake that was never bought.
+    expect(modeFinding?.severity).toBe("required");
+    expect(testBody.ok).toBe(false);
+    expect(test.status).toBe(503);
+
+    // The same deployment with a live key: the mode is still reported, and the
+    // finding is gone. Nothing else about this environment changed.
+    set("STRIPE_SECRET_KEY", "sk_live_abcdef");
+    const live = await call();
+    const liveBody = (await live.json()) as Body;
+    expect(liveBody.stripeKeyMode).toBe("live");
+    expect(liveBody.findings.some((f) => f.detail.includes("test-mode"))).toBe(
+      false,
+    );
+  });
 });
 
 describe("adminAuth", () => {
@@ -536,26 +592,42 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
     const CANARY = "wrong-gate-token-canary";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const json = (spy: { mock: { calls: unknown[][] } }, i = 0) =>
+      JSON.parse(String(spy.mock.calls[i]?.[0] ?? "{}")) as Record<string, unknown>;
     try {
       set("ADMIN_TOKEN", "gate-shape");
       // A prober with a bearer token and one with no credential at all are
       // different events, and the line says which one happened.
       await adminGate(adminReq(CANARY), "admin/probe-log-bearer");
       await adminGate(adminReq(), "admin/probe-log-none");
-      const lines = warn.mock.calls.map((c) => String(c[0]));
-      expect(lines[0]).toContain("auth: refused (bearer token, 403)");
-      expect(lines[0]).toContain("/api/admin/probe-log-bearer");
-      expect(lines[0]).toContain("from 0.0.0.0");
-      expect(lines[1]).toContain("auth: refused (no credential, 403)");
-      expect(lines[1]).toContain("admin/probe-log-none");
+      expect(json(warn)).toMatchObject({
+        level: "warn",
+        scope: "auth",
+        msg: "refused",
+        shape: "bearer token",
+        status: 403,
+        route: "admin/probe-log-bearer",
+        ip: "0.0.0.0",
+      });
+      expect(json(warn, 1)).toMatchObject({
+        msg: "refused",
+        shape: "no credential",
+        route: "admin/probe-log-none",
+      });
 
       // The alert threshold escalates exactly the twentieth refusal on a route:
       // the review's hundred wrong tokens crosses it in the first minute, and a
       // line per guess would be the flood the operator is meant to see instead.
       for (let i = 0; i < 20; i++) await adminGate(adminReq(CANARY), "admin/probe-log-alert");
       expect(error).toHaveBeenCalledTimes(1);
-      expect(String(error.mock.calls[0][0])).toContain("(a rate no operator reaches by hand)");
-      expect(String(error.mock.calls[0][0])).toContain("20 this hour");
+      expect(json(error)).toMatchObject({
+        level: "error",
+        scope: "auth",
+        msg: "refused",
+        escalated: true,
+        count: 20,
+        window: "1h",
+      });
 
       // A log line is a durable artefact on a platform we do not own: the value
       // tried, and the value stored, must not be legible in it.

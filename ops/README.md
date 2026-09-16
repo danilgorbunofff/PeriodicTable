@@ -1,13 +1,14 @@
 # Operator runbooks
 
 The procedures for running periodictable.lol. Everything here assumes no UI:
-the operator surface is five authenticated endpoints and a shell. Started as
+the operator surface is the authenticated `/api/admin/*` and `/api/jobs/*`
+endpoints and a shell. Started as
 the Phase 17 fix pass (`doc/review/17-operator-tooling-and-runbooks.md`), which
 measured how much of the plan's runbook list had no procedure written at all —
 this file is the index for what now exists, and each runbook names the finding
 it answers.
 
-## The thirteen procedures
+## The fourteen procedures
 
 | # | Situation | Runbook | Finding |
 | --- | --- | --- | --- |
@@ -24,6 +25,7 @@ it answers.
 | 11 | Email stops going out | `email.md` | R17-13 |
 | 12 | An abuse wave arrives | `abuse-wave.md` | R17-14 |
 | 13 | The site is down and users need telling | `comms.md` | R17-15 |
+| 14 | Nothing has failed yet — thresholds, the monitor, retention | `alerts.md` | R18-9, R18-12, R18-15 |
 
 Two findings have no procedure of their own because their software half is what
 closes them: R17-7's operator half is the last section of `takedown.md` (a buyer's
@@ -68,6 +70,17 @@ export CRON_SECRET=…   # /api/jobs/*    — workers and reports
 - A free external pinger reads `/api/jobs/config` status codes: **200** means the
   secret is right and no required variable is missing, **503** means
   authenticated but misconfigured, **401** means the pinger's secret is wrong.
+- `GET /api/health` is the unauthenticated one: **200** only when the database
+  answered inside 2 s, **503** when it did not. It exists so liveness does not
+  depend on a bearer token (the monitor's URL list is in `alerts.md`).
+- `GET /api/admin/ops` is the launch-day dashboard (money, funnel, queue, mail,
+  audit, recorded errors, alarms) and answers **503 only under `?ok=1`** when
+  something is wrong.
+  `alerts.md` lists each alarm code, its threshold, and — with `D18-2` —
+  where it should reach you.
+- Runtime logs last about an hour on the current platform tier. Anything that has
+  to outlive an incident is a Postgres row; the substitute for every "check the
+  logs" step is tabled in `alerts.md` §"Log retention".
 - `GET /api/jobs/config` also carries `mail`, `heartbeats`, `cost` and `stripeKey`
   blocks — the liveness and mail readings the runbooks below start from.
 - Run it by hand after a deploy or a change:
@@ -85,5 +98,6 @@ export CRON_SECRET=…   # /api/jobs/*    — workers and reports
   there is no reason to run it against production. See `database.md`.
 - The operator-only answers (on-call hours, credential custody, refund authority,
   the PITR window, the status page, Upstash) are recorded as decisions
-  `D10–D16` in `doc/review/FINDINGS.md`. Where a runbook needs one, it names the
-  decision instead of inventing the answer.
+  `D10–D18` in `doc/review/FINDINGS.md`. Where a runbook needs one, it names the
+  decision instead of inventing the answer — `alerts.md` does this for the alert
+  channel (`D18-2`), the monitor (`D18-5`) and the pager (`D18-6`).

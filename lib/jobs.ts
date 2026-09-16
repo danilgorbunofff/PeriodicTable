@@ -38,6 +38,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
+import { logError, logWarn } from "./log";
 import { isLocalDatabase, isProduction } from "./env";
 import { clientIp } from "./ip";
 import { rateLimitAsync } from "./rateStore";
@@ -249,13 +250,14 @@ function noteRefusal(
   // different event from one guessing tokens, and a log must not become the
   // place a leaked secret is legible. Past the alert threshold the line is
   // escalated once per AUTH_REJECTION_ALERT refusals instead of every time.
-  const line =
-    `auth: refused (${shape}, ${status}) on /api/${route} from ${ip} — ` +
-    `${count} this hour`;
+  const fields = { shape, status, route, ip, count, window: "1h" };
+  // One line per refusal, escalated on every AUTH_REJECTION_ALERT-th. The level
+  // carries the escalation (R18-11): a stray wrong token is `warn`, and only the
+  // rate no operator reaches by hand is `error` — i.e. the only one that pages.
   if (count % AUTH_REJECTION_ALERT === 0) {
-    console.error(`${line} (a rate no operator reaches by hand)`);
+    logError("auth", "refused", { ...fields, escalated: true });
   } else {
-    console.warn(line);
+    logWarn("auth", "refused", fields);
   }
 }
 

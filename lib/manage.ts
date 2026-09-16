@@ -35,6 +35,7 @@
  */
 import { createHash, randomBytes } from "crypto";
 import { prisma } from "./prisma";
+import { logWarn } from "./log";
 import { getAppEnv, isProduction } from "./env";
 import { audit } from "./audit";
 
@@ -98,7 +99,7 @@ export async function requestManageToken(params: {
     // development, and only when DEV_MANAGE_TOKENS=1 (R14-7).
     if (devManageTokenEnabled()) return { sent: true, __devToken: raw };
     // TODO(v2): ship the management pages, then enqueue the link via OutboxEvent.
-    console.warn(`manage link requested for ${domain}, but listing management is not shipped (v1); link not sent`);
+    logWarn("manage", "link-not-delivered", { domain, reason: "listing-management-not-shipped" });
     return { sent: true };
   }
   return { sent: true };

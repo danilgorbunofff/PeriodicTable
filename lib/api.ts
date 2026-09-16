@@ -146,8 +146,18 @@ export type ElementDetail = {
  *
  * `claimedElements`/`unclaimedElements` count the tiles the board draws as
  * claimed, under the shared face predicate (`lib/moderation.ts`). `stakeCount`
- * and `totalStakedUsd` are money: every stake row, concealed and reversed
- * included (R03-2).
+ * and `totalStakedUsd` are money: every stake row, concealed ones included
+ * (R03-2).
+ *
+ * **Both money fields are board-scoped** (R18-7), and `moneyScope` says so on
+ * the wire rather than in this comment alone. Board scope sums the stakes
+ * currently listed, so it answers "how much is standing on the board right now"
+ * — not "how much money has this business taken". Those two numbers are
+ * genuinely different (a refunded payment leaves the board but stays in the
+ * ledger, and a stake whose tile is concealed leaves the ledger's board view
+ * while still being paid for), and an operator comparing them without knowing
+ * that reads the difference as a bug. The ledger number lives in one place:
+ * `GET /api/admin/ops` → `money.paidNetUsd`, defined in `lib/opsMetrics.ts`.
  */
 export type StatsResponse = {
   elementsTotal: number;
@@ -155,6 +165,7 @@ export type StatsResponse = {
   unclaimedElements: number;
   stakeCount: number;
   totalStakedUsd: number;
+  moneyScope: "board";
 };
 
 /** Table Order row from /api/table-order — ALL stakes summed (P1-10). */
@@ -230,7 +241,8 @@ export function isStatsResponse(v: unknown): v is StatsResponse {
     typeof v.claimedElements === "number" &&
     typeof v.unclaimedElements === "number" &&
     typeof v.stakeCount === "number" &&
-    typeof v.totalStakedUsd === "number"
+    typeof v.totalStakedUsd === "number" &&
+    v.moneyScope === "board"
   );
 }
 

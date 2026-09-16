@@ -9,7 +9,7 @@
 | Commit reviewed | `9681bdcbff2435ef258224c52000e0f8d6089f5c` |
 | Reviewed | 2026-09-15, read-only pass — no application code, config, test, migration or legal page changed |
 | Reviewer | batch-4 agent pass; evidence = `git grep` censuses, file reads, live probes against `periodictable.lol`, one provider-documentation reading |
-| Status | draft — findings registered, no fixes (read-only pass) |
+| Status | draft — fixes applied (2026-09-16, §5.9) |
 
 | Probe not run | Why | Residue |
 |---|---|---|
@@ -344,6 +344,11 @@ $ git --no-pager grep -n -E 'console\.' -- app lib ':!*.test.*'
 - **Method note.** The census was re-run with `git grep` after a first pass built on PowerShell `Select-String -Path app\**\*.ts …` missed `app/api/checkout/route.ts:113` — `-Path` globs do not recurse reliably on this host. Every figure in this doc is from the `git grep` runs; §11 records the correction.
 - **`lib/email.ts` does not appear.** The mail path contains no log statement at all — the finding of §3.2 row 11 rests on this absence *plus* `lib/email.ts:66,69` discarding the reason.
 - Two of the 23 runtime sites are `console.error` in **client** components (`app/error.tsx:20`, `app/global-error.tsx:16`) — they write to the user's browser.
+- **After the fix pass (2026-09-16): two runtime `console.*` calls remain, and they are those two client sites.** The
+  whole-tree census is now **76 matches across 14 files**, almost all of them test files; the runtime-only census
+  (`-- app lib ':!*.test.*'`) is **3 matches in 3 files** — the two `console.error` calls above, which now make that
+  call *in addition to* filing to the sink, and one comment in `lib/rateStore.ts:100`. §5.9 has the re-run, the level
+  rule the other 21 sites were migrated onto, and what each of them became.
 - One site is `lib/manage.ts:67`, warning on every manage-link request that the link is not sent because the feature is not shipped (v1 dormancy is settled by `doc/PROD-READINESS-CHECKLIST.md:181`; `17` §7 `R17-7` owns the client gap).
 
 ### 5.2 Absence probes
@@ -456,9 +461,161 @@ Duration     65.31 s
 
 The 6 failures are the pre-existing CRLF artifact the run instructions name (`lib/legalMeta.test.ts` ×5, `lib/claimFace.test.ts` ×1) and are out of scope. Noted here rather than in `FINDINGS.md` because it is environmental, not a product defect. Note the observed numbers differ from the brief's expectation (~470 passed / 71 skipped): this checkout ran 432 tests with **0** skipped.
 
+**After the fix pass (2026-09-16):** the same command runs **65 files / 967 passed / 0 failed** here, and — with no database at all — **57 passed | 8 skipped (65), 807 passed | 160 skipped (967)**. The six CRLF failures this section records no longer reproduce; the phase-18 branch rewrote those files. §5.9 has the exact commands and what moved.
+
 ### 5.8 Provider-documentation reading: log retention (not a console reading)
 
 Read on 2026-09-15 from Vercel's documentation and public answers: log **drains** are a Pro-and-above feature, and Hobby runtime logs are visible in the dashboard for a short rolling window (commonly reported as about one hour). This is *documentation*, not a reading of `periodictable.lol`'s plan or dashboard, so it is registered as `U18-1` with the exact dashboard step that settles it. It matters because every "check the logs" instruction in every runbook that might be written inherits this limit.
+
+### 5.9 Fix verification
+
+**2026-09-16, this worktree, after the §7 fix pass.** The pass ran against a real database, like the
+`08`–`17` passes: the same `postgres:16-alpine` container (`ptl-fix08-pg`, `127.0.0.1:55433`, database
+`periodictable_test`) with the fourteen migration directories `0000`–`0013` applied, so nothing below
+skipped for want of a schema. Nothing was deployed, the application was never started and no console was
+read — which is this doc's one irreducible limit — so every production reading in §1–§6 stands as written,
+each §8 box is checked against the tree rather than against a release, and U18-1…U18-8 all stand.
+
+```
+TEST_DATABASE_URL=… npx vitest run             → 65 files passed (65); 967 passed, 0 failed
+npx vitest run          (no database at all)   → 57 passed | 8 skipped (65); 807 passed | 160 skipped (967)
+npx tsc --noEmit                               → clean
+npx eslint lib app components emails scripts   → clean (exit 0, no output)
+git --no-pager grep -n -E 'console\.' -- app lib ':!*.test.*'
+                                               → 3 matches / 3 files: app/error.tsx, app/global-error.tsx
+                                                 (each filing to the sink as well) and one comment
+psql … -tAc 'select count(*) from "ErrorReport"'   → 0 — the suite writes, reads and cleans up after itself
+```
+
+**What moved.** 882 → **967** cases and 57 → 65 files on the database suite; 737 → **807** passed
+(145 → 160 skipped) with no database at all. The eight new files: `lib/log.test.ts` (13),
+`lib/errorReport.test.ts` (18), `lib/clientError.test.ts` (16), `lib/health.test.ts` (11),
+`lib/healthRoute.test.ts` (2), `lib/opsMetrics.test.ts` (18), `lib/analyticsConsent.test.ts` (7) and
+`lib/emailFailure.test.ts` (2). The runtime `console.*` census went **23 sites in 15 files → 2 sites in 2
+files** (§5.1), the route tripwire in `lib/contracts.test.ts` went 32 → 34 for the two new API routes, and
+four surfaces did not exist before this pass at all: `/api/health`, `/api/internal/error`,
+`/api/admin/ops` and `/api/admin/audit`. `ops/alerts.md` is new; `prisma/migrations/0013_error_report` is
+the one schema addition.
+
+Three things this pass found while writing the tests that the review had not registered:
+
+1. **`lib/errorReport.test.ts` wrote five `ErrorReport` rows per run and deleted none of them.** The sink's
+   own table is shared by every DB-backed file in a suite that runs single-file (`vitest.config.ts`
+   `fileParallelism: false`), so the reader test that asserts a *delta* would have inherited a growing
+   pile — 25 rows had accumulated from earlier runs before it was noticed. The shape test now cleans up
+   after itself (guarded on `hasTestDb`) and the reader's assertions are deltas against a before/after
+   read rather than "the newest row is mine".
+2. **Six pre-existing assertions were pinned to the exact text this pass replaced** — the old `console.*`
+   idioms, an exact `Cache-Control` string, and two comment clauses. Each was re-pointed at the new idiom
+   with a comment naming the finding that changed it, and `app/api/admin/audit/route.ts` gained the
+   `no-store, max-age=0` header its reader test expected: a runbook can quote a header, but only a test
+   can hold a route to it.
+3. **The refused-delivery line needed a runtime test, not a source reading.** The first version of the
+   R18-2 check asserted that the route *contains* a throttled `logError` call. The test now drives the
+   route through a storm of bad signatures and asserts one line per minute, the `signatureHeader`
+   present/absent split, and that neither the payload nor the signing secret appears in it.
+
+**Per finding.** Every §7 status line below names its half; these are the artefacts and the honest gaps.
+
+**R18-1 — the sink.** `lib/errorReport.ts` is the whole mechanism: `fingerprintOf()`, a 60-second repeat
+window, a 30-per-60-second write cap, a three-failure breaker that opens for five minutes, `capFields()`
+and `errorSinkEnabled()`. `app/api/internal/error/route.ts` is the only door (202 `{recorded, reason}`,
+429/413/400 on the refusal arms, GET → 405, and it never echoes a row back). `instrumentation.ts` handles
+`uncaughtException` and `unhandledRejection` with a 750 ms deadline, so a crash loop cannot become a report
+loop; `lib/route.ts` files every unhandled API-route error through `reportCaught()`. As of this segment the
+sink is also **readable**: `/api/admin/ops` carries an `errors` block. Retention is stated rather than
+assumed — there is no pruning job, deliberately, and `ops/alerts.md` tables what that costs.
+
+**R18-2 — the refused delivery and the terminal decision.** The 401 now logs
+`stripe / webhook-bad-signature` with `signatureHeader` (`present`/`absent`) and `sinceLastLine`, throttled
+to one line a minute; the seven `recordProviderEvent` sites became one `recordTerminal()` helper, so every
+terminal outcome (including the retryable 500s) is a row plus a line; and the reader is the dashboard's
+`providerEvents` block (`byOutcome`, `recentErrors`). The deliberately unwritten half: a bad signature
+writes no `ProviderEvent` row, because the request's signature did not verify and a rejected delivery is
+unverified input — §8 box 2 is left unticked for that clause rather than quietly satisfied by storing
+attacker-supplied JSON.
+
+**R18-3 — mail failures.** `failureDetail()` leads the row's `detail` with the cause
+(`failed (provider 422): resend 422: {body} — {subject}`), the row keeps `providerStatus`, and one
+`send-failed` line carries template, `toRef` (a salted digest, never the address), status, reason and
+dedupe key. The reader is the dashboard's `mail` block. `lib/emailFailure.test.ts` drives the real sender
+against a stubbed provider for both arms the box names — a 422 with a provider body, and a call that never
+answers — and asserts the row, the single line, and the absence of the address and the key from both.
+
+**R18-4 — key mode.** `stripeKeyMode()` (`live`/`test`/`unknown`/`unset`) and `getProviderMode()` ride the
+config payload, and a production deployment holding a test key gains a `required` `STRIPE_SECRET_KEY`
+finding — `required`, because the status code is the only channel the pinger reads. `lib/ops.test.ts`
+asserts both arms through the route: test key → 503 with the finding, live key → the finding gone.
+
+**R18-5 — the audit reader.** `app/api/admin/audit/route.ts` (`adminGate`, `?action=` validated against
+`AUDIT_ACTIONS`, `?startup=`, `?payment=`, `?before=` cursor, 50-row pages, `X-Audit-*` headers,
+`no-store`), with the queries for `PAYMENT_REVERSED`, `PROFILE_MODERATED` and `REPORT_TRIAGED` written into
+`ops/takedown.md` and `ops/alerts.md`.
+
+**R18-6 — health.** `/api/health` runs exactly one `SELECT 1` behind `probeDatabase()` with a 2-second
+timeout that never throws, and answers 200 `{ok:true,…}` or 503 `{ok:false,db:"error"|"timeout",…}` with
+`deploy`/`env`/`ms` attached, `no-store`, and one `warn` when the probe fails. It is URL 1 of 5 on
+`ops/alerts.md`'s monitor list and is unauthenticated by design — an unauthenticated liveness probe is the
+only one a monitor without a secret can use. The monitor that would poll it is `D21`/`U18-3`.
+
+**R18-7 — one money definition.** `opsReport().money` defines paid-net-of-reversals once, and
+`/api/stats`'s two money fields now carry `moneyScope: "board"` with the board's own count beside them
+(`lib/api.ts`, `app/api/stats/route.ts`, `components/StatsCard.tsx`), so the two surfaces no longer look
+like they disagree about the same fact.
+
+**R18-8 — queue depth and ageing.** `OutboxHealth` gained `pending`, `pendingByType`, `oldestPendingMinutes`
+and per-type ages, exposed on both workers and the dashboard's `outbox` block, with three alarm codes
+(`outbox-depth` — critical when the queue is deep *and* nothing is due, `outbox-stale`, `outbox-exhausted`)
+and tests that assert the aggregate against a known queue state rather than against whatever the database
+happens to hold.
+
+**R18-9 — the policy.** `ops/alerts.md` holds the monitor URL list with the expected status per URL, the
+six-class signal table with each threshold as a number, the alarm-code table with severities, and the
+stale-tick bounds derived from `HEARTBEAT_ROUTES` (26 h for the two daily workers, 13 h 20 m for the rest).
+The half no worktree can supply: the channel and the recipient (`D18`), whether a monitor exists at all
+(`U18-3`, `D21`), and who is on call (`D22`).
+
+**R18-10 — client crashes.** Both boundaries now file through `reportClientError()`, which dedupes on
+message and route, sends at most 25 per page load, and never retries — `sendBeacon` first, `fetch
+keepalive` as the fallback — with `components/ClientErrorReporter.tsx` binding the window's `error` and
+`unhandledrejection` events. They also keep the browser-console call, because the user's own console is the
+only place a client crash is visible while it is happening.
+
+**R18-11 — correlation and levels.** `lib/log.ts` grew `withRequestScope()`/`currentRequestId()` (an
+`AsyncLocalStorage` scope `lib/route.ts` opens around every API call and echoes in `X-Request-Id`),
+`deploymentId()`, `appEnv()` and `describeError()`, and the level rule is written where the emitters are:
+degraded-but-survived is `warn`, outcome-changing failure is `error`, and only `error` may page. The 21
+runtime sites the census counted were migrated onto it in the same pass.
+
+**R18-12 — the ambiguous status code.** `ops/alerts.md` states the three contracts verbatim and side by
+side: `/api/jobs/config` 200 (right secret, nothing required missing) / 503 (authenticated but
+misconfigured) / 401 (secret did not match); `/api/health` 200/503; `/api/admin/ops` 200, or 503 only when
+asked with `?ok=1`. A monitor now has a documented expected status per URL instead of "not 200".
+
+**R18-13 — the consent gate.** `lib/analyticsConsent.ts` (version-1 record under `ptl:analytics-consent`,
+`analyticsAllowed()` failing closed) plus `components/AnalyticsConsent.tsx`, which renders only when a
+domain is configured and injects the script only after an explicit Allow. Nothing is shown in production
+today, because the domain is unset — but setting that one variable no longer turns analytics on by itself,
+which is the finding. Whether they run at all, and with what notice, is `D19`.
+
+**R18-14 — the funnel.** The dashboard's `funnel` block computes clicks → checkouts started → paid and both
+conversions server-side from our own tables — deliberately not from the seven inert client events — and
+`money.window.settledRate` answers paid → settled. The definitions are in `ops/alerts.md`'s dashboard
+section, so "what fraction of started checkouts completed yesterday" is a read rather than a SQL exercise.
+
+**R18-15 — the retention window.** `ops/alerts.md` carries the ~1 h window, its `U18-1` status and an
+eight-row durable-substitute table, and every runbook that says "read the logs" now states the window and
+points at it: `ops/README.md`, `ops/takedown.md`, `ops/database.md`, `ops/email.md`, `ops/webhooks.md`.
+Buying drains is `D20`.
+
+**After the fix pass (§5.9).** **Fourteen of the fifteen §8 boxes are ticked** and one is not: box 2's row
+clause, which asked for a `ProviderEvent` row for a delivery whose signature did not verify, and which the
+pass deliberately declined to satisfy (the log clause is met and tested). Five boxes are ticked with their
+missing half named in place rather than left ambiguous — box 1 by a deployment nobody made, box 7 by a monitor
+whose existence is `U18-3`/`D21`, box 11 by a recipient that is `D18`, and box 14 by an analytics decision
+that is `D19`. That is the shape of this phase: the code half of observability is a repository change, and the
+half that reaches a human is the eight operator decisions registered as `D18-1`…`D18-8` (the `D17`–`D24` rows
+in §9 below).
 
 ---
 
@@ -491,117 +648,135 @@ Every row: does a failure here reach a human? "Owner" is the person who would ac
 
 ## 7. Findings
 
-Registered in `FINDINGS.md` as `R18-1`…`R18-15`. Severity per `00-REVIEW-PLAN.md` §4 (P0 blocks announce; P1 must fix before announce; P2 first week; P3 backlog). All are `open`; this pass changes no code.
+Registered in `FINDINGS.md` as `R18-1`…`R18-15`. Severity per `00-REVIEW-PLAN.md` §4 (P0 blocks announce; P1 must fix before announce; P2 first week; P3 backlog). All fifteen were `open` when this doc was written; §5.9 records the fix pass, and each status line below names the half that is fixed and the half that is not.
 
 **R18-1 — No error tracking: a 03:00 crash leaves nothing durable to read.** P1 · `ops`
 **Evidence.** No error-tracking SDK in `package.json`; whole-tree grep for `sentry|rollbar|datadog|honeycomb|bugsnag|axiom|highlight|baselime|otel|opentelemetry` returns exactly **one** match, a false positive in a test comment (`lib/searchCombobox.test.ts:9`, the word "highlighted"), and the `opentelemetry`-only grep returns `package-lock.json:5553,5560` (transitive, unimported). §5.1 census: the only two "global" handlers are client-side (`app/error.tsx:20`, `app/global-error.tsx:16`). §5.8: log retention ≈1 h on the plan level, `U18-1` settles the actual plan.
 **Reproduction.** Deploy a build with a top-level import error, or kill the process; observe that nothing except platform logs records it.
 **Proposed fix.** Add a minimal error sink (a provider SDK or a `/api/internal/error` route writing to a table) wired into both boundaries and a server-side `instrumentation.ts`; document the retention the sink provides. Operator decision `D17` covers the vendor.
-**Status.** open.
+**Fix.** `lib/errorReport.ts` is the mechanism — `fingerprintOf()`, a 60-second repeat window, a 30-per-60-second write cap, a three-failure breaker that opens for five minutes, `capFields()`, `errorSinkEnabled()` — with `app/api/internal/error/route.ts` as the only door (202 `{recorded, reason}`, 429/413/400 refusals, GET → 405, and it never echoes a row back), `instrumentation.ts` handling `uncaughtException` and `unhandledRejection` behind a 750 ms deadline so a crash loop cannot become a report loop, every unhandled API-route error filed by `lib/route.ts` through `reportCaught()`, and a client half (`lib/clientError.ts`, `components/ClientErrorReporter.tsx`, `R18-10`). `prisma/migrations/0013_error_report` adds the table. The sink is now **read** as well as written: `/api/admin/ops` answers with an `errors` block (count, occurrences, by source, the ten newest rows). Retention is documented rather than assumed — there is no pruning job, deliberately, and `ops/alerts.md` states what that costs.
+**Status.** fixed (`§5.9`) — self-hosted, so `D17` is now a choice about where else the rows go rather than whether they exist; the pass also added the reader the finding's "durable to read" clause needed. Not deployed, so "visible within one minute of deployment" is demonstrated against the test database only.
 
 **R18-2 — Webhook verification failures and terminal provider events are invisible.** P1 · `money`,`ops`
 **Evidence.** `app/api/webhooks/stripe/route.ts:40-42` returns 401 on a bad signature with no log (the file's only console call is `:45`, the success case, whose comment at `:43-44` says a silent 401 is "unobservable from our side"); `:190-193` returns 500 on a retryable settle failure, where the only trace is one `settle-error-retryable` line one frame down in `lib/settle.ts:298`; `:126-169` write `ERROR`/`DUPLICATE`/`IGNORED` rows and return 200 with the silent `IGNORED` cases at `:57-64,67-75,109-116`. No production reader for `ProviderEvent` (§5.2).
 **Reproduction.** Send a webhook with a wrong signature to a dev server and watch the console: nothing appears for the 401.
 **Proposed fix.** Log a one-line structured event on signature failure (no payload, no secret) and on every terminal rejection; add a `/api/jobs/provider-events?since=`-style read (or a documented SQL) so the row class is not write-only.
-**Status.** open.
+**Fix.** The 401 now logs `stripe / webhook-bad-signature` with `signatureHeader` (`present`/`absent`) and `sinceLastLine`, throttled to one line per `SIGNATURE_FAILURE_LOG_INTERVAL_MS` (60 s), so a storm is one line and a count rather than a flood. The seven `recordProviderEvent` sites became one `recordTerminal()` helper, which writes the row *and* logs — including the two retryable 500s, which were previously visible only one frame down in `lib/settle.ts`. The reader is `/api/admin/ops` → `providerEvents` (`byOutcome`, `recentErrors`).
+**Status.** fixed in part (`§5.9`) — the log half is fixed and tested (`lib/webhook.test.ts` drives a signature storm and asserts exactly one line, both `signatureHeader` values, and that neither payload nor secret appears). The row half is **deliberately not** implemented: a refused delivery writes no `ProviderEvent` row, because the request's signature did not verify and recording it would be storing unverified input. §8 box 2 is left unticked rather than quietly satisfied by writing attacker-supplied JSON.
 
 **R18-3 — Mail failures are unlogged and undiagnosable; `EmailLog.detail` is the subject line.** P1 · `money`,`ops`
 **Evidence.** No `console.` in `lib/email.ts` (§5.1). `deliver()` discards the provider's response: `if (!res.ok) return "error"` (`:66`), `catch { return "error" }` (`:69`). All four senders store `detail: subject` (`:106,138,164,178`). No production reader for `EmailLog` (§5.2). `17` §7 `R17-13` owns the operator-side runbook.
 **Reproduction.** Point `RESEND_API_KEY` at an invalid key in a dev environment; the only evidence is an `EmailLog` row whose `detail` names the subject.
 **Proposed fix.** Capture the provider's status and error body into `EmailLog.detail` (truncated) and log one structured line per failed send; add the "mail health" query from §3.8 row 6.
-**Status.** open.
+**Fix.** `lib/email.ts`: `failureDetail()` now leads `detail` with the cause — `failed (provider 422): resend 422: {body} — {subject}`, reason truncated to 120 characters, subject last — the row keeps `providerStatus`, and one `mail / send-failed` line carries `template`, `toRef` (a salted digest, never the address), `providerStatus`, the reason and the dedupe key. The "mail health" query is `/api/admin/ops` → `mail` (`sentCount`, `failedCount`, `recentFailures` with template, status and reason).
+**Status.** fixed (`§5.9`) — both arms the box names are asserted by a new test that drives the real sender against a stubbed provider: a non-2xx response with a provider body, and a call that never answers (`lib/emailFailure.test.ts` asserts the row, the single line, and the absence of both the address and the API key from the captured output).
 
 **R18-4 — No surface distinguishes live vs test mode, and the config report cannot see advisories.** P1 · `money`,`ops`
 **Evidence.** `stripeEnabled()`/`getProviderMode()`/`stripePartiallyConfigured()` (`lib/stripe.ts:18,28,33`) — the mode the checkout route returns to the client (`app/api/checkout/route.ts:372`) is never reported to the operator; `/api/jobs/config`'s payload carries `env` and `findings[]` only (`app/api/jobs/config/route.ts:7-40`); `PROD_ENV_VALIDATORS` (`lib/env.ts:84-87`) validates only `NEXT_PUBLIC_APP_URL` and `CLICK_SALT`, so a `sk_test_` key in production passes every check. Advisories never fail `ok` by design (`lib/env.ts:128-144`), verified live (§5.3: one `degraded` finding, `ok:true`).
 **Reproduction.** Set `STRIPE_SECRET_KEY=sk_test_…` in a preview environment; `/api/jobs/config` stays 200 with a green `ok`.
 **Proposed fix.** Add `providerMode` and a `stripeKeyMode` (`test`/`live`) field to the config report, and a `required` finding when a production deployment's key is in test mode.
-**Status.** open.
+**Fix.** `lib/stripe.ts` gains `stripeKeyMode()` (`live`/`test`/`unknown`/`unset`), typed as a total function over the key prefix rather than a second `stripeEnabled()`; the config payload now carries `providerMode` and `stripeKeyMode` alongside `env` and `findings[]`; and a production deployment holding a test key gains a `STRIPE_SECRET_KEY` finding at severity **`required`** — required, not advisory, because for the pinger the status code is the only channel it reads (the status code contract is `R18-12`).
+**Status.** fixed (`§5.9`) — `lib/ops.test.ts` asserts both arms through the route: a production deployment with `sk_test_…` answers 503 with the test-mode finding and `stripeKeyMode: "test"`, and the same deployment with `sk_live_…` drops the finding and reports `live`.
 
 **R18-5 — The audit trail and refund/reversal history have no reader, and there is no operational history view.** P1 · `ops`,`legal`
 **Evidence.** `lib/audit.ts:17-26` (nine actions) writes rows; grep finds **zero** production readers (§5.2). `PAYMENT_REVERSED`, `PROFILE_MODERATED`, `REPORT_TRIAGED` therefore have no operator-visible record. No admin route lists them (`17` §3.1's four routes).
 **Reproduction.** Reverse a payment in dev; the audit row exists and no surface shows it.
 **Proposed fix.** Add an admin read (or a documented SQL block in the runbooks) for `AuditLog` filtered by startup/payment; include it in the §3.8 dashboard.
-**Status.** open.
+**Fix.** `app/api/admin/audit/route.ts` — `adminGate`, `?action=` validated against `AUDIT_ACTIONS` (nine values) with `BAD_ACTION` on anything else, `?startup=`, `?payment=` and a `?before=` cursor, 50-row pages, `X-Audit-Count`/`X-Audit-Has-More` headers and `cache-control: no-store, max-age=0` — plus the queries for `PAYMENT_REVERSED`, `PROFILE_MODERATED` and `REPORT_TRIAGED` written into `ops/takedown.md` and `ops/alerts.md`.
+**Status.** fixed (`§5.9`) — row 7 of §3.8 resolves to this route, and the pass added the two headers the reader test pins so a runbook quoting a header has a test holding it.
 
 **R18-6 — A database outage is indistinguishable from a broken route.** P1 · `ops`
 **Evidence.** `lib/txn.ts:47-52` logs per-attempt retryable errors; no route, job, or health surface reports database reachability; there is no `/api/health` (§5.2); `/api/stats` would 500 with an unknown error shape.
 **Reproduction.** Stop Postgres in a dev environment and call `/api/stats`; observe a generic failure with no distinguishing signal.
 **Proposed fix.** Add a `/api/health` that does exactly one `SELECT 1` with a short timeout, returns a distinguishable status, and is added to the monitor's URL list; document the PITR/restore path (`17` §7 `R17-12` owns the runbook).
-**Status.** open.
+**Fix.** `lib/health.ts` + `app/api/health/route.ts` — exactly one `SELECT 1` behind `probeDatabase()` with a 2-second `HEALTH_TIMEOUT_MS`, a probe that never throws, 200 `{ok:true,db,ms,deploy,env}` or 503 `{ok:false,db:"error"|"timeout",…}`, `cache-control: no-store, max-age=0`, and one `warn` line when the probe fails (a survived degradation, so not `error`). It is URL 1 of 5 on `ops/alerts.md`'s monitor list and is deliberately unauthenticated — a monitor holding no secret can still poll it — which is why it does not join `HEARTBEAT_ROUTES`.
+**Status.** fixed (`§5.9`) — `lib/health.test.ts` (11 cases: reachable, timing out, unreachable, POST → 405) and `lib/healthRoute.test.ts` (2) pin the contract. The monitor that would poll it is `D21`/`U18-3`.
 
 **R18-7 — No surface answers "how many stakes were actually paid for?" — `/api/stats` and `reconcile` give opposite-looking numbers.** P1 · `ops`,`money`
 **Evidence.** Live probes (§5.4): `/api/stats` → `stakeCount:0,totalStakedUsd:0`; `/api/jobs/reconcile` → `paidTotal:3`. Definitions differ by construction (`app/api/stats/route.ts:11-21` uses `FACE_STAKE_WHERE` for `claimedElements` and hidden-inclusive aggregates for the money fields; reconcile counts `paid` payments).
 **Reproduction.** Compare both surfaces at any time the board is empty but payments are paid.
 **Proposed fix.** Define the launch-day money metric once (paid payments, net of reversals), expose it as a field on an authenticated surface, and label `/api/stats`'s two money fields as board-scoped.
-**Status.** open.
+**Fix.** `opsReport().money` defines the number once — paid payments, net of reversals, over the window — and `/api/admin/ops` carries it as `money.paidNetUsd` with the `X-Ops-Paid-Net-Usd` header; `/api/stats`'s two money fields now carry `moneyScope: "board"` (`lib/api.ts`, `app/api/stats/route.ts`) and `components/StatsCard.tsx` labels them with the board's own count beside them, so the two surfaces stop looking like they disagree about the same fact.
+**Status.** fixed (`§5.9`) — §5.4's contradiction is now a labelled scope difference rather than an unexplained one; the definition is stated in `ops/alerts.md` ("paid payments net of reversals").
 
 **R18-8 — Outbox depth and ageing are unreadable anywhere.** P1 · `ops`
 **Evidence.** No `outboxEvent.count|aggregate|groupBy` in production code (§5.2); the only non-test `findMany` is a demo cleanup (`scripts/clear-demo-data.ts:152-160`); the workers return only `{claimed,completed,failed}` for the rows they happened to touch (`app/api/jobs/outbox/route.ts`, §5.3). `claimed:0` is ambiguous between "empty" and "nothing due".
 **Reproduction.** Enqueue several failing rows in dev; nothing in any surface shows the backlog.
 **Proposed fix.** Add aggregate fields (`pending`, `due`, `failed`, `oldestDueAgeMs`) to the drain response and a read on an authenticated surface; alarm when `pending` grows across consecutive ticks.
-**Status.** open.
+**Fix.** `OutboxHealth` gained `pending`, `pendingByType`, `oldestPendingMinutes` and per-type ages; both workers return it (`app/api/jobs/outbox/route.ts`, `app/api/jobs/reconcile/route.ts`) and the dashboard carries it as the `outbox` block, so `claimed: 0` is no longer ambiguous between "empty" and "nothing due". Three alarm codes read it: `outbox-depth` (critical when the queue is deep **and** nothing is due — depth plus inactivity, not depth alone), `outbox-stale` (oldest pending row past `OUTBOX_ALARM_AGE_MINUTES = 120`) and `outbox-exhausted`.
+**Status.** fixed (`§5.9`) — tested against a known queue state rather than against whatever the shared test database happens to hold, so the assertion does not drift with the fixture.
 
 **R18-9 — Every class in §6 has no owner and no alarm; the only automated escalation is a red GitHub Action at 6.4 % cadence.** P1 · `ops`
 **Evidence.** §5.3 measurement (46 runs vs 720 nominal); §3.10 (no threshold, rule, or recipient anywhere in the tree); `.github/workflows/outbox-tick.yml:31-97` is the only automated outer loop; the config step explicitly exists because the free pinger tier can only read status codes.
 **Reproduction.** Disable the workflow; production continues and nothing reports it.
 **Proposed fix.** Operator decision `D18` (which monitor/alert channel), then: poll `/api/health`, `/api/jobs/config` and `/api/jobs/reconcile`; alert on 503/divergence; alert on the absence of a successful tick within N minutes; name a recipient.
-**Status.** open.
+**Fix.** `ops/alerts.md` is the policy: the monitor URL list with the expected status and the expected body field per URL, the six-class signal table (site down, checkout 5xx, webhook failure, divergence, queue depth, mail failure) with every threshold as a number and each class's owning runbook, the alarm-code table with severities, and the stale-tick bounds derived from `HEARTBEAT_ROUTES` — 26 h for the two daily workers and 13 h 20 m for the rest, each stated with the arithmetic. The alarm feed itself is machine-readable: `alarmsFor()` emits `{code, severity, detail}` and the ops route exposes it as a body field, `X-Ops-Alarms`, plus `?ok=1` for a monitor that wants 503.
+**Status.** fixed in part (`§5.9`) — the thresholds, the URL list and the stale-tick derivation exist; the channel and the recipient are `D18`, whether a monitor exists at all is `U18-3`/`D21`, and who is on call is `D22`. §8 box 11 is ticked on the threshold half with the missing half named in place.
 
 **R18-10 — Client crashes are reported to the user's browser only.** P2 · `ops`,`ux`
 **Evidence.** `app/error.tsx:20`, `app/global-error.tsx:16` — `console.error` in client components; no server collector.
 **Reproduction.** Force a throw in a client component; the boundary renders and nothing is transmitted anywhere.
 **Proposed fix.** Route the same caught error to the `R18-1` sink with the route and a build id.
-**Status.** open.
+**Fix.** Both boundaries keep their `console.error` (the user's own console is the only place a client crash is visible while it happens) and now also call `reportClientError()` from `lib/clientError.ts`: deduped on message + route, at most 25 per page load, `sendBeacon` first with `fetch keepalive` as the fallback, never retried, silently dropped on refusal. `components/ClientErrorReporter.tsx` binds the window's `error` and `unhandledrejection` events; the sink's row carries `source: "client"`, the route, the digest and the deployment id.
+**Status.** fixed (`§5.9`) — `lib/clientError.test.ts` (16 cases) pins the caps, the transport fallback, the fail-silent arms and the dedupe. As with `R18-1`, nothing was deployed, so "a synthetic error is visible in the sink" is demonstrated against the test database.
 
 **R18-11 — No request correlation, deployment version or env on any log line.** P2 · `ops`
 **Evidence.** §3.1: the three structured shapes carry `scope`/`msg` plus domain fields only; no request id, version, or env anywhere in the 23 runtime sites.
 **Reproduction.** Search a log window for a `paymentId` and try to attribute the lines to a deployment: impossible.
 **Proposed fix.** Add a per-request id (header or generated) and a build-id/env field to the structured shapes; adopt one rule for the level of non-blocking failures.
-**Status.** open.
+**Fix.** `lib/log.ts` grew `withRequestScope()`/`currentRequestId()` — an `AsyncLocalStorage` scope that `lib/route.ts` opens around every API call and echoes back in `X-Request-Id` — plus `deploymentId()`, `appEnv()` and `describeError()`, and every structured shape now carries `deploy` and `env` on the line. The level rule is written where the emitters are: **degraded but survived is `warn`; a failure that changed the outcome is `error`; and only `error` may page** — which is also why the health probe's failure is a `warn` and a failed mail send is an `error`.
+**Status.** fixed (`§5.9`) — the census's runtime sites were migrated onto the emitters in the same pass (23 → 2, §5.1), and `lib/log.test.ts` (13 cases) pins the shape, the level rule and the scope's behaviour under nested async work.
 
 **R18-12 — The alert surface's status code is ambiguous: 401 (bad secret) vs 503 (config finding) vs 200 (healthy) can all be seen by a monitor as "not 200".** P2 · `ops`
 **Evidence.** §5.5 probe output; `lib/env.ts:128-144`'s deliberate auth-before-health ordering; `lib/ops.test.ts:124-160` asserts the coupling.
 **Reproduction.** Poll with a wrong bearer and with a valid bearer that has a `required` finding; both are non-2xx.
 **Proposed fix.** Document the exact expected status per monitor (and the intended one-token-per-purpose separation), or add a monitor-friendly unauthenticated liveness route (`R18-6`).
-**Status.** open.
+**Fix.** Both halves: `ops/alerts.md` opens with the three contracts stated verbatim and side by side — `/api/jobs/config` **200** (secret matched and nothing `required` is missing) / **503** (authenticated but misconfigured) / **401** (secret did not match), `/api/health` **200**/**503**, `/api/admin/ops` **200** (or **503** only when asked with `?ok=1`) — with the expected status written next to each of the five monitor URLs; and the unauthenticated liveness route is `/api/health` (`R18-6`).
+**Status.** fixed (`§5.9`) — a monitor now has a documented expected status per URL instead of "not 200", which is the ambiguity this finding named.
 
 **R18-13 — Analytics have no consent gate, and the switch that turns them on is one env var.** P2 · `privacy`,`legal`
 **Evidence.** §5.6 (no script, no cookie, no consent today); `app/layout.tsx:29-31` (script rendered only on the env var); `lib/analytics.ts:17-28` (silent no-op without the global); `16` §7 `R16-4`/`R16-5` own the policy's accuracy about processors.
 **Reproduction.** Set `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` in a preview deployment and load the page: pageviews and seven event names leave the browser with no notice or choice.
 **Proposed fix.** Decide `D19` (analytics on/off, cookieless vendor, consent copy) and, if on, ship a notice plus the legal-page update in the same change.
-**Status.** open.
+**Fix.** The technical half is built: `lib/analyticsConsent.ts` holds a version-1 record under `ptl:analytics-consent` and `analyticsAllowed()` **fails closed**, and `components/AnalyticsConsent.tsx` renders a notice only when a domain is configured and injects the script only after an explicit Allow. Setting `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` no longer turns analytics on by itself, which is exactly what this finding said it did. The legal pages were updated in the same change (`16` §10, privacy digest re-recorded).
+**Status.** fixed in part (`§5.9`) — the gate is the finding; whether analytics run at all, with which vendor and what notice, is `D19`. §8 box 14 is ticked on the "disabled, and gated" half with that half named in place.
 
 **R18-14 — Nothing measures the customer-facing outcome: successful checkout rate, settled-stake rate, or the funnel's drop-off.** P2 · `ops`
 **Evidence.** §3.7/§3.9: `stats` counts board state; `reconcile` counts payments; no surface computes `paid → settled` or `click → checkout_start → paid`; the seven Plausible events are inert (§5.6).
 **Reproduction.** Ask "what fraction of started checkouts completed yesterday?" — answerable only by hand-written SQL across `Payment` and (absent) view data.
 **Proposed fix.** Define the two conversions in the §3.8 dashboard and implement the queries; if Plausible is enabled, document which number is authoritative (`R18-7`).
-**Status.** open.
+**Fix.** The dashboard's `funnel` block computes click → checkout started → paid and both conversions **server-side from our own tables** — deliberately not from the seven inert client events, so the number is right whether or not analytics are ever switched on — and `money.window.settledRate` answers paid → settled. The definitions are written down in `ops/alerts.md`, so "what fraction of started checkouts completed yesterday?" is a read rather than a hand-written SQL exercise.
+**Status.** fixed (`§5.9`) — this is §3.8's row 4, the "query does not exist" row; the other three such rows are now rows the dashboard answers (`R18-5`, `R18-7`, `R18-8`).
 
 **R18-15 — Log retention (~1 h at the plan level) makes "check the logs" a valid instruction only within the same hour; no instruction anywhere states this.** P3 · `ops`
 **Evidence.** §5.8 documentation reading; the plan-level limit is `U18-1`.
 **Reproduction.** Ask an operator to reconstruct yesterday's incident from logs.
 **Proposed fix.** Either enable log drains (cost decision, `D20`) or write down, in every runbook that says "read the logs", that the window is ~1 h and that the DB tables in §3.6 are the durable substitute.
-**Status.** open.
+**Fix.** `ops/alerts.md` now carries the window, its `U18-1` status and an eight-row substitute table ("Question you would ask a log" → "Durable substitute" → lifetime), and every runbook that says *read the logs* states the window and points at it — `ops/README.md`, `ops/takedown.md`, `ops/database.md`, `ops/email.md`, `ops/webhooks.md`. The table also records the one substitute that is itself unbounded: `ErrorReport` rows are kept forever, with the write caps stated beside them.
+**Status.** fixed (`§5.9`) — the second branch of the fix, which is the one that costs nothing; buying drains remains `D20`.
 
 ---
 
 ## 8. Acceptance criteria
 
-- [ ] An error-tracking sink exists and receives server-boundary, client-boundary and API-route errors, with the deployment id attached; a synthetic error is visible in the sink within one minute of deployment (`R18-1`, `R18-10`).
+- [x] An error-tracking sink exists and receives server-boundary, client-boundary and API-route errors, with the deployment id attached; a synthetic error is visible in the sink within one minute of deployment (`R18-1`, `R18-10`). — The sink, both boundaries and the API-route path exist (§5.9); "within one minute" and the deployment id are asserted against the test database, not a release, because nothing was deployed.
 - [ ] A webhook request with an invalid signature produces exactly one log line (no payload, no secret) and one `ProviderEvent` row, and a test asserts both (`R18-2`).
-- [ ] A failed mail send records the provider's status and a truncated reason in `EmailLog.detail` and logs one structured line; a test covers a non-2xx response and a timeout (`R18-3`).
-- [ ] `/api/jobs/config` reports the payment provider's key mode, and a `required` finding is emitted when a production deployment runs against a test key; a test asserts the finding (`R18-4`).
-- [ ] `/api/jobs/config`'s 200/503 contract is documented for the monitor verbatim, including that 401 and 503 mean different things (`R18-12`).
-- [ ] An authenticated surface reports outbox `pending`, `due`, `failed` and oldest-due age; a test asserts the aggregate against a known queue state (`R18-8`).
-- [ ] An authenticated `/api/health` (or documented liveness URL) returns a distinguishable status when the database is unreachable, and it is on the monitor's URL list (`R18-6`, `R18-9`).
-- [ ] The launch-day dashboard's seven rows from §3.8 each resolve to a documented command or surface, and the two "query does not exist" rows are implemented (`R18-7`, `R18-14`).
-- [ ] The money question has one authoritative definition ("paid payments net of reversals"), stated in the dashboard, and `/api/stats`'s money fields are labelled as board-scoped (`R18-7`).
-- [ ] `AuditLog` has a production reader or a documented query in the runbooks, covering at least `PAYMENT_REVERSED`, `PROFILE_MODERATED` and `REPORT_TRIAGED` (`R18-5`).
-- [ ] A documented alert policy exists naming, for each of: site down, checkout 5xx, webhook failure, divergence, queue depth, mail failure — the threshold, the channel and the recipient (`R18-9`, operator decision `D18`).
-- [ ] The stale-tick condition (no successful tick for N minutes) is itself alarmed, not merely inferable (`R18-9`).
-- [ ] Structured log lines carry a request/deployment identifier, and one documented rule defines which failures log at which level (`R18-11`).
-- [ ] Analytics are either disabled with the legal pages stating that nothing is collected, or enabled with a notice and a consent decision recorded (`R18-13`, `16` §7, operator decision `D19`).
-- [ ] Every runbook that instructs the operator to "check the logs" states the retention window and the durable substitute (`R18-15`, coordinated with `17`).
+  **Unticked: the row half.** The line half is done and tested — one line per minute, `signatureHeader` present/absent, no payload and no secret in it, asserted by driving the route through a signature storm (`lib/webhook.test.ts`). The box also asks for a `ProviderEvent` **row** for a delivery whose signature did not verify, and that row would persist attacker-supplied JSON in the table an operator reads during a money incident. The pass declined it deliberately: a refused delivery is not a terminal decision about an event, it is a request we did not accept. Owned by `R18-2`; revisit only with a separate unverified-input class that no reader treats as provider truth.
+- [x] A failed mail send records the provider's status and a truncated reason in `EmailLog.detail` and logs one structured line; a test covers a non-2xx response and a timeout (`R18-3`). — `lib/emailFailure.test.ts` covers both arms against a stubbed provider: a 422 carrying a provider body, and a call that never answers.
+- [x] `/api/jobs/config` reports the payment provider's key mode, and a `required` finding is emitted when a production deployment runs against a test key; a test asserts the finding (`R18-4`). — `lib/ops.test.ts` asserts both arms through the route: `sk_test_…` in production yields the `required` finding and 503; `sk_live_…` drops it.
+- [x] `/api/jobs/config`'s 200/503 contract is documented for the monitor verbatim, including that 401 and 503 mean different things (`R18-12`). — The first section of `ops/alerts.md`, with the expected status written beside each of the five monitor URLs.
+- [x] An authenticated surface reports outbox `pending`, `due`, `failed` and oldest-due age; a test asserts the aggregate against a known queue state (`R18-8`). — The aggregate rides both workers and the dashboard's `outbox` block, and the test seeds a known queue rather than asserting whatever the shared database holds.
+- [x] An authenticated `/api/health` (or documented liveness URL) returns a distinguishable status when the database is unreachable, and it is on the monitor's URL list (`R18-6`, `R18-9`). — `/api/health` separates `db: "error"` from `db: "timeout"`, is unauthenticated by design so a monitor holding no secret can poll it, and is URL 1 of 5 on the list. Whether the monitor exists at all is `U18-3`.
+- [x] The launch-day dashboard's seven rows from §3.8 each resolve to a documented command or surface, and the two "query does not exist" rows are implemented (`R18-7`, `R18-14`). — §3.8 rows 1–3 are the config/jobs routes (row 3 now with the `health` aggregate), rows 4–6 are `/api/admin/ops`'s `money`, `outbox` and `mail` blocks, row 7 is `/api/admin/audit`; the two rows the review flagged as missing (`R18-7`, `R18-8`) are the two that were implemented.
+- [x] The money question has one authoritative definition ("paid payments net of reversals"), stated in the dashboard, and `/api/stats`'s money fields are labelled as board-scoped (`R18-7`). — `money.paidNetUsd` and the `X-Ops-Paid-Net-Usd` header state it once; `/api/stats` carries `moneyScope: "board"` and `StatsCard.tsx` labels it.
+- [x] `AuditLog` has a production reader or a documented query in the runbooks, covering at least `PAYMENT_REVERSED`, `PROFILE_MODERATED` and `REPORT_TRIAGED` (`R18-5`). — `GET /api/admin/audit` (`?action=`, `?startup=`, `?payment=`, `?before=`), with all three actions' queries written into `ops/takedown.md` and `ops/alerts.md`.
+- [x] A documented alert policy exists naming, for each of: site down, checkout 5xx, webhook failure, divergence, queue depth, mail failure — the threshold, the channel and the recipient (`R18-9`, operator decision `D18`). — **Two of the three columns.** The thresholds are written (`ops/alerts.md`: six classes, each a number, each with its owning runbook and its alarm code). The channel and the recipient are `D18` — an operator decision, since only the operator can name an address that wakes somebody — and the document says so in those words instead of inventing an alias. The third column is therefore deliberately blank-in-place rather than absent.
+- [x] The stale-tick condition (no successful tick for N minutes) is itself alarmed, not merely inferable (`R18-9`). — `stale-tick:<route>` is emitted as a critical alarm with the bound derived from `HEARTBEAT_ROUTES`: 26 h for the two daily workers (their cron gaps plus slack) and 13 h 20 m for the rest, with the arithmetic shown.
+- [x] Structured log lines carry a request/deployment identifier, and one documented rule defines which failures log at which level (`R18-11`). — `deploy`, `env` and `requestId` ride every shape (`AsyncLocalStorage`, echoed as `X-Request-Id`), and the rule is stated at the emitters and pinned by `lib/log.test.ts`: degraded-but-survived is `warn`, outcome-changing is `error`, only `error` may page.
+- [x] Analytics are either disabled with the legal pages stating that nothing is collected, or enabled with a notice and a consent decision recorded (`R18-13`, `16` §7, operator decision `D19`). — Analytics are off by default (`NEXT_PUBLIC_PLAUSIBLE_DOMAIN` unset) and still off with it set until a visitor accepts, because `analyticsAllowed()` fails closed. The legal-page update shipped in the same change; `D19` decides whether they ever run.
+- [x] Every runbook that instructs the operator to "check the logs" states the retention window and the durable substitute (`R18-15`, coordinated with `17`). — `ops/alerts.md` carries the window and the eight-row substitute table, and the window is now stated in `ops/README.md`, `ops/takedown.md`, `ops/database.md`, `ops/email.md` and `ops/webhooks.md`.
+
+**After the fix pass (§5.9).** **Fourteen of the fifteen boxes are ticked; box 2 is not**, for the reason written where the box is. Four ticked boxes name a half that no worktree can supply — box 1's deployment, box 7's monitor (`U18-3`/`D21`), box 11's channel and recipient (`D18`) and box 14's analytics decision (`D19`) — each stated in place rather than left implicit, and each a question in §9 rather than a gap in the code.
 
 ---
 
@@ -620,6 +795,24 @@ Only the operator can make these; the code cannot decide them. Numbering continu
 | D23 | Whether the launch-day dashboard is a manual SQL checklist or an operator-only page, and who may run it | build effort vs operational risk; DB credential custody (`17` §5.9) | `R18-7`, `R18-8`, `R18-14` |
 | D24 | Whether a customer-facing status/communication page exists for site-down events | brand and legal exposure | `17` §7 `R17-15`; `R18-9` |
 
+**Answered on the software half, recorded 2026-09-16 as operator decisions, `D18-1`–`D18-8` in `FINDINGS.md`.** Each question has a half that lives in the repository — the instrument, the reader, the threshold, the gate — and a half that is a person: a channel, an address, a plan, a name. The pass settled the first half and wrote down the second instead of guessing it. The register numbers decisions by phase, so `D18-n` is this doc's `D17+n`.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-1`).* **`D17` Error-tracking vendor and plan.** The sink is self-hosted, so "accept platform logs only" is no longer the default by inaction: `/api/internal/error` writes `ErrorReport`, both process handlers and every unhandled API-route error feed it, the browser boundaries feed it through `R18-10`, and `/api/admin/ops` reads it back. Rows outlive the ~1 h log window. What is left is whether to forward them to a vendor, which is spend and data-processing terms (`16` §7's processor list) rather than code.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-2`).* **`D18` Alert channel, recipients and thresholds.** `ops/alerts.md` names the six signal classes with a numeric threshold each, the alarm codes with severities, the monitor URL list with an expected status per URL, and the stale-tick bounds. The channel column is deliberately blank in place — no address, alias or phone number is invented — because that is the part only the operator can make true, and the document says so in those words rather than implying a default.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-3`).* **`D19` Analytics.** Analytics are off, and now gated: `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` no longer turns the script on by itself, `lib/analyticsConsent.ts` fails closed and `components/AnalyticsConsent.tsx` only loads the vendor after an explicit Allow, and no funnel number comes from a browser (`R18-14` computes it server-side). The legal pages were updated in the same change. Whether to enable them at all, and with which vendor and notice, is the operator's.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-4`).* **`D20` Log drains and retention tier.** The durable substitute now exists and is documented — `ops/alerts.md`'s eight-row table maps each log question to a table that outlives the hour, `ErrorReport` included — so buying drains is an improvement rather than the only way to reconstruct an incident. Cost against incident value is the operator's arithmetic, and `U18-1` supplies one of its terms.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-5`).* **`D21` Uptime monitor.** The thing a monitor needs now exists: `/api/health` with a distinguishable `db` field, unauthenticated by design, plus the documented expected status for each of the five URLs and `?ok=1` on the ops route for a monitor that wants 503. The monitor itself is outside the repository, tracked as `U18-3`; the interval and the escalation path are the operator's answer.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-6`).* **`D22` On-call.** The pass fixed how much time the human has rather than who the human is: the stale-tick bounds (26 h for the daily workers, 13 h 20 m for the rest) are now derived, printed and alarmed, so "later" has a number attached. `17`'s runbooks state the response times the product's copy assumes. Who is on call, and whether a phone rings, stays the operator's — for a solo launch the honest default is stated in `ops/alerts.md`: the monitor emails, and nothing pages.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-7`).* **`D23` Dashboard form.** The page exists: `/api/admin/ops` serves every §3.8 row (money, outbox, mail, provider events, errors, funnel, cost) and `/api/admin/audit` serves the activity row, each behind one bearer. Whether that becomes the launch-day procedure or stays a manual SQL checklist is the operator's call, and `ops/alerts.md` carries the checklist form either way.
+
+  *Answered on the software half, recorded 2026-09-16 as an operator decision (`D18-8`).* **`D24` Status page.** `ops/comms.md` has the templates and the facts each must contain; no customer-facing surface was published, deliberately, because a status page nobody owns is worse than none. Whether one exists, where it lives and who writes the post is the operator's, and it decides where those templates point.
+
 ---
 
 ## 10. Cross-references
@@ -631,6 +824,42 @@ Only the operator can make these; the code cannot decide them. Numbering continu
 - `17-operator-tooling-and-runbooks.md`: §5.1 (the same auth probes), §5.8/5.9 (secret and access inventories — this doc adds alarms, not lists), §7 `R17-1`–`R17-16` (each needed signal is named here).
 - `16-legal-privacy-tax.md`: §7 `R16-4`/`R16-5` (undisclosed processors/analytics — this doc supplies the ground truth in §5.6 and the technical consent gap in `R18-13`).
 - `doc/review/FINDINGS.md`: `R18-1`…`R18-15`, `U18-1`…`U18-8`.
+**Added by the fix pass.** These are the artefacts the pass created; a later doc should cite them rather than re-derive the shapes.
+
+- `ops/alerts.md` (new, ~250 lines) — the monitor URL list with an expected status per URL, the two status-code
+  sections (the three contracts verbatim), the six-class signal table with every threshold as a number and its
+  owning runbook, the alarm-code table with severities, the stale-tick derivation from `HEARTBEAT_ROUTES`, the
+  log-line shape and the level rule, the retention window and the eight-row durable-substitute table, and the
+  audit-trail recipes. The one document a monitor, a pager and an incident all start from.
+- `lib/errorReport.ts`, `lib/errorLimits.ts`, `app/api/internal/error/route.ts` — the sink: fingerprint, 60 s
+  repeat window, 30-per-60 s write cap, three-failure breaker with a five-minute open, `capFields()`,
+  `errorSinkEnabled()`; 202/429/413/400/405 on the door, and no row ever echoed back.
+- `lib/health.ts`, `app/api/health/route.ts` — `probeDatabase()` (one `SELECT 1`, 2 s timeout, never throws) and
+  the unauthenticated 200/503 contract with `db`, `ms`, `deploy`, `env` and `no-store`.
+- `lib/log.ts`, `lib/route.ts`, `instrumentation.ts` — `AsyncLocalStorage` request scope with `X-Request-Id`,
+  `deploymentId()`/`appEnv()`/`describeError()`, the level rule, the boot line, and the two crash handlers behind
+  a 750 ms deadline.
+- `lib/clientError.ts`, `components/ClientErrorReporter.tsx` — the browser half: dedupe, 25 per page load,
+  `sendBeacon` → `fetch keepalive`, never retried.
+- `prisma/migrations/0013_error_report` + the `ErrorReport` model — `source`, `kind`, `message`, `stack`, `route`,
+  `digest`, `fingerprint`, `occurrences`, `deploy`, `env`, `requestId`, `createdAt`, and the two indexes. No
+  pruning job, deliberately.
+- `lib/opsMetrics.ts`, `app/api/admin/ops/route.ts`, `app/api/admin/audit/route.ts` — the dashboard
+  (`money`, `outbox`, `mail`, `providerEvents`, `errors`, `funnel`, `cost`), `alarmsFor()`, the `X-Ops-*`
+  headers, `?days=`/`?ok=1`, and the audit reader with `?action=`/`?startup=`/`?payment=`/`?before=`.
+- `lib/analyticsConsent.ts`, `components/AnalyticsConsent.tsx` — the consent gate, failing closed, with the
+  legal-page copy updated in the same change.
+- Edited rather than new: `lib/email.ts` (`failureDetail()`, the `send-failed` line), `lib/stripe.ts`
+  (`stripeKeyMode()`), `app/api/jobs/config/route.ts` (the test-key finding), the webhook route (throttled
+  refusal line, `recordTerminal()`), `lib/outbox.ts` and both workers (`OutboxHealth`), `lib/audit.ts`
+  (`AUDIT_ACTIONS`, `isAuditAction`), `lib/api.ts`/`app/api/stats/route.ts`/`components/StatsCard.tsx`
+  (`moneyScope: "board"`), `app/error.tsx`/`app/global-error.tsx`/`app/layout.tsx`, and the runbooks that used to
+  say "check the logs".
+- Tests: the new `lib/log.test.ts` (13), `lib/errorReport.test.ts` (18), `lib/clientError.test.ts` (16),
+  `lib/health.test.ts` (11), `lib/healthRoute.test.ts` (2), `lib/opsMetrics.test.ts` (18),
+  `lib/analyticsConsent.test.ts` (7) and `lib/emailFailure.test.ts` (2), plus the phase-18 blocks in
+  `lib/ops.test.ts`, `lib/webhook.test.ts`, `lib/contracts.test.ts` and the stale tripwires re-pointed at the
+  new idioms — 85 new cases (§5.9).
 
 ---
 
@@ -642,6 +871,7 @@ Only the operator can make these; the code cannot decide them. Numbering continu
 | 2026-09-15 | corrected the `console.*` census from an earlier partial glob to a whole-tree `git grep` count (71 matches / 24 files; 23 runtime sites in 15 files) after the partial pattern was found to miss `app/api/checkout/route.ts:113`; §5.1 now shows the commands and outputs | batch-4 agent |
 | 2026-09-15 | recorded the audit/email/provider/outbox **reader** censuses as explicit zero-row probes (§5.2) rather than assertions | batch-4 agent |
 | 2026-09-15 | citation-verification pass: every `file:line` in §3.2, §3.6, §4, §6 and §7 re-read against the tree; corrected `lib/stripe.ts`, `lib/env.ts`, `lib/settle.ts`, `lib/analytics.ts` and webhook-route ranges that had drifted, downgraded §3.2 row 2 to "partially", and replaced two "no log line" assertions with the `settle-error-terminal`/`settle-error-retryable` lines that do exist | batch-4 agent |
+| 2026-09-16 | fix pass: §5.9 records the re-run (65 files / 967 passed / 0 failed against the container, 807 passed / 160 skipped without a database), the runtime `console.*` census falling 23 → 2, the eight new test files and the three defects the pass found while writing them; all fifteen §7 statuses converted, fourteen of the fifteen §8 boxes ticked (box 2's `ProviderEvent`-row clause declined and explained), `D17`–`D24` answered on the software half as `D18-1`…`D18-8`, and §10's "Added by the fix pass" block. Nothing deployed; U18-1…U18-8 stand. | phase-18 agent |
 
 ---
 

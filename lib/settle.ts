@@ -14,6 +14,7 @@
  * asserts + retry policy land in Phase 3.
  */
 import { PaymentPath, PaymentStatus, ProviderEventOutcome, ReservationStatus } from "@prisma/client";
+import { describeError, logInfo, logWarn } from "./log";
 import { prisma } from "./prisma";
 import { applyStakeTx, reverseStakeTx } from "./recompute";
 import { consumeReservation } from "./reservations";
@@ -68,7 +69,7 @@ export type ReversalOutcome =
   | { outcome: "rejected"; paymentId: string; reason: string };
 
 function logSettle(msg: string, fields: Record<string, unknown>): void {
-  console.log(JSON.stringify({ scope: "settle", msg, ...fields }));
+  logInfo("settle", msg, fields);
 }
 
 /** Inline mail delivery must finish before the webhook response is flushed, but
@@ -177,7 +178,7 @@ async function recordEvent(params: Parameters<typeof recordProviderEvent>[0]): P
   try {
     await recordProviderEvent(params);
   } catch (e) {
-    console.error("provider event record failed (non-blocking):", e);
+    logWarn("settle", "provider-event-record-failed", { error: describeError(e) });
   }
 }
 
@@ -420,7 +421,7 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
       logSettle("post-settle-drain", { paymentId, eventId: event.eventId, ...drained });
     } catch (e) {
       // Delivery must never turn an already-durable settle into a retryable 5xx.
-      console.error("post-settle mail drain failed (non-blocking):", e);
+      logWarn("settle", "post-settle-drain-failed", { error: describeError(e) });
     }
     return { outcome: "applied", paymentId, stakeId: applied.stakeId, elementSymbol: applied.elementSymbol };
   } catch (e) {
@@ -583,7 +584,7 @@ export async function reversePayment(paymentId: string, event: ReversalEvent): P
       ]);
       logSettle("post-reversal-drain", { paymentId, eventId: event.eventId, ...drained });
     } catch (e) {
-      console.error("post-reversal mail drain failed (non-blocking):", e);
+      logWarn("settle", "post-reversal-drain-failed", { error: describeError(e) });
     }
     return { outcome: "reversed", paymentId, remainingUsd: result.remainingUsd, elementSymbol: result.elementSymbol };
   } catch (e) {

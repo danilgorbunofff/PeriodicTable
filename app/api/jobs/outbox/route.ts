@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { jobGate } from "@/lib/jobs";
-import { drainInBatches } from "@/lib/outbox";
+import { drainInBatches, outboxHealth } from "@/lib/outbox";
 import { JOB_WORK_BUDGET_MS, jobLimit } from "@/lib/jobBudget";
 import { stampHeartbeat } from "@/lib/jobHeartbeat";
 import { apiJson, apiRoute } from "@/lib/route";
@@ -31,6 +31,22 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
  *   like an empty queue;
  * - `remaining` says how many rows a *next* call would find, which is what lets
  *   the tick decide to call again instead of guessing from a short batch.
+ *
+ * Phase 18 adds the queue itself (R18-8). Everything above describes what this
+ * invocation *did*, and `claimed: 0` cannot be told apart from a healthy empty
+ * queue when the backlog is simply not due yet: a row at attempt 2 is invisible
+ * for up to five minutes, so the same body that means "nothing to do" also means
+ * "40 receipts are waiting on their backoff" — and the second reading is the one
+ * an operator needed at launch. `queue` is the durable answer, read after the
+ * drain: `pending` is every undelivered row whatever its backoff says (the
+ * number that only goes down by delivering something, and the one an alarm
+ * should compare between consecutive ticks), `due` is what a next call would
+ * claim right now, `exhausted` and `failed` are the two states no worker will
+ * ever clear, and `oldestPendingMinutes` is how long the oldest row has waited.
+ *
+ * It is nested rather than flattened because `failed` means two different things
+ * here — rows this invocation failed, versus mail that failed and was never
+ * superseded — and a single flat key would silently report one as the other.
  */
 async function runOutbox(req: NextRequest) {
   let body: { secret?: string; limit?: number } = {};
@@ -45,6 +61,7 @@ async function runOutbox(req: NextRequest) {
   const limit = jobLimit(req, body, 5, 25);
   const out = await drainInBatches({ limit, budgetMs: JOB_WORK_BUDGET_MS });
   await stampHeartbeat("/api/jobs/outbox", out.errors ? "batch failed" : null);
+  const queue = await outboxHealth();
 
   const counts = {
     claimed: out.claimed,
@@ -54,6 +71,16 @@ async function runOutbox(req: NextRequest) {
     deferred: out.deferred,
     batches: out.batches,
     remaining: out.remaining,
+    queue: {
+      driver: queue.driver,
+      pending: queue.pending,
+      due: queue.due,
+      exhausted: queue.exhausted,
+      failed: queue.failed,
+      pendingByType: queue.pendingByType,
+      oldestPendingMinutes: queue.oldestPendingMinutes,
+      lastDeliveredAt: queue.lastDeliveredAt,
+    },
   };
   // The numbers stay in the body on the failure path: they are the report. The
   // status is the signal, so a CLI running `curl -fsS` fails on a batch that

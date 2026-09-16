@@ -153,7 +153,9 @@ describe("verifyTurnstile", () => {
 
     expect(await verifyTurnstile(undefined, "1.2.3.4")).toBe(false);
     expect(bodies).toHaveLength(0);
-    expect(warn.mock.calls.flat().join(" ")).toContain("no token");
+    const line = warn.mock.calls.map((c) => String(c[0])).join(" ");
+    expect(line).toContain('"msg":"no-token"');
+    expect(line).toContain('"action":"blocked"');
   });
 
   it("fails closed, and loudly, when siteverify is unreachable", async () => {
@@ -164,11 +166,16 @@ describe("verifyTurnstile", () => {
         throw new Error("ECONNRESET");
       })
     );
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // R18-11: failing closed because Cloudflare is unreachable changes the
+    // outcome (no sale), so the line is `error` — the only level that pages.
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const { verifyTurnstile } = await import("./abuse");
 
     expect(await verifyTurnstile("tok", "1.2.3.4")).toBe(false);
-    expect(warn.mock.calls.flat().join(" ")).toContain("unreachable");
+    const line = error.mock.calls.map((c) => String(c[0])).join(" ");
+    expect(line).toContain('"msg":"siteverify-unreachable"');
+    expect(line).toContain("ECONNRESET");
+    expect(line).toContain('"scope":"turnstile"');
   });
 });
 
@@ -221,9 +228,12 @@ describe("createStripeCheckoutSession", () => {
 
     expect(await createStripeCheckoutSession(params)).toBeNull();
     const logged = warn.mock.calls.flat().join(" ");
-    expect(logged).toContain("HTTP 401");
+    expect(logged).toContain('"msg":"checkout-rejected"');
+    expect(logged).toContain('"providerStatus":401');
+    // The mode, never the key: enough to tell a live/test mix-up from a revoked
+    // key, and useless to anyone reading the log.
+    expect(logged).toContain('"keyMode":"sk_test"');
     expect(logged).toContain("Your API Key is invalid");
-    expect(logged).toContain("key=sk_test");
     expect(logged).not.toContain("sk_test_abc123");
     expect(calls[0].auth).toContain("sk_test_abc123");
   });
@@ -235,8 +245,9 @@ describe("createStripeCheckoutSession", () => {
 
     expect(await createStripeCheckoutSession(params)).toBeNull();
     const logged = warn.mock.calls.flat().join(" ");
-    expect(logged).toContain("missing url");
-    expect(logged).toContain("keys: id,status");
+    expect(logged).toContain('"msg":"checkout-response-malformed"');
+    expect(logged).toContain('"missing":"url"');
+    expect(logged).toContain('"keys":"id,status"');
   });
 
   it("returns the session the provider handed back, quietly", async () => {
@@ -257,7 +268,7 @@ describe("createStripeCheckoutSession", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     expect(await createStripeCheckoutSession(params)).toBeNull();
-    expect(warn.mock.calls.flat().join(" ")).toContain("missing id");
+    expect(warn.mock.calls.flat().join(" ")).toContain('"missing":"id"');
   });
 
   it("names the missing key instead of calling the provider without one", async () => {

@@ -275,9 +275,13 @@ describe("the partial-configuration warning is reachable where it matters (R07-5
 
     const paused = await call();
     expect(paused.status).toBe(403);
-    const warnings = () => spy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("partial Stripe configuration"));
+    const warnings = () =>
+      spy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((l) => l.includes('"msg":"partial-stripe-config"'));
     expect(warnings()).toHaveLength(1);
-    expect(warnings()[0]).toContain("payments are paused");
+    expect(warnings()[0]).toContain('"effect":"payments-paused"');
+    expect(warnings()[0]).toContain("STRIPE_WEBHOOK_SECRET");
 
     // Once per process, not once per request: the environment cannot change
     // while this instance lives, so a second line would only repeat the first.

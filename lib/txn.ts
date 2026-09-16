@@ -7,6 +7,8 @@
  * still draw SSI false positives — the budget below absorbs those while
  * staying bounded and logged (observable).
  */
+import { logWarn } from "./log";
+
 export const TXN_MAX_ATTEMPTS = 10;
 
 /**
@@ -106,12 +108,10 @@ export async function withTxnRetry<T>(
       if (elapsed + ATTEMPT_RESERVE_MS > budgetMs) {
         // Refused, not retried: the caller gets the error it already handles
         // rather than the platform killing the function mid-transaction.
-        console.warn(
-          JSON.stringify({ scope: "txn", msg: "budget-exhausted", attempt, elapsedMs: elapsed, budgetMs })
-        );
+        logWarn("txn", "budget-exhausted", { attempt, elapsedMs: elapsed, budgetMs });
         throw e;
       }
-      console.warn(JSON.stringify({ scope: "txn", msg: "retryable-txn-error", attempt }));
+      logWarn("txn", "retryable-txn-error", { attempt });
       // Jittered backoff so contenders stop re-colliding on the same beat.
       await sleep(20 + Math.floor(Math.random() * 80) * attempt);
     }

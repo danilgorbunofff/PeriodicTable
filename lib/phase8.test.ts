@@ -160,8 +160,13 @@ describe("one writer for the register (R08-1, R08-7)", () => {
     expect(route).not.toContain("providerEvent.create");
     // Every branch that answers — unknown payment, ignored, money mismatch,
     // reference mismatch/claimed, duplicate, reversal — records a row, so a
-    // delivery that changed nothing is still visible in the register.
-    expect(route.match(/await recordProviderEvent\(\{/g)).toHaveLength(7);
+    // delivery that changed nothing is still visible in the register. All seven
+    // go through one helper now (R18-2), which is also where the terminal line
+    // is logged: a branch that answers without recording is a branch that never
+    // called it.
+    expect(route.match(/await recordTerminal\(\{/g)).toHaveLength(7);
+    expect(route).toContain("await recordProviderEvent(event)");
+    expect(route).toMatch(/if \(event\.outcome === "ERROR"\) logError\(/);
     // The two deliveries that could not be attributed to a payment carry no id:
     // a fabricated one would violate the foreign key and misattribute the row.
     expect(route.match(/paymentId: null/g)).toHaveLength(2);

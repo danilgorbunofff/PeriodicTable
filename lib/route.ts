@@ -10,6 +10,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { randomUUID } from "crypto";
+import { describeError, logError, logInfo, withRequestScope } from "./log";
+import { reportCaught } from "./errorReport";
 
 export function requestId(): string {
   try {
@@ -216,8 +218,13 @@ function requestPath(req: unknown): string {
  * could not tell a slow route from a fast one or attribute a spike to a path.
  * The CDN absorbs most reads, so these lines are the origin's own traffic — the
  * cheapest honest version of "invocations, and how long each took". Deliberately
- * `console.log` and not a counter store: a counter table would put write load on
- * every read to answer a question the log already answers.
+ * not a counter store: a counter table would put write load on every read to
+ * answer a question the log already answers.
+ *
+ * R18-11 moved this line onto `lib/log.ts`, which adds the level, the message,
+ * the environment and the deployment to every shape the product emits — the
+ * field the review asked for by name ("search a log window for a `paymentId` and
+ * try to attribute the lines to a deployment: impossible").
  */
 function logInvocation(
   id: string,
@@ -226,16 +233,13 @@ function logInvocation(
   startedAt: number
 ): void {
   const method = (req as { method?: unknown } | undefined)?.method;
-  console.log(
-    JSON.stringify({
-      scope: "api",
-      id,
-      method: typeof method === "string" ? method : "-",
-      path: requestPath(req),
-      status,
-      ms: Date.now() - startedAt,
-    })
-  );
+  logInfo("api", "invocation", {
+    requestId: id,
+    method: typeof method === "string" ? method : "-",
+    path: requestPath(req),
+    status,
+    ms: Date.now() - startedAt,
+  });
 }
 
 /**
@@ -245,6 +249,13 @@ function logInvocation(
  * bug" are different pages for an operator), and hand every refusal through
  * `enforceContract`.
  *
+ * R18-10/R18-11: the whole invocation runs inside `withRequestScope`, so every
+ * structured line a handler writes — several frames down, in a lib that never
+ * sees a request — carries the same request id as the response header, and the
+ * throw is filed with the error sink (`lib/errorReport.ts`) rather than only
+ * being printed. The sink call is deliberately not awaited: recording a failure
+ * must not add a failure mode to the request that is already failing.
+ *
  * `apiRoute()` already wraps what it exports; this is exported for the tests
  * that exercise the boundary without a route file.
  */
@@ -252,23 +263,39 @@ export function withContract(handler: ApiHandler): ApiHandler {
   const wrapped = async (...args: unknown[]): Promise<Response> => {
     const id = inboundRequestId(args[0]) ?? requestId();
     const startedAt = Date.now();
-    try {
-      const res = await enforceContract(await handler(...args), id);
-      logInvocation(id, args[0], res.status, startedAt);
-      return res;
-    } catch (err) {
-      const connectivity = isConnectivityFailure(err);
-      const status = connectivity ? 503 : 500;
-      const code = connectivity ? "DB_UNAVAILABLE" : "INTERNAL";
-      // The log line pairs with the header a caller sees — the whole point of
-      // the request id is that support can find this line from either end.
-      console.error(`[api] ${id} ${status} ${code}:`, err instanceof Error ? `${err.name}: ${err.message}` : err);
-      logInvocation(id, args[0], status, startedAt);
-      return NextResponse.json(
-        { error: messageForStatus(status), code },
-        { status, headers: { "x-request-id": id } }
-      );
-    }
+    return withRequestScope(id, async () => {
+      try {
+        const res = await enforceContract(await handler(...args), id);
+        logInvocation(id, args[0], res.status, startedAt);
+        return res;
+      } catch (err) {
+        const connectivity = isConnectivityFailure(err);
+        const status = connectivity ? 503 : 500;
+        const code = connectivity ? "DB_UNAVAILABLE" : "INTERNAL";
+        // The log line pairs with the header a caller sees — the whole point of
+        // the request id is that support can find this line from either end.
+        // `error` level, not `warn`: this is the branch where the caller did not
+        // get what they asked for and nobody downstream caught it, which is the
+        // one level the review's threshold table lets page an operator.
+        logError("api", connectivity ? "database-unreachable" : "unhandled", {
+          requestId: id,
+          status,
+          code,
+          error: describeError(err),
+          method:
+            typeof (args[0] as { method?: unknown } | undefined)?.method === "string"
+              ? ((args[0] as { method: string }).method)
+              : "-",
+          path: requestPath(args[0]),
+        });
+        void reportCaught("api", err, { kind: code, route: requestPath(args[0]), requestId: id });
+        logInvocation(id, args[0], status, startedAt);
+        return NextResponse.json(
+          { error: messageForStatus(status), code },
+          { status, headers: { "x-request-id": id } }
+        );
+      }
+    });
   };
   return wrapped as ApiHandler;
 }

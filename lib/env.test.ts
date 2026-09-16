@@ -385,8 +385,9 @@ describe("reportProdEnvAtStartup", () => {
     const missing = reportProdEnvAtStartup();
     expect(spy).toHaveBeenCalledTimes(1);
     const line = String(spy.mock.calls[0]?.[0] ?? "");
+    expect(line).toContain('"msg":"production-incomplete"');
     expect(line).toContain("STRIPE_WEBHOOK_SECRET"); // half a pair is named
-    expect(line).toContain(`${missing.length} required`);
+    expect(line).toContain(`"missing":${missing.length}`);
     expect(line).not.toContain("sentinel");
     expect(missing.join(" ")).not.toContain("sentinel");
     spy.mockRestore();

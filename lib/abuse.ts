@@ -2,6 +2,8 @@
  * Turnstile is env-gated like Stripe/Resend: when TURNSTILE_SECRET is absent,
  * verification passes locally so dev/E2E still works; production must set it.
  */
+import { describeError, logError, logWarn } from "./log";
+
 export function turnstileEnabled(): boolean {
   return !!process.env.TURNSTILE_SECRET;
 }
@@ -11,7 +13,7 @@ export async function verifyTurnstile(token: string | null | undefined, ip?: str
   if (!token) {
     // The widget is the only source of this token, so a missing one means the
     // form never produced it. That is a bug in our own page, not a bot.
-    console.warn("turnstile: no token on request — checkout blocked");
+    logWarn("turnstile", "no-token", { action: "blocked" });
     return false;
   }
   try {
@@ -30,14 +32,15 @@ export async function verifyTurnstile(token: string | null | undefined, ip?: str
       // a stale one from a wrong `remoteip` — and the buyer sees the same 400 for
       // all of them. Codes plus an ip presence flag only: never the token, never
       // the secret, never the raw address.
-      console.warn(
-        `turnstile: siteverify rejected (${json["error-codes"]?.join(",") ?? "no error-codes"}) remoteip=${ip ? "sent" : "omitted"}`
-      );
+      logWarn("turnstile", "siteverify-rejected", {
+        codes: json["error-codes"]?.join(",") ?? "no error-codes",
+        remoteip: ip ? "sent" : "omitted",
+      });
     }
     return json.success === true;
   } catch (err) {
     // Fail closed, but audibly: a broken siteverify is a dead payment path.
-    console.warn(`turnstile: siteverify unreachable — ${err instanceof Error ? err.message : "unknown error"}`);
+    logError("turnstile", "siteverify-unreachable", { error: describeError(err) });
     return false;
   }
 }

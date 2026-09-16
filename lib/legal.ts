@@ -48,7 +48,7 @@ export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: stri
     { version: "2026-09-16", note: "Replaced the copyright/DMCA heading with the process that actually runs, and said what a billing request must contain." },
   ],
   privacy: [
-    { version: "2026-09-16", note: "First published. Every category, processor and retention period was taken from the schema and the writers, not from intent." },
+    { version: "2026-09-16", note: "First published. Every category, processor and retention period was taken from the schema and the writers, not from intent. Revised the same day to describe the analytics consent gate (R18-13): the switch used to be the same thing as the collection, and it now says the script loads only after a notice is accepted, so a visitor who never answers makes no request to Plausible." },
   ],
 };
 

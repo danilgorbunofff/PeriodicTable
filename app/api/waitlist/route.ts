@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { describeError, logWarn } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { normalizeEmail } from "@/lib/manage";
 import { domainFromUrl } from "@/lib/validate";
@@ -116,9 +117,10 @@ async function confirmWaitlist(entry: { email: string; domain: string | null; so
       { onStoreError: "closed" }
     );
     if (!under) {
-      console.warn(
-        `waitlist: recipient cap reached for ${hashIp(entry.ip)} — join stored, no mail`
-      );
+      logWarn("waitlist", "recipient-cap", {
+        ip: hashIp(entry.ip),
+        effect: "join-stored-no-mail",
+      });
       return;
     }
     await enqueueOutbox(prisma, {
@@ -129,6 +131,6 @@ async function confirmWaitlist(entry: { email: string; domain: string | null; so
     await drainDueWithin(3_000, 5, ["WAITLIST_EMAIL"]);
   } catch (err) {
     // The join is already stored; a failed confirmation must not fail intake.
-    console.warn("waitlist confirm failed", err);
+    logWarn("waitlist", "confirm-failed", { error: describeError(err) });
   }
 }
