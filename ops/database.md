@@ -70,6 +70,13 @@ npx prisma migrate deploy          # apply pending, no prompts, no drift checks
   development-only and will try to reset on drift. Production deploys run
   `scripts/migrate-if-production.mjs` from `npm run build`, which is why a
   deploy can fail on a migration before it fails on anything else.
+- That script retries **only connection failures** (`P1001`/`P1002`/`P1017`,
+  `ECONNRESET`, `ETIMEDOUT`) — twice, at 5s and 15s — and fails the build on
+  anything else on the first attempt. This is not leniency about schema errors;
+  it is because a suspended Neon compute answers a cold connection too slowly,
+  and that failure (`P1002`, seen on the `2330d5c` deploy) is a wake, not a
+  migration. If a build still fails on one of those codes after three attempts,
+  the database is genuinely unreachable and the deploy is the least of it.
 - A migration that adds a `CHECK` or an index can fail on existing data. The
   failure is the point: read it, fix the data, re-run. `0009_data_invariants`
   and `0011_leader_index` both did this.

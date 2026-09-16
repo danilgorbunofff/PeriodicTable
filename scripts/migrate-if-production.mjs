@@ -61,14 +61,40 @@ if (!process.env.DATABASE_URL) {
 }
 
 console.log("[migrate] VERCEL_ENV=production — applying pending migrations");
-const { command, args, options } = prismaCommand("migrate", "deploy");
-const result = spawnSync(command, args, { stdio: "inherit", ...options });
 
-if (result.error) {
-  console.error(`[migrate] failed to run prisma: ${result.error.message}`);
-  process.exit(1);
+// 2026-09-16: a production build failed here with P1002 — "the database server
+// was reached but timed out" — on a database that had gone idle (Neon suspends
+// the compute, and the next connection pays for the wake). The migration was
+// never the problem; the deploy just never happened. So the *connection* class
+// is retried, and nothing else is: a retried schema error only fails slower, and
+// every attempt still exits non-zero on a real one.
+const CONNECT_FAILURE = /\bP1001\b|\bP1002\b|\bP1017\b|ECONNRESET|ETIMEDOUT|Connection terminated/i;
+const BACKOFF_MS = [5_000, 15_000];
+
+for (let attempt = 1; ; attempt += 1) {
+  const { command, args, options } = prismaCommand("migrate", "deploy");
+  // Piped rather than inherited so the retry decision can read the output. It is
+  // printed either way, so the build log shows what it always showed.
+  const result = spawnSync(command, args, { ...options, encoding: "utf8" });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  if (output) process.stdout.write(output);
+
+  if (result.error) {
+    console.error(`[migrate] failed to run prisma: ${result.error.message}`);
+    process.exit(1);
+  }
+
+  const status = result.status ?? 1;
+  if (status === 0) process.exit(0);
+
+  if (!CONNECT_FAILURE.test(output) || attempt > BACKOFF_MS.length) {
+    // A failed migration must fail the build: the alternative is deploying code
+    // whose schema was never applied.
+    console.error(`[migrate] prisma migrate deploy exited ${status} on attempt ${attempt} — failing the build`);
+    process.exit(status);
+  }
+
+  const wait = BACKOFF_MS[attempt - 1];
+  console.log(`[migrate] could not reach the database on attempt ${attempt} — retrying in ${wait / 1000}s`);
+  await new Promise((resolve) => setTimeout(resolve, wait));
 }
-
-// A failed migration must fail the build: the alternative is deploying code whose
-// schema was never applied.
-process.exit(result.status ?? 1);
