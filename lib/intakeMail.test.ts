@@ -15,6 +15,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { esc } from "../emails/escape";
+import { senderAddress } from "./email";
+import { SUPPORT_EMAIL } from "./legal";
 import { reportSubject, reportHtml } from "../emails/report";
 import { waitlistSubject, waitlistHtml } from "../emails/waitlist";
 
@@ -180,5 +182,36 @@ describe("R05-7 route wiring", () => {
     // RESEND_API_KEY logs instead of throwing.
     expect(email).toMatch(/sendReportEmail/);
     expect(email).toMatch(/sendWaitlistEmail/);
+  });
+});
+
+/* R19-7: one published mailbox, and the sender really uses it. A blank
+ * EMAIL_FROM is what a dashboard variable looks like mid-edit, and an empty
+ * `from` is refused by the provider — so the question "who does this mail come
+ * from" has to have an answer even when the variable has none. */
+describe("R19-7 the sender address", () => {
+  const published = `periodictable.lol <${SUPPORT_EMAIL}>`;
+
+  it("is the published address when nothing is configured", () => {
+    expect(senderAddress({})).toBe(published);
+    expect(senderAddress({ EMAIL_FROM: undefined })).toBe(published);
+  });
+
+  it("treats a blank or padded value as unset rather than as a sender", () => {
+    expect(senderAddress({ EMAIL_FROM: "" })).toBe(published);
+    expect(senderAddress({ EMAIL_FROM: "   " })).toBe(published);
+    expect(senderAddress({ EMAIL_FROM: `  periodictable.lol <${SUPPORT_EMAIL}>  ` })).toBe(published);
+  });
+
+  it("uses an explicit value as written", () => {
+    expect(senderAddress({ EMAIL_FROM: "Board <noreply@example.org>" })).toBe("Board <noreply@example.org>");
+  });
+
+  it("is what the provider is handed, so no send can carry an empty From", () => {
+    const email = src("lib/email.ts");
+    expect(email).toMatch(/from: senderAddress\(\)/);
+    // The `??`-with-a-default shape it replaced kept an empty string, which is
+    // the one value the provider rejects outright.
+    expect(email).not.toMatch(/process\.env\.EMAIL_FROM \?\?/);
   });
 });

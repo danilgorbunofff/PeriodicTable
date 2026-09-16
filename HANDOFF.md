@@ -624,8 +624,14 @@ newest production deployment, not GitHub's commit status (see the traps below).
       earlier copy were retired, and the receipt, the report fallback and the
       legal pages all read `SUPPORT_EMAIL` now. Set `EMAIL_FROM` explicitly in
       Vercel (Production and Preview) to
-      `periodictable.lol <info@periodictable.lol>` — the code fallback is the
-      bare address.
+      `periodictable.lol <info@periodictable.lol>`; `REPORT_NOTIFY_EMAIL` to
+      `info@periodictable.lol`. Both are set in Production. Neither is set for
+      Preview on purpose — the CLI wants a named branch for a Preview variable
+      and `senderAddress()` in `lib/email.ts` falls back to the published
+      address anyway, which is the same string. A blank `EMAIL_FROM` also falls
+      back rather than being sent as an empty `From:` (which the provider
+      refuses), while `lib/env.ts` still reports the blank as a required
+      variable missing.
 - [ ] Vercel dashboard Cron Jobs tab should list both daily jobs (visual check)
 
 **Environment traps — do not lose time on these**

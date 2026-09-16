@@ -35,6 +35,27 @@ import { waitlistHtml, waitlistSubject } from "../emails/waitlist";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+/**
+ * The `From:` the provider is handed.
+ *
+ * The default is the one published address, so the mailbox a buyer sees in
+ * their inbox is the one the contact page and `/faq` both name, and a reply to
+ * a receipt lands in the same place.
+ *
+ * A blank value counts as unset rather than as a sender. `EMAIL_FROM=""` is
+ * exactly what a dashboard variable looks like while it is being typed, and
+ * `??` would keep the empty string — the provider answers 422 to an empty
+ * `from` and every receipt settles as `"error"` with the real cause buried in
+ * a provider sentence. Falling back means a mis-set variable degrades to the
+ * published address instead of to silence. (`lib/env.ts` still reports an empty
+ * `EMAIL_FROM` as a required variable missing, which is the operator-facing
+ * half of the same fact.)
+ */
+export function senderAddress(env: Record<string, string | undefined> = process.env): string {
+  const configured = env.EMAIL_FROM?.trim();
+  return configured && configured.length > 0 ? configured : `periodictable.lol <${SUPPORT_EMAIL}>`;
+}
+
 /** How a send ended, plus the provider's own answer when there is one. */
 export type DeliveryResult = {
   status: "sent" | "logged" | "error";
@@ -578,12 +599,7 @@ async function deliver(
           : {}),
       },
       body: JSON.stringify({
-        from:
-          // The sender is the one published address, so the mailbox a buyer sees
-          // in their inbox is the one the contact page and `/faq` both name — and
-          // a reply to a receipt lands in the same place.
-          process.env.EMAIL_FROM ??
-          `periodictable.lol <${SUPPORT_EMAIL}>`,
+        from: senderAddress(),
         to,
         subject,
         html,
