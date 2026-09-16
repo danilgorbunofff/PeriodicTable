@@ -66,7 +66,7 @@ export const FAQ_ITEMS: FaqItem[] = [
     q: "Why does an element look empty?",
     a: [
       `An element nobody has staked on has no list to show yet, and says so — "${NO_STAKES_YET}" is the honest empty state, not a broken page. The first claim on that element lands there, and costs $${MIN_STAKE} or more.`,
-      `Listings marked "demo" are different: the operator seeded those before launch so the table is not empty on day one. They were not paid for, they are labelled as such wherever they appear, and they are removed before any visitor could mistake one for a customer.`,
+      `Some elements are held by launch inventory: seats the operator opened before launch, naming real companies and linking to their sites, so a stranger does not meet an empty table. Nothing on those seats was submitted, paid for or approved by the company named on them, and the company may not know the seat exists — a seat is a place on a leaderboard, not ownership, endorsement or sponsorship. Any of them is beatable for a dollar over whatever it holds, and the operator releases any seat nobody has paid for.`,
     ],
   },
   {

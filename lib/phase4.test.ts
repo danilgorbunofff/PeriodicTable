@@ -1,5 +1,7 @@
 /* Phase 4 pure unit tests (no DB): previews, abuse guards, tile captions. */
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { faviconFor, upstreamFaviconUrl, isUpstreamFaviconUrl, previewFor, jsonShotUrlFor, probeShot } from "./screenshots";
 import { honeypotCaught, attestValid, turnstileEnabled } from "./abuse";
 import { createStripeCheckoutSession } from "./stripe";
@@ -331,5 +333,31 @@ describe("createStripeCheckoutSession", () => {
     expect(body.get("metadata[paymentId]")).toBe("pay_1");
     expect(body.get("payment_intent_data[metadata][paymentId]")).toBe("pay_1");
     expect(calls[0].url).toContain("/checkout/sessions");
+  });
+});
+
+describe("logo backfill CLI contract", () => {
+  const src = readFileSync(join(__dirname, "..", "scripts/backfill-logos.ts"), "utf8");
+
+  it("is dry-run by default", () => {
+    expect(src).toMatch(/const APPLY = argv\.includes\("--apply"\)/);
+    expect(src).toMatch(/APPLY \? "APPLY \(writes\)" : "DRY RUN/);
+  });
+
+  it("refuses a remote target without --allow-remote", () => {
+    expect(src).toMatch(/APPLY && !isLocal\(url\) && !ALLOW_REMOTE/);
+  });
+
+  it("rewrites through the shared predicate and the proxy helper only", () => {
+    expect(src).toMatch(/isUpstreamFaviconUrl\(s\.logoUrl\)/);
+    expect(src).toMatch(/logoUrl: faviconFor\(s\.domain, 64\)/);
+    // The upstream URL is what this script exists to remove: it may be matched
+    // (in the SQL prefilter) but must never be a value the script writes.
+    expect(src).not.toMatch(/logoUrl:\s*upstreamFaviconUrl/);
+  });
+
+  it("re-reads after writing and fails loudly if a legacy row survives", () => {
+    expect(src).toMatch(/const left = stored\.filter/);
+    expect(src).toMatch(/if \(left > 0\) die\(/);
   });
 });

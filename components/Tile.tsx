@@ -4,15 +4,16 @@ import type { ElementNode } from "../lib/elements";
 import { cameraInteract } from "../lib/cameraInteract";
 import { getExoticTheme } from "../lib/exoticThemes";
 import { tileFace } from "../lib/tileFace";
+import { Avatar } from "./Avatar";
 
 export type TileClaim = {
   price: number;
   logoUrl?: string;
+  /** The holder's domain, which is what the icon's proxy URL is built from —
+   *  a stored row may carry the icon service's own URL, and the browser is not
+   *  allowed to load that one (`img-src 'self' data:`). */
+  domain?: string;
   selected?: boolean;
-  /** R16-9: a seeded placeholder rather than a customer. The face carries a
-   *  `demo` badge, because the tile otherwise asserts that the named company
-   *  bought this seat — the same claim the About page makes for every listing. */
-  demo?: boolean;
 };
 
 /** Flat porcelain tile for standard elements. Exotic tiles share the exact same
@@ -77,28 +78,11 @@ function TileInner({
       <>
         <span className={exoticTheme ? "text-[8px] font-bold text-[#d5e7f7] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "text-[8px] font-bold text-ink"}>{el.id > 0 ? el.id : "✦"}</span>
         <span className={exoticTheme ? "font-display text-[14px] font-bold text-[#f7fbff] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "font-display text-[14px] font-bold text-ink"}>{el.symbol}</span>
-        {face.priced && claim?.demo ? (
-          // The badge sits on the face itself, not in the hover tooltip: a label
-          // a reader has to hover to find is not a label on a table of 118
-          // tiles. Size is fixed at 7px so it cannot change the tile's box.
-          <span
-            aria-hidden="true"
-            className={`pointer-events-none absolute right-[3px] top-[2px] rounded-[3px] px-[2px] text-[7px] font-bold uppercase leading-[9px] tracking-wide ${exoticTheme ? "bg-[#0b1220] text-[#d5e7f7]" : "bg-ink/85 text-white"}`}
-          >
-            demo
-          </span>
-        ) : null}
         {face.priced && claim?.logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={claim.logoUrl}
-            alt=""
-            draggable={false}
-            className="mt-0.5 h-[18px] w-[18px] rounded-[5px]"
-            onError={(event) => {
-              event.currentTarget.style.display = "none";
-            }}
-          />
+          // The shared icon component (components/Avatar.tsx) draws it: it
+          // resolves the stored URL through our own proxy and falls back to the
+          // domain's initial rather than leaving the tile's logo box empty.
+          <Avatar src={claim.logoUrl} domain={claim.domain ?? ""} size={18} className="mt-0.5" />
         ) : face.priceText ? (
           <span className={`mt-0.5 h-[18px] flex items-center justify-center text-[11px] font-extrabold ${exoticTheme ? "text-[#f7fbff] [text-shadow:0_1px_3px_rgba(0,3,12,0.78)]" : "text-ink"}`}>{face.priceText}</span>
         ) : (

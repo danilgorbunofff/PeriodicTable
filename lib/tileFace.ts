@@ -12,7 +12,6 @@
  * — as an advertised floor in the hero CTA and the claim modal, in live
  * territory copy, and on a tile the server has actually confirmed is unclaimed.
  */
-import { DEMO_NOTE } from "./demoLabels";
 
 export const FLOOR_PRICE = 5;
 
@@ -21,9 +20,6 @@ export const FLOOR_PRICE = 5;
 export type FaceClaim = {
   price: number;
   logoUrl?: string;
-  /** R16-9: a seeded placeholder, so the face and its description say so
-   *  instead of reading as a purchase by the named company. */
-  demo?: boolean;
 };
 
 export type TileFace = {
@@ -53,15 +49,11 @@ export function tileFace(
   // Truthiness rather than `??`: a zero price cannot come from the pricing
   // rules, and "$0" would advertise a free element rather than hide the bug.
   const price = claim?.price || FLOOR_PRICE;
-  // R16-9: the label is part of the claim, not a decoration. The tooltip and the
-  // accessible name both carry it, so the sentence a screen reader hears about a
-  // seeded tile is the same one a sighted reader sees on it.
-  const mark = claim?.demo ? ` · ${DEMO_NOTE}` : "";
   return {
     priced: true,
     claimed,
-    title: claimed ? `${identified} · #1 $${price}${mark}` : `${identified} · Unclaimed · $${FLOOR_PRICE}`,
-    ariaLabelSuffix: claimed ? `, claimed, leader pays $${price}${mark}` : ", unclaimed",
+    title: claimed ? `${identified} · #1 $${price}` : `${identified} · Unclaimed · $${FLOOR_PRICE}`,
+    ariaLabelSuffix: claimed ? `, claimed, leader pays $${price}` : ", unclaimed",
     priceText: `$${price}`,
   };
 }

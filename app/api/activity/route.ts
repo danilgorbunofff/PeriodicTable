@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { apiJson, apiRoute } from "@/lib/route";
 import { ELEMENTS } from "@/lib/elements";
-import { demoListingDomains, isDemoListing } from "@/lib/demoData";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listActivity });
@@ -18,10 +17,6 @@ type ActivityFeedRow = {
   resultTotalUsd: number | null;
   kind: string;
   city: string | null;
-  /** R16-9: seeded placeholder, not a customer. Optional on the wire because
-   *  every other row omits it, and a `false` on each of 40k rows would cost
-   *  more than it says. */
-  demo?: boolean;
   createdAt: Date;
   stakeId: string | null;
 };
@@ -91,10 +86,6 @@ async function listActivity(req: NextRequest) {
     LIMIT ${limit}::int
   `;
 
-  // R16-9: which rows are the seeder's. Resolved once per request (nine domains,
-  // one query) rather than per row, and only for the page that was asked for.
-  const demoDomains = await demoListingDomains();
-
   return apiJson(
     rows.map((r) => ({
       id: r.id,
@@ -107,7 +98,6 @@ async function listActivity(req: NextRequest) {
       city: r.city,
       createdAt: r.createdAt,
       stakeId: r.stakeId,
-      ...(isDemoListing(r.domain, demoDomains) ? { demo: true } : {}),
     }))
   );
 }

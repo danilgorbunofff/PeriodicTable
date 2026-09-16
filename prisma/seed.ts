@@ -1,5 +1,5 @@
-/* Seed: idempotent upsert of 122 elements (lib/elements.ts), 6 demo startups
-   + 27 stakes (mocks/startups.ts MOCK_STAKES), then recompute ranks/pools
+/* Seed: idempotent upsert of 122 elements (lib/elements.ts), 6 inventory startups
+   + inventory seats (mocks/startups.ts MOCK_STAKES), then recompute ranks/pools
    and write ActivityLog rows. Safe to run repeatedly (append-only: existing
    stakes are never mutated, only ranked; re-runs converge).
    Ranking reuses the shared rankStakes + assertLedgerInvariants path
@@ -9,7 +9,7 @@
 
    R17-5: this script deletes nothing, so it needs no guard — but it is the
    other half of the same hazard. "npm run seed" against whatever
-   DATABASE_URL happens to be exported is how a demo row lands in production,
+   DATABASE_URL happens to be exported is how an inventory row lands in production,
    and the operator sees no host in the output. It therefore prints the target
    host (loopback or not) before it writes anything, using the same
    lib/seedGuard.ts host resolution the destructive script refuses on. */
@@ -87,8 +87,8 @@ async function main() {
     });
   }
 
-  // 2) Startups + stakes (only if the element has no stakes yet — keeps demo
-  //    data but never duplicates on re-run)
+  // 2) Startups + stakes (only if the element has no stakes yet — keeps the
+  //    seat but never duplicates on re-run)
   for (const m of MOCK_STAKES) {
     const element = await prisma.element.findUnique({ where: { symbol: m.symbol } });
     if (!element) {

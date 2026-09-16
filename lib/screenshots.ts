@@ -30,6 +30,26 @@ export function isUpstreamFaviconUrl(src: string | null | undefined): boolean {
 }
 
 /**
+ * What a listing's icon should be rendered with — the one rule every surface
+ * that draws a logo asks (`components/Avatar.tsx`, `components/Tile.tsx`).
+ *
+ * Both stored generations resolve to the same same-origin proxy: a row written
+ * before the proxy existed holds the icon service's own URL, which the
+ * production CSP (`img-src 'self' data:`) blocks outright and which would
+ * otherwise hand the icon service the visitor's IP together with the listing
+ * being viewed (R16-3). Passing it through here is what stops a legacy row from
+ * rendering as an empty square, without a second policy for old rows.
+ */
+export function logoSrc(
+  src: string | null | undefined,
+  domain: string,
+  size = 64,
+): string | undefined {
+  if (!src) return undefined;
+  return isUpstreamFaviconUrl(src) ? faviconFor(domain, size) : src;
+}
+
+/**
  * Microlink JSON API call for a 16:9 homepage screenshot — metadata, not bytes.
  * Cold render of an uncached site is ~4s, a cached repeat ~0.1s.
  */

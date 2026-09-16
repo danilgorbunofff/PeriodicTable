@@ -5,8 +5,9 @@
  * served by deleting rows; the routine *scrubs* every column that holds the
  * person, keeps every row, and keeps every id. Ledgers, receipts, provider
  * registers and the audit trail stay internally consistent — only the identity
- * goes. `scripts/clear-demo-data.ts` is the one place that deletes, and it
- * exists to remove *demo* rows; this file is its opposite number for people.
+ * goes. `scripts/clear-launch-inventory.ts` is the one place that deletes, and
+ * it exists to remove *inventory* rows; this file is its opposite number for
+ * people.
  *
  * Three decisions are recorded here because the doc that asks for them (12
  * §5.12) explicitly leaves the policy to `16` and the runbook to `17`:

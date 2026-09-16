@@ -241,7 +241,10 @@ describe("form + status contracts (static)", () => {
     expect(tile).not.toMatch(/EXOTIC_STYLES/);
     expect(tile).not.toMatch(/exotic-tile__/);
     expect(tile).toMatch(/exotic-tile/);
-    expect(tile).toMatch(/onError=/);
+    // The icon is rendered through <Avatar>, which owns the fallback: a broken
+    // image becomes a letter chip rather than an empty box.
+    expect(tile).toMatch(/<Avatar/);
+    expect(src("components/Avatar.tsx")).toMatch(/onError=/);
   });
   it("exotic ambient sheen has a static reduced-motion state", () => {
     const css = src("app/globals.css");

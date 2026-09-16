@@ -1,12 +1,17 @@
-/* Launch seed (Phase 5, spec 01-seed-instrument.md): 8–12 recognizable real
- * startups across marquee elements + contested C ladder ($50/$24/$9) + 72h
- * activity backlog. Real domains are deliberate: tile logos come from Google's
- * favicon service (s2/favicons?domain=…), so real domains → real logos.
- * Pass --fresh to first wipe all existing demo rows (FK-safe order) + reset
- * element aggregates; a bare run stays idempotent append-only: upserts
- * startups/stakes by (element,startup), never mutates existing stakes, re-runs
- * converge. Ranking reuses shared rankStakes + assertLedgerInvariants
- * (lib/pricing.ts); historical ts preserved by design.
+/* Launch seed (Phase 5, spec 01-seed-instrument.md): 18 inventory seats across
+ * six recognizable real startups — one seat per element, never two, so no tile
+ * carries a price ladder and every captured tile quotes exactly one dollar over
+ * its holder (`MIN_STAKE` + `TAKEOVER_MARGIN`, lib/pricing.ts).
+ * Real domains are deliberate: a tile draws its holder's icon through
+ * `/api/favicon` (this site's own proxy — see faviconFor in lib/screenshots.ts),
+ * so a real domain is what makes a real icon render.
+ * The seats are NOT customers: lib/launchInventory.ts is the single list, and
+ * scripts/clear-launch-inventory.ts is the guarded way back out.
+ * Pass --fresh to first wipe all existing rows (FK-safe order) + reset element
+ * aggregates; a bare run stays idempotent append-only: upserts startups/stakes
+ * by (element,startup), never mutates existing stakes, re-runs converge.
+ * Ranking reuses shared rankStakes + assertLedgerInvariants (lib/pricing.ts);
+ * historical ts preserved by design.
  *
  * R17-5: this is the one irreversible script in the repo, so `--fresh` is
  * guarded (lib/seedGuard.ts). Against a non-loopback database it refuses
@@ -17,7 +22,8 @@
  * Usage: DATABASE_URL=... tsx prisma/launch-seed.ts [--fresh [--allow-remote --confirm=<host>]]
  */
 import { PrismaClient } from "@prisma/client";
-import { rankStakes, assertLedgerInvariants } from "../lib/pricing";
+import { MIN_STAKE, rankStakes, assertLedgerInvariants } from "../lib/pricing";
+import { faviconFor } from "../lib/screenshots";
 import { seedGuard } from "../lib/seedGuard";
 
 const prisma = new PrismaClient();
@@ -25,31 +31,36 @@ const FRESH = process.argv.includes("--fresh");
 const H = 3600_000;
 const NOW = Date.now();
 
-type SeedStake = {
+type SeedSeat = {
   domain: string;
   title: string;
   pitch: string;
   symbol: string;
-  amount: number;
-  clicks: number;
-  city: string;
   ts: number;
-  email?: string;
 };
 
-const STAKES: SeedStake[] = [
-  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "C", amount: 50, clicks: 267, city: "San Francisco", ts: NOW - 1 * H },
-  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Au", amount: 88, clicks: 412, city: "San Francisco", ts: NOW - 3 * H },
-  { domain: "adyen.com", title: "Adyen", pitch: "The financial technology platform of choice.", symbol: "C", amount: 24, clicks: 55, city: "Amsterdam", ts: NOW - 2 * H },
-  { domain: "squareup.com", title: "Square", pitch: "Financial services for local commerce.", symbol: "C", amount: 9, clicks: 12, city: "San Francisco", ts: NOW - 20 * H },
-  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "Si", amount: 34, clicks: 98, city: "Santa Clara", ts: NOW - 5 * H },
-  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Pt", amount: 42, clicks: 84, city: "San Francisco", ts: NOW - 7 * H },
-  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "DM", amount: 66, clicks: 190, city: "San Francisco", ts: NOW - 30 * H },
-  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "H", amount: 12, clicks: 41, city: "San Francisco", ts: NOW - 8 * H },
-  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "He", amount: 10, clicks: 28, city: "San Francisco", ts: NOW - 18 * H },
-  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Fe", amount: 21, clicks: 73, city: "Remote-first", ts: NOW - 26 * H },
-  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "O", amount: 15, clicks: 46, city: "San Francisco", ts: NOW - 11 * H },
-  { domain: "huggingface.co", title: "Hugging Face", pitch: "The AI community building the future.", symbol: "U", amount: 39, clicks: 76, city: "New York", ts: NOW - 50 * H },
+/* One seat per element, three elements per holder, all at the floor. The
+   amounts are not restated here: a seat costs `MIN_STAKE`, and the price of
+   beating it is derived the same way the checkout derives it. */
+const SEATS: SeedSeat[] = [
+  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "C", ts: NOW - 1 * H },
+  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "Ne", ts: NOW - 21 * H },
+  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "Ti", ts: NOW - 33 * H },
+  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Au", ts: NOW - 3 * H },
+  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Ag", ts: NOW - 13 * H },
+  { domain: "coinbase.com", title: "Coinbase", pitch: "The easiest place to buy and sell crypto.", symbol: "Cu", ts: NOW - 25 * H },
+  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "Si", ts: NOW - 5 * H },
+  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "B", ts: NOW - 17 * H },
+  { domain: "nvidia.com", title: "NVIDIA", pitch: "Accelerated computing for the AI era.", symbol: "Ga", ts: NOW - 29 * H },
+  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "H", ts: NOW - 7 * H },
+  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "He", ts: NOW - 19 * H },
+  { domain: "cloudflare.com", title: "Cloudflare", pitch: "The connectivity cloud for a faster internet.", symbol: "O", ts: NOW - 27 * H },
+  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Fe", ts: NOW - 9 * H },
+  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Co", ts: NOW - 23 * H },
+  { domain: "supabase.com", title: "Supabase", pitch: "Open source Postgres at the edge.", symbol: "Ni", ts: NOW - 31 * H },
+  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "DM", ts: NOW - 11 * H },
+  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "U", ts: NOW - 15 * H },
+  { domain: "anthropic.com", title: "Anthropic", pitch: "AI safety and research.", symbol: "Pu", ts: NOW - 35 * H },
 ];
 
 async function recompute(elementId: number) {
@@ -133,7 +144,7 @@ async function main() {
   }
   if (!FRESH) console.log(`launch-seed: appending to ${guard.host}`);
   if (FRESH) await freshWipe(guard.host, guard.local);
-  for (const s of STAKES) {
+  for (const s of SEATS) {
     const element = await prisma.element.findUnique({ where: { symbol: s.symbol } });
     if (!element) {
       console.warn(`launch-seed: unknown symbol ${s.symbol}, skipping`);
@@ -146,8 +157,7 @@ async function main() {
         title: s.title,
         pitch: s.pitch,
         url: `https://${s.domain}`,
-        logoUrl: `https://www.google.com/s2/favicons?domain=${s.domain}&sz=64`,
-        ...(s.email ? { email: s.email } : {}),
+        logoUrl: faviconFor(s.domain, 64),
       },
       update: { title: s.title, pitch: s.pitch },
     });
@@ -155,11 +165,14 @@ async function main() {
       where: { elementId_startupId: { elementId: element.id, startupId: startup.id } },
     });
     if (!existing) {
+      // clicksDelivered and city stay empty on purpose: a seat nobody bought
+      // has not sent any traffic, and the seed does not invent a city for a
+      // company that never told us one (doc/phase-5-launch/seed-list.csv).
       await prisma.stake.create({
-        data: { elementId: element.id, startupId: startup.id, amountUsd: s.amount, clicksDelivered: s.clicks },
+        data: { elementId: element.id, startupId: startup.id, amountUsd: MIN_STAKE, clicksDelivered: 0 },
       });
       await prisma.activityLog.create({
-        data: { domain: s.domain, elementSymbol: s.symbol, amountUsd: s.amount, kind: "stake", city: s.city, createdAt: new Date(s.ts) },
+        data: { domain: s.domain, elementSymbol: s.symbol, amountUsd: MIN_STAKE, kind: "join", city: null, createdAt: new Date(s.ts) },
       });
     }
   }

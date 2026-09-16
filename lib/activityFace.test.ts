@@ -61,7 +61,7 @@ describe("an empty feed is not a loading feed (R02-5)", () => {
 
   it("shows the newest event when there is one", () => {
     const face = activityFace("ok", [row({ elementSymbol: "he", kind: "reclaim", city: null })]);
-    expect(face.header).toEqual({ kind: "lead", symbol: "HE", verb: "Crown reclaimed", city: "somewhere", demo: false });
+    expect(face.header).toEqual({ kind: "lead", symbol: "HE", verb: "Crown reclaimed", city: "somewhere" });
   });
 });
 

@@ -66,6 +66,7 @@ export const CONSENT_VERSION = LEGAL_REVISIONS.rules;
  * `LEGAL_REVISIONS` value, which the checkout's version check then enforces. */
 export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: string }[]> = {
   about: [
+    { version: "2026-09-16", note: "The independence clause stopped describing seeded listings as \u201cdemo\u201d, because the site no longer marks them: a seat the operator opens before launch is stated as inventory, never paid for or approved by the company named on it, beatable for a dollar over what it holds, and releasable by the operator." },
     { version: "2026-09-16", note: "The data paragraph was corrected: it described a city/country we never collect, and listed one processor out of seven. The independence clause now says the seeded demo listings were never paid for, so neither their stake nor their city is real." },
   ],
   rules: [
@@ -77,6 +78,7 @@ export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: stri
     { version: "2026-09-16", note: "Replaced the copyright/DMCA heading with the process that actually runs, and said what a billing request must contain." },
   ],
   privacy: [
+    { version: "2026-09-16", note: "Stopped describing a city on a \u201cdemo\u201d row: the launch inventory writes no city at all now, so no row carries one and there is nothing to explain." },
     { version: "2026-09-16", note: "First published. Every category, processor and retention period was taken from the schema and the writers, not from intent. Revised the same day to describe the analytics consent gate (R18-13): the switch used to be the same thing as the collection, and it now says the script loads only after a notice is accepted, so a visitor who never answers makes no request to Plausible." },
   ],
 };

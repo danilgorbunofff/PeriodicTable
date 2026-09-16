@@ -3,7 +3,6 @@ import { Card } from "./Card";
 import { Avatar } from "./Avatar";
 import useSWR from "swr";
 import { fetchJson, isTableOrderRows, type TableOrderRow } from "../lib/api";
-import { DEMO_LABEL, DEMO_NOTE } from "../lib/demoLabels";
 import { NO_STAKES_YET } from "../lib/activityFace";
 
 export function WorldOrder({
@@ -129,7 +128,6 @@ export function WorldOrder({
                 <span className={`block truncate font-extrabold text-ink ${podium ? "text-base" : "text-sm"}`}>{r.domain}</span>
                 <span className={`${podium ? "text-xs" : "text-[11.5px]"} block truncate font-bold text-mutedink`}>
                   {r.elements} elements · 👑 {r.crowns}
-                  {r.demo ? <> · <span title={DEMO_NOTE} className="rounded-[4px] bg-icy px-1 py-[1px] text-[10px] font-bold uppercase tracking-wide">{DEMO_LABEL}</span></> : null}
                 </span>
               </span>
               <span className={`${podium ? "text-[19px]" : "text-sm"} whitespace-nowrap font-display font-bold text-moneyink`}>${r.totalSpent}</span>

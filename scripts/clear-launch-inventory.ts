@@ -1,6 +1,6 @@
-/** Launch cleanup: remove the placeholder listings `prisma/launch-seed.ts`
- *  wrote into the grid, so a brand-new territory map does not read as "taken"
- *  by real companies that never claimed anything (HANDOFF §1).
+/** Launch cleanup: remove the inventory seats `prisma/launch-seed.ts` opened on
+ *  the grid, so a brand-new territory map does not read as "taken" by real
+ *  companies that never claimed anything (HANDOFF §1).
  *
  *  Dry run by default. Provenance-guarded: a candidate is only touched when it
  *  still looks exactly as the seed left it — no notification email, no payment,
@@ -11,8 +11,8 @@
  *  rolled back, so the printed plan is exactly what --apply will do.
  *
  *  Usage:
- *    npm run db:clear-demo                                  # plan only
- *    npm run db:clear-demo -- --apply --allow-remote         # write
+ *    npm run db:clear-inventory                              # plan only
+ *    npm run db:clear-inventory -- --apply --allow-remote     # write
  *  Flags:
  *    --apply             execute (default: print the plan and roll back)
  *    --allow-remote      required with --apply for a non-local host
@@ -21,7 +21,7 @@
  */
 import { Prisma, PrismaClient } from "@prisma/client";
 import { rankStakes, assertLedgerInvariants } from "../lib/pricing";
-import { DEMO_STARTUP_DOMAINS, assessDemoStartups, type DemoStartupRow } from "../lib/demoData";
+import { LAUNCH_INVENTORY_DOMAINS, assessInventoryStartups, type InventoryStartupRow } from "../lib/launchInventory";
 
 const prisma = new PrismaClient();
 
@@ -67,7 +67,7 @@ async function recomputeElement(db: Prisma.TransactionClient, elementId: number)
 
 async function main() {
   const url = process.env.DATABASE_URL ?? "";
-  if (!url) die("DATABASE_URL is not set (use: npm run db:clear-demo)");
+  if (!url) die("DATABASE_URL is not set (use: npm run db:clear-inventory)");
 
   let host = "(unparseable url)";
   try {
@@ -85,7 +85,7 @@ async function main() {
 
   // ---- 1. candidates + provenance guard -------------------------------------
   const found = await prisma.startup.findMany({
-    where: { domain: { in: [...DEMO_STARTUP_DOMAINS] } },
+    where: { domain: { in: [...LAUNCH_INVENTORY_DOMAINS] } },
     select: {
       id: true,
       domain: true,
@@ -96,7 +96,7 @@ async function main() {
     },
   });
 
-  const rows: DemoStartupRow[] = found.map((s) => ({
+  const rows: InventoryStartupRow[] = found.map((s) => ({
     id: s.id,
     domain: s.domain,
     email: s.email,
@@ -107,7 +107,7 @@ async function main() {
     manageSessionCount: s._count.manageSessions,
   }));
 
-  const { removable, blocked } = assessDemoStartups(rows);
+  const { removable, blocked } = assessInventoryStartups(rows);
 
   for (const { row, reasons } of blocked) {
     console.error(`  ! ${row.domain} — ${reasons.join("; ")}`);
@@ -120,7 +120,7 @@ async function main() {
   }
 
   if (removable.length === 0) {
-    console.log("\nNo demo rows found on the allowlist. Nothing to do.");
+    console.log("\nNo inventory rows found. Nothing to do.");
     return;
   }
 
@@ -129,23 +129,23 @@ async function main() {
   if (paidTotal > 0 && !FORCE) {
     die(
       `this database has ${paidTotal} PAID payment(s) — real money moved here.\n` +
-        `  Re-run with --force only if you are certain those rows are unrelated to the demo seed.`
+        `  Re-run with --force only if you are certain those rows are unrelated to the launch inventory.`
     );
   }
 
   // ---- 2. the blast radius --------------------------------------------------
-  const demoIds = removable.map((r) => r.id);
-  const demoStakes = await prisma.stake.findMany({
-    where: { startupId: { in: demoIds } },
+  const inventoryIds = removable.map((r) => r.id);
+  const inventoryStakes = await prisma.stake.findMany({
+    where: { startupId: { in: inventoryIds } },
     select: { id: true, elementId: true },
   });
-  const demoStakeIds = demoStakes.map((s) => s.id);
+  const inventoryStakeIds = inventoryStakes.map((s) => s.id);
   const ledElements = await prisma.element.findMany({
-    where: { currentLeaderId: { in: demoIds } },
+    where: { currentLeaderId: { in: inventoryIds } },
     select: { id: true },
   });
   const affectedElementIds = [
-    ...new Set([...demoStakes.map((s) => s.elementId), ...ledElements.map((e) => e.id)]),
+    ...new Set([...inventoryStakes.map((s) => s.elementId), ...ledElements.map((e) => e.id)]),
   ].sort((a, b) => a - b);
 
   const outboxIds = (
@@ -156,11 +156,11 @@ async function main() {
   )
     .filter((e) => {
       const payload = e.payload as { startupId?: string } | null;
-      return !!payload?.startupId && demoIds.includes(payload.startupId);
+      return !!payload?.startupId && inventoryIds.includes(payload.startupId);
     })
     .map((e) => e.id);
 
-  console.log(`\ndemo rows: ${removable.length} startups, ${demoStakeIds.length} stakes on ${affectedElementIds.length} elements`);
+  console.log(`\ninventory rows: ${removable.length} startups, ${inventoryStakeIds.length} stakes on ${affectedElementIds.length} elements`);
   console.log(`  ${removable.map((r) => r.domain).join(", ")}`);
   console.log(`  elements: ${affectedElementIds.join(", ")}`);
 
@@ -169,25 +169,25 @@ async function main() {
   const del = (label: string, run: Step["run"]): Step => ({ label, run });
 
   const children: Step[] = [
-    del("providerEvent", async (tx) => (await tx.providerEvent.deleteMany({ where: { payment: { startupId: { in: demoIds } } } })).count),
-    del("claimReservation", async (tx) => (await tx.claimReservation.deleteMany({ where: { startupId: { in: demoIds } } })).count),
-    del("manageSession", async (tx) => (await tx.manageSession.deleteMany({ where: { startupId: { in: demoIds } } })).count),
-    del("manageToken", async (tx) => (await tx.manageToken.deleteMany({ where: { startupId: { in: demoIds } } })).count),
+    del("providerEvent", async (tx) => (await tx.providerEvent.deleteMany({ where: { payment: { startupId: { in: inventoryIds } } } })).count),
+    del("claimReservation", async (tx) => (await tx.claimReservation.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
+    del("manageSession", async (tx) => (await tx.manageSession.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
+    del("manageToken", async (tx) => (await tx.manageToken.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
     del("firstClaim", async (tx) =>
       (await tx.firstClaim.deleteMany({
-        where: { OR: [{ startupId: { in: demoIds } }, { stakeId: { in: demoStakeIds } }] },
+        where: { OR: [{ startupId: { in: inventoryIds } }, { stakeId: { in: inventoryStakeIds } }] },
       })).count),
     del("report", async (tx) =>
       (await tx.report.deleteMany({
-        where: { OR: [{ startupId: { in: demoIds } }, { stakeId: { in: demoStakeIds } }] },
+        where: { OR: [{ startupId: { in: inventoryIds } }, { stakeId: { in: inventoryStakeIds } }] },
       })).count),
-    del("clickEvent", async (tx) => (await tx.clickEvent.deleteMany({ where: { stakeId: { in: demoStakeIds } } })).count),
-    del("auditLog", async (tx) => (await tx.auditLog.deleteMany({ where: { startupId: { in: demoIds } } })).count),
-    del("payment", async (tx) => (await tx.payment.deleteMany({ where: { startupId: { in: demoIds } } })).count),
-    del("stake", async (tx) => (await tx.stake.deleteMany({ where: { startupId: { in: demoIds } } })).count),
+    del("clickEvent", async (tx) => (await tx.clickEvent.deleteMany({ where: { stakeId: { in: inventoryStakeIds } } })).count),
+    del("auditLog", async (tx) => (await tx.auditLog.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
+    del("payment", async (tx) => (await tx.payment.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
+    del("stake", async (tx) => (await tx.stake.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
     del("activityLog", async (tx) =>
       (await tx.activityLog.deleteMany({
-        where: { paymentId: null, domain: { in: [...DEMO_STARTUP_DOMAINS] } },
+        where: { paymentId: null, domain: { in: [...LAUNCH_INVENTORY_DOMAINS] } },
       })).count),
   ];
 
@@ -195,7 +195,7 @@ async function main() {
   // delete, because Element.currentLeaderId references Startup.
   const parents: Step[] = [
     del("outboxEvent", async (tx) => (outboxIds.length ? (await tx.outboxEvent.deleteMany({ where: { id: { in: outboxIds } } })).count : 0)),
-    del("startup", async (tx) => (await tx.startup.deleteMany({ where: { id: { in: demoIds } } })).count),
+    del("startup", async (tx) => (await tx.startup.deleteMany({ where: { id: { in: inventoryIds } } })).count),
     ...(PURGE_EMAIL_LOG
       ? [del("emailLog", async (tx) => (await tx.emailLog.deleteMany({ where: { to: { endsWith: ".dev" } } })).count)]
       : []),
@@ -222,20 +222,20 @@ async function main() {
   }
 
   if (!APPLY) {
-    console.log(`\nnothing written. to execute:\n  npm run db:clear-demo -- --apply${isLocal(url) ? "" : " --allow-remote"}\n`);
+    console.log(`\nnothing written. to execute:\n  npm run db:clear-inventory -- --apply${isLocal(url) ? "" : " --allow-remote"}\n`);
     return;
   }
 
   // ---- 4. verify the public surface ----------------------------------------
   const [leftover, stakes, pool, claimed] = await Promise.all([
-    prisma.startup.count({ where: { domain: { in: [...DEMO_STARTUP_DOMAINS] } } }),
+    prisma.startup.count({ where: { domain: { in: [...LAUNCH_INVENTORY_DOMAINS] } } }),
     prisma.stake.count(),
     prisma.stake.aggregate({ _sum: { amountUsd: true } }),
     prisma.element.count({ where: { stakeCount: { gt: 0 } } }),
   ]);
 
-  console.log(`\nverify: ${leftover} demo startup(s) left, ${stakes} stake(s), $${pool._sum.amountUsd ?? 0}, ${claimed} claimed element(s)`);
-  if (leftover > 0) die("demo rows survived the cleanup — investigate before announcing.");
+  console.log(`\nverify: ${leftover} inventory startup(s) left, ${stakes} stake(s), $${pool._sum.amountUsd ?? 0}, ${claimed} claimed element(s)`);
+  if (leftover > 0) die("inventory rows survived the cleanup — investigate before announcing.");
 
   const elements = await prisma.element.findMany({
     where: { OR: [{ stakeCount: { gt: 0 } }, { totalPoolUsd: { gt: 0 } }, { currentLeaderId: { not: null } }] },

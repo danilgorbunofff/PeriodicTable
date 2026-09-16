@@ -1,13 +1,19 @@
-domain,title,pitch,symbol,amount_usd,city,clicks
-coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Au,88,San Francisco,412
-stripe.com,Stripe,Payments infrastructure for the internet.,C,50,San Francisco,267
-adyen.com,Adyen,The financial technology platform of choice.,C,24,Amsterdam,55
-squareup.com,Square,Financial services for local commerce.,C,9,San Francisco,12
-nvidia.com,NVIDIA,Accelerated computing for the AI era.,Si,34,Santa Clara,98
-coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Pt,42,San Francisco,84
-anthropic.com,Anthropic,AI safety and research.,DM,66,San Francisco,190
-cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,H,12,San Francisco,41
-cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,He,10,San Francisco,28
-supabase.com,Supabase,Open source Postgres at the edge.,Fe,21,Remote-first,73
-cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,O,15,San Francisco,46
-huggingface.co,Hugging Face,The AI community building the future.,U,39,New York,76
+domain,title,pitch,symbol,amount_usd
+stripe.com,Stripe,Payments infrastructure for the internet.,C,5
+stripe.com,Stripe,Payments infrastructure for the internet.,Ne,5
+stripe.com,Stripe,Payments infrastructure for the internet.,Ti,5
+coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Au,5
+coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Ag,5
+coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Cu,5
+nvidia.com,NVIDIA,Accelerated computing for the AI era.,Si,5
+nvidia.com,NVIDIA,Accelerated computing for the AI era.,B,5
+nvidia.com,NVIDIA,Accelerated computing for the AI era.,Ga,5
+cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,H,5
+cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,He,5
+cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,O,5
+supabase.com,Supabase,Open source Postgres at the edge.,Fe,5
+supabase.com,Supabase,Open source Postgres at the edge.,Co,5
+supabase.com,Supabase,Open source Postgres at the edge.,Ni,5
+anthropic.com,Anthropic,AI safety and research.,DM,5
+anthropic.com,Anthropic,AI safety and research.,U,5
+anthropic.com,Anthropic,AI safety and research.,Pu,5

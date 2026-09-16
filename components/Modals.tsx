@@ -9,7 +9,6 @@ import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
 import { CONSENT_LINK_HREF, CONSENT_LINK_TEXT, CONSENT_STATEMENT, CONSENT_VERSION, LEGAL_LINKS } from "../lib/legal";
-import { DEMO_LABEL, DEMO_NOTE } from "../lib/demoLabels";
 import { MIN_STAKE, TAKEOVER_MARGIN, classifyAndValidate } from "../lib/pricing";
 import { FAQ_LABEL, FAQ_PATH } from "../lib/faq";
 import { stakeQuote, crownCopy } from "../lib/stakeQuote";
@@ -655,17 +654,6 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
     ) : (
       <span className="w-6 text-sm">#{i + 1}</span>
     );
-  // R16-9: "the board" ranks money. Seeded placeholder rows appear in it with
-  // amounts nobody paid, so they say so on every tab.
-  const demoTag = (row: BoardRow) =>
-    row.demo ? (
-      <span
-        title={DEMO_NOTE}
-        className="shrink-0 rounded-[4px] bg-icy px-1 py-[1px] text-[10px] font-bold uppercase tracking-wide text-mutedink"
-      >
-        {DEMO_LABEL}
-      </span>
-    ) : null;
 
   return (
     <Modal open={open} onClose={onClose} label="The board">
@@ -692,7 +680,6 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
-            {demoTag(row)}
             <span className="text-xs text-mutedink">{row.elementSym} {row.elementName}</span>
             <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">${row.total}</span>
           </a>
@@ -702,7 +689,6 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
-            {demoTag(row)}
             <span className="text-xs text-mutedink whitespace-nowrap">👑 {row.total} {row.total === 1 ? "crown" : "crowns"} · ${row.totalSpent ?? 0}</span>
             <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">👑 {row.total}</span>
           </a>
@@ -712,7 +698,6 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
-            {demoTag(row)}
             <span className="text-xs text-mutedink">first on {row.elementSym} {row.elementName}</span>
             <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">🏅 {row.total}</span>
           </a>

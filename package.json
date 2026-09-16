@@ -12,9 +12,11 @@
                     "test:ci":  "vitest run --maxWorkers=4",
                     "check-prod-env":  "node scripts/check-prod-env.mjs",
                     "audit:prod":  "node scripts/audit-prod.mjs",
+                    "db:backfill-logos": "tsx --env-file=.env scripts/backfill-logos.ts",
                     "db:migrate":  "prisma migrate dev",
                     "db:deploy":  "prisma migrate deploy",
-                    "db:clear-demo":  "tsx --env-file=.env scripts/clear-demo-data.ts",
+                    "db:clear-inventory":  "tsx --env-file=.env scripts/clear-launch-inventory.ts",
+                    "db:check-board":  "tsx --env-file=.env scripts/check-launch-board.ts",
                     "db:erase-subject":  "tsx --env-file=.env scripts/erase-subject.ts"
                 },
     "dependencies":  {

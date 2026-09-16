@@ -16,7 +16,6 @@ import { settlePayment } from "./settle";
 import { audit } from "./audit";
 import { ATTEST_VERSION, CONSENT_TEXT_HASH } from "./consent";
 import { faviconFor, upstreamFaviconUrl } from "./screenshots";
-import { DEMO_STARTUP_DOMAINS } from "./demoLabels";
 import { isStatsResponse, isTableOrderRows, isBoardRows, isActivityRows, isSearchHits } from "./api";
 
 const prisma = testPrisma();
@@ -29,12 +28,10 @@ const T9 = 9990;
 // to test canonical casing end to end (R04-4).
 const HBAR = 9992;
 const HIDDEN = "helemprobe.dev";
-// R16-9: the provenance rule needs an element of its own and one of the
-// seeder's placeholder domains, so marking can be checked without disturbing
-// the money fixtures above.
-const T16 = 9995;
-const DEMO_DOMAIN = DEMO_STARTUP_DOMAINS[0];
-const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN, "rt-hold-a.dev", "rt-hold-b.dev", "rt-zero-t.dev", "rt-r16-a.dev", DEMO_DOMAIN];
+// R16-3: the icon proxy only serves a domain that is on the table, so this
+// fixture is a listing and nothing else.
+const LISTING = "rt-listing.dev";
+const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN, "rt-hold-a.dev", "rt-hold-b.dev", "rt-zero-t.dev", "rt-r16-a.dev", LISTING];
 // A different buyer IP: the checkout throttle is per client per hour, and the
 // rate-limit fixture above spends a full bucket of its own.
 const IP16 = "203.0.113.16";
@@ -58,12 +55,11 @@ beforeAll(async () => {
     create: { id: T9, symbol: "TST9", name: "Test Nine", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
     update: {},
   });
-  await prisma.element.upsert({
-    where: { id: T16 },
-    create: { id: T16, symbol: "TST16", name: "Test Sixteen", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
+  await prisma.startup.upsert({
+    where: { domain: LISTING },
+    create: { domain: LISTING, title: "Rt Listing", pitch: "route fixture pitch", url: `https://${LISTING}`, logoUrl: faviconFor(LISTING) },
     update: {},
   });
-  await prisma.stake.deleteMany({ where: { elementId: T16 } });
   if (!(await prisma.element.findUnique({ where: { symbol: "Hbar" } }))) {
     // Created only when the test DB has no `Hbar`; a seeded one is used as-is
     // and left untouched by the cleanup below.
@@ -104,8 +100,6 @@ afterAll(async () => {
   await prisma.stake.deleteMany({ where: { elementId: T6 } });
   await prisma.stake.deleteMany({ where: { elementId: T9 } });
   await prisma.firstClaim.deleteMany({ where: { elementId: T9 } });
-  await prisma.stake.deleteMany({ where: { elementId: T16 } });
-  await prisma.firstClaim.deleteMany({ where: { elementId: T16 } });
   if (madeHbar) {
     await prisma.firstClaim.deleteMany({ where: { elementId: HBAR } });
     await prisma.stake.deleteMany({ where: { elementId: HBAR } });
@@ -115,7 +109,6 @@ afterAll(async () => {
   await prisma.payment.deleteMany({ where: { startup: { domain: { startsWith: "rl-probe-" } } } });
   await prisma.element.deleteMany({ where: { id: T6 } });
   await prisma.element.deleteMany({ where: { id: T9 } });
-  await prisma.element.deleteMany({ where: { id: T16 } });
   await prisma.startup.deleteMany({ where: { OR: [{ domain: { in: DOMAINS } }, { domain: { startsWith: "rl-probe-" } }] } });
   await prisma.$disconnect();
 });
@@ -505,12 +498,11 @@ describe.skipIf(!hasDb)("audit inside a transaction", () => {
 });
 
 /**
- * Phase 16's three promises that only a real database can prove: the consent
- * record that backs the checkbox (R16-6/R16-7), the provenance label on the
- * seeder's placeholder listings (R16-9), and the icon proxy that keeps the
- * browser away from a third party (R16-3).
+ * Phase 16's two promises that only a real database can prove: the consent
+ * record that backs the checkbox (R16-6/R16-7) and the icon proxy that keeps
+ * the browser away from a third party (R16-3).
  */
-describe.skipIf(!hasDb)("phase 16: consent, provenance and the icon proxy", () => {
+describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
   const post16 = (body: Record<string, unknown>, idempotencyKey: string = key(), ip: string = IP16) =>
     checkoutPOST(
       req("/api/checkout", {
@@ -569,67 +561,20 @@ describe.skipIf(!hasDb)("phase 16: consent, provenance and the icon proxy", () =
     expect(bare.consentTextHash).toBe(CONSENT_TEXT_HASH);
   });
 
-  it("marks a seeded placeholder on the leaderboards and in the feed, and stops once it is paid (R16-9)", async () => {
-    const stem = await prisma.startup.upsert({
-      where: { domain: DEMO_DOMAIN },
-      create: { domain: DEMO_DOMAIN, title: "Square Up", pitch: "seeded placeholder pitch", url: `https://${DEMO_DOMAIN}`, logoUrl: faviconFor(DEMO_DOMAIN) },
-      update: {},
-    });
-    // A big stake, so the row is present on every surface that a listing can
-    // reach: the top-10 rail, the by-element tab and the crowns tab.
-    await prisma.stake.create({ data: { elementId: T16, startupId: stem.id, amountUsd: 12_000, rank: 1, isLeader: true } });
-    await prisma.activityLog.create({
-      data: { domain: DEMO_DOMAIN, elementSymbol: "TST16", kind: "stake", amountUsd: 12_000, deltaUsd: 12_000, resultTotalUsd: 12_000 },
-    });
-
-    const order = (await (await tableOrderGET()).json()) as unknown;
-    expect(isTableOrderRows(order)).toBe(true);
-    if (!isTableOrderRows(order)) return;
-    const rail = order.find((r) => r.domain === DEMO_DOMAIN);
-    expect(rail).toBeDefined();
-    expect(rail?.demo).toBe(true);
-    // Only the placeholder carries the label; a customer's row must not.
-    expect(order.filter((r) => r.demo === true).every((r) => r.domain === DEMO_DOMAIN)).toBe(true);
-
-    for (const tab of ["by-element", "crowns"]) {
-      const rows = (await (await boardGET(req(`/api/board?tab=${tab}`))).json()) as unknown;
-      expect(isBoardRows(rows)).toBe(true);
-      if (!isBoardRows(rows)) return;
-      const row = rows.find((r) => r.domain === DEMO_DOMAIN);
-      expect([tab, row?.demo]).toEqual([tab, true]);
-      expect([tab, rows.find((r) => r.domain === "ct-a.dev")?.demo]).toEqual([tab, undefined]);
-    }
-
-    const feed = (await (await activityGET(req("/api/activity?limit=20"))).json()) as unknown;
-    expect(isActivityRows(feed)).toBe(true);
-    if (!isActivityRows(feed)) return;
-    expect(feed.find((r) => r.domain === DEMO_DOMAIN)?.demo).toBe(true);
-
-    // The label means "nobody paid for this". A real payment retires it.
-    const paid = await prisma.payment.create({
-      data: { elementId: T16, startupId: stem.id, amountUsd: 12_000, path: "JOIN", provider: "DEV", idempotencyKey: key(), status: "PAID" },
-    });
-    const afterPaid = (await (await tableOrderGET()).json()) as unknown;
-    expect(isTableOrderRows(afterPaid)).toBe(true);
-    if (!isTableOrderRows(afterPaid)) return;
-    expect(afterPaid.find((r) => r.domain === DEMO_DOMAIN)?.demo).toBeUndefined();
-    await prisma.payment.delete({ where: { id: paid.id } });
-  });
-
   it("serves listing icons through our own server and degrades to a local picture (R16-3)", async () => {
     const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(png, { headers: { "content-type": "image/png" } })
     );
     try {
-      const ok = await faviconGET(req(`/api/favicon?domain=${DEMO_DOMAIN}&sz=64`));
+      const ok = await faviconGET(req(`/api/favicon?domain=${LISTING}&sz=64`));
       expect(ok.status).toBe(200);
       expect(ok.headers.get("content-type")).toBe("image/png");
       expect(ok.headers.get("cache-control")).toContain("immutable");
       expect(ok.headers.get("x-content-type-options")).toBe("nosniff");
       // The one place the icon service is named is this server-side call.
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(String(spy.mock.calls[0]?.[0])).toBe(upstreamFaviconUrl(DEMO_DOMAIN, 64));
+      expect(String(spy.mock.calls[0]?.[0])).toBe(upstreamFaviconUrl(LISTING, 64));
 
       spy.mockClear();
       const placeholder = async (query: string, label: string) => {
@@ -644,7 +589,7 @@ describe.skipIf(!hasDb)("phase 16: consent, provenance and the icon proxy", () =
         expect([label, spy.mock.calls.length]).toEqual([label, 0]);
       };
       await placeholder("domain=not-a-listing-r16.dev&sz=64", "unlisted domain");
-      await placeholder(`domain=${DEMO_DOMAIN}&sz=999`, "disallowed size");
+      await placeholder(`domain=${LISTING}&sz=999`, "disallowed size");
       await placeholder("domain=&sz=64", "missing domain");
 
       // A live domain whose icon is not an image, or is missing, falls back
@@ -654,7 +599,7 @@ describe.skipIf(!hasDb)("phase 16: consent, provenance and the icon proxy", () =
         spy.mockClear();
         if (response instanceof Error) spy.mockRejectedValue(response);
         else spy.mockResolvedValue(response);
-        const res = await faviconGET(req(`/api/favicon?domain=${DEMO_DOMAIN}&sz=32`));
+        const res = await faviconGET(req(`/api/favicon?domain=${LISTING}&sz=32`));
         expect([label, res.status]).toEqual([label, 302]);
         expect([label, res.headers.get("cache-control")]).toEqual([label, "public, max-age=600"]);
       };

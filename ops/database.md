@@ -83,8 +83,8 @@ directory (the checksum in `_prisma_migrations` is what proves what ran).
 
 ## Seeding, and the one destructive flag
 
-`npm run seed` (`prisma/seed.ts`) is additive: it upserts the table and the demo
-data and says nothing about the database it targets, so **read the host first**
+`npm run seed` (`prisma/seed.ts`) is additive: it upserts the table and the
+inventory seats and says nothing about the database it targets, so **read the host first**
 (§1). The launch path (`prisma/launch-seed.ts`) is guarded:
 
 ```sh
@@ -182,7 +182,25 @@ the reason a database outage no longer looks like any other 500.
   bite at deploy time.
 - Deleting a subject's data has one supported path: `npm run db:erase-subject`
   (`scripts/erase-subject.ts`, requires `DATABASE_URL`). It erases an identified
-  subject; it does not clean the demo table. What may be deleted and what must be
+  subject; it does not clean the seeded board. What may be deleted and what must be
   kept for tax/ledger reasons is phase 16's topic.
-- `npm run db:clear-demo-data` clears the demo listings — additive seed's
-  counterpart, not a ledger tool.
+- `npm run db:clear-inventory` clears the launch inventory seats — additive seed's
+  counterpart, not a ledger tool (`scripts/clear-launch-inventory.ts`).
+- `npm run db:backfill-logos` rewrites stored `Startup.logoUrl` values that still
+  point at the icon service to this site's own `/api/favicon` proxy
+  (`scripts/backfill-logos.ts`, dry run by default). Legacy rows render fine
+  without it — `lib/screenshots.ts` `logoSrc` rewrites on the way out — so this is
+  bookkeeping, not a fix: it makes the stored value match what the browser fetches
+  and keeps the icon service's host out of every payload (`ops/database.md` is
+  where a stored URL shape belongs, `R16-3` is why).
+- `npm run db:check-board` reads the live board and says whether the launch copy's
+  price claim is still true (`scripts/check-launch-board.ts`). **Read-only by
+  construction** — no `--apply`, no writes, no `process.argv` at all — so it is
+  safe against production one minute before publishing. Exit 0 means every unpaid
+  seat is launch inventory, at the `MIN_STAKE` floor, alone on its tile, so a
+  captured tile is beaten for exactly $6; exit 1 lists what changed, one line per
+  element (`lib/launchBoard.ts` holds the rules, `lib/launchBoard.test.ts` pins
+  them). A **paid** rival is reported as info and does *not* fail the check: real
+  bids are the product working, and after they land the check is expected to warn,
+  which is how the "$6 floor" sentence gets retired from the copy instead of
+  quietly going stale.

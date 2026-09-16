@@ -20,7 +20,7 @@ end before quoting a row count from it.
 | 1 | `whop` | `pending` | `NULL` | `NULL` | 4 | Legacy pre-Stripe checkouts. Inert by construction: no session, no provider row, no stake. The `whop` enum value survives only so these four rows deserialize (`PaymentProvider` in `prisma/schema.prisma` says so, and dropping it would strand them). |
 | 2 | `stripe` | `pending` | `NULL` | `NULL` | 2 | Checkouts whose request never reached the provider. No money, no session, nothing to apply. |
 | 3 | `stripe` | `pending` | `cs_live_…` | `NULL` | 3 | Sessions genuinely created at Stripe and never completed. |
-| 4 | `stripe` | `paid` | `cs_live_…` | `NULL` | 3 | **Settled, and the only rows that ever carried money.** Their stakes were deleted by the pre-announce cleanup (`scripts/clear-demo-data.ts` nulls `Payment.stakeId` before deleting `Stake`), and `appliedAt` (`09:57:05.964`, `09:57:12.016`, `11:08:37.147`) was left standing on purpose: it is the settle proof for the webhook path (§"Webhook edge cases" in the ledger). |
+| 4 | `stripe` | `paid` | `cs_live_…` | `NULL` | 3 | **Settled, and the only rows that ever carried money.** Their stakes were deleted by the pre-announce cleanup (`scripts/clear-launch-inventory.ts` nulls `Payment.stakeId` before deleting `Stake`), and `appliedAt` (`09:57:05.964`, `09:57:12.016`, `11:08:37.147`) was left standing on purpose: it is the settle proof for the webhook path (§"Webhook edge cases" in the ledger). |
 
 Four column shapes over twelve rows. The ledger says *five* shapes because one of
 shape 3 is the operator's own free-entry checkout at `$25`

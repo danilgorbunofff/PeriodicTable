@@ -10,12 +10,14 @@ set (R19-1, U19-3): the script is consent-gated, so "Plausible live" and the fun
 dashboard are not true until then.
 
 ## Seed (dogfood before strangers)
-- [ ] 12 startup stakes across 10 marquee elements, real companies with real domains, logos, pitches — `prisma/launch-seed.ts:40-53`; `seed-list.csv` is the same table, and a test keeps the two from drifting (`lib/launchReadiness.test.ts`)
-- [ ] Contested ladder on C ($50 Stripe / $24 Adyen / $9 Square) so the drawer's ladder and the reclaim path are visible on day 1 — the same three rows
-- [ ] Activity backlog: one row per seeded stake, stamped 1–50h back, cities on the row — the feed is non-empty because the stakes are
+- [ ] 18 seats for six real companies with real domains, logos, pitches — `prisma/launch-seed.ts:45-63`; `seed-list.csv` is the same table, and a test keeps the two from drifting (`lib/launchReadiness.test.ts`)
+- [ ] One seat per element, every one at the `$5` floor — so a captured tile quotes exactly `$6` and no tile carries a ladder too tall for that price (`lib/launchInventory.test.ts`)
+- [ ] Activity backlog: one row per seat, stamped 1–35h back, no city and no clicks on the row — the feed is non-empty because the seats are
 - [ ] Concierge reclaim test: outbid a founder friend, verify email + top-up — operator step, unrun
-- [ ] Seeded rows are labelled `demo` on every surface and retire the label the moment a real payment exists — done in batch 4 (R16-9, `lib/demoLabels.ts`), and the About page admits these rows were never paid for
-- [ ] Seed policy decided: **seed before announcing** (2026-09-16, `doc/review/19-launch-and-marketing-readiness.md` §9 Q1 → D19-1) — the operator runs `tsx prisma/launch-seed.ts` at T-30m, undo is `npx tsx scripts/clear-demo-data.ts` (dry-run first)
+- [ ] The board says what a seat is: not ownership, not an endorsement, not a payment from the company — one honest sentence on the About page and in the FAQ, plus "every seat is a dollar over its holder" (`lib/legalDocs.ts`, `lib/faqDocs.ts`)
+- [ ] Stored logos point at our own proxy, not at the icon service — `npm run db:backfill-logos` (dry run first, then `-- --apply --allow-remote`); rendering does not depend on it (`logoSrc` rewrites legacy URLs on the way out), so it is housekeeping for the *stored* value
+- [ ] The live board still matches the price claim — `npm run db:check-board` (read-only, safe against prod, exit 0 = every unpaid seat is inventory at the floor and alone on its tile). **Run this at T-30m, right before the seed step below and again right after it:** a seed can be correct in the repo and wrong in the database, and the operator only finds out from a visitor otherwise (`lib/launchBoard.ts`)
+- [ ] Seed policy decided: **seed before announcing** (2026-09-16, `doc/review/19-launch-and-marketing-readiness.md` §9 Q1 → D19-1) — the operator runs `tsx prisma/launch-seed.ts --fresh --allow-remote --confirm=<host>` at T-30m, undo is `npx tsx scripts/clear-launch-inventory.ts` (dry-run first)
 
 ## Analytics
 - [ ] Plausible pageviews + custom events: `tile_click, drawer_open, search_submit, checkout_start, checkout_paid, reclaim_click, go_click` — the seven events exist and are pinned (`lib/analytics.ts`, `lib/phase5.test.ts:27-31`); **nothing is collected** until `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` is set *and* the visitor accepts the notice (R18-13, `lib/analyticsConsent.ts`)

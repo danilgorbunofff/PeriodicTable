@@ -384,8 +384,8 @@ describe("R20-12/R20-13 the questions launch week can answer have queries", () =
     expect(week).toMatch(/\/api\/admin\/ops/);
     expect(week).toMatch(/funnel/);
     expect(week).toMatch(/NEXT_PUBLIC_PLAUSIBLE_DOMAIN/);
-    // Seeded rows are separable without a schema change.
-    expect(week).toContain("lib/demoLabels.ts");
+    // Inventory seats are separable without a schema change.
+    expect(week).toContain("lib/launchInventory.ts");
     // The crown is a mutable flag, so history is read from the activity log.
     expect(week.replace(/\\"/g, '"')).toMatch(/"ActivityLog"/);
   });

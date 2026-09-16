@@ -20,7 +20,7 @@ Resend (email), Cloudflare Turnstile (bot checks). Hosting: Vercel.
 npm ci
 cp .env.example .env   # then fill DATABASE_URL (below)
 npx prisma migrate deploy
-npx tsx prisma/seed.ts # 122 elements + demo stakes (optional)
+npx tsx prisma/seed.ts # 122 elements + 18 inventory seats (optional)
 npm run dev            # http://localhost:3000
 ```
 

@@ -66,16 +66,13 @@ export type BoardRow = {
   elementName: string;
   total: number;
   totalSpent?: number;
-  /** R16-9: a seeded placeholder. Present only when the row is one, so `demo`
-   *  alone decides the label — the same field the feed and the tiles use. */
-  demo?: boolean;
 };
 
 /** Tile claim from /api/elements. Built from `leader`, which is filtered to
  *  directly-visible stakes — so this type must never carry a flag derived from
  *  the hidden-inclusive `count`, or the tile would advertise a concealed
  *  listing's existence. */
-export type Claim = { price: number; logoUrl?: string; demo?: boolean };
+export type Claim = { price: number; logoUrl?: string; domain?: string };
 
 /** Activity row from /api/activity — amount paid + resulting total. */
 export type ActivityRow = {
@@ -92,9 +89,6 @@ export type ActivityRow = {
   createdAt: string;
   /** Live stake behind this event — rows deep-link via /go/:stakeId when set. */
   stakeId?: string | null;
-  /** R16-9: a seeded placeholder listing, not a customer. Present only on the
-   *  seeder's rows (see lib/demoLabels.ts), so `!!row.demo` is the whole test. */
-  demo?: boolean;
 };
 
 /** Element detail from /api/elements/[sym] */
@@ -177,9 +171,6 @@ export type TableOrderRow = {
   elements: number;
   /** Biggest stake for the domain — rows link via /go/:stakeId. */
   stakeId?: string;
-  /** R16-9: a seeded placeholder, so the rail's "most spent" figure is labelled
-   *  as a figure nobody paid. */
-  demo?: boolean;
 };
 
 /** Search hits from /api/search (P1-06). Startup rows carry everything the
@@ -257,8 +248,7 @@ export function isTableOrderRows(v: unknown): v is TableOrderRow[] {
         typeof r.totalSpent === "number" &&
         typeof r.crowns === "number" &&
         typeof r.elements === "number" &&
-        (r.stakeId === undefined || typeof r.stakeId === "string") &&
-        (r.demo === undefined || typeof r.demo === "boolean")
+        (r.stakeId === undefined || typeof r.stakeId === "string")
     )
   );
 }
@@ -291,8 +281,7 @@ export function isActivityRows(v: unknown): v is ActivityRow[] {
         typeof r.total === "number" &&
         typeof r.kind === "string" &&
         typeof r.createdAt === "string" &&
-        (r.stakeId === undefined || r.stakeId === null || typeof r.stakeId === "string") &&
-        (r.demo === undefined || typeof r.demo === "boolean")
+        (r.stakeId === undefined || r.stakeId === null || typeof r.stakeId === "string")
     )
   );
 }

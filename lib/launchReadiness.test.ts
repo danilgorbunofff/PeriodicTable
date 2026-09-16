@@ -218,18 +218,21 @@ describe("R19-8 the launch-day file stops contradicting the runbook", () => {
   it("the seed list describes the rows the seeder actually writes", () => {
     const csv = src("doc/phase-5-launch/seed-list.csv").trim().split("\n");
     const header = csv[0].split(",");
-    expect(header).toEqual(["domain", "title", "pitch", "symbol", "amount_usd", "city", "clicks"]);
+    expect(header).toEqual(["domain", "title", "pitch", "symbol", "amount_usd"]);
     const rows = csv.slice(1).map((line) => line.split(","));
-    expect(rows.length).toBe(12);
+    expect(rows.length).toBe(18);
     const seeder = src("prisma/launch-seed.ts");
     for (const row of rows) {
-      // Real domains: the favicon service needs them, and a seeded row carries a
-      // real company's name (R16-9), so the spreadsheet may not invent one.
+      // Real domains: the icon proxy needs them, and a seat carries a real
+      // company's name, so the spreadsheet may not invent one.
       expect(seeder, row[0]).toContain(`domain: "${row[0]}"`);
       expect(seeder, row[0]).toContain(`symbol: "${row[3]}"`);
-      expect(seeder, row[0]).toContain(`amount: ${row[4]}`);
-      expect(seeder, row[0]).toContain(`city: "${row[5]}"`);
+      // One seat per element, all at the floor: a laddered row here would be a
+      // tile no $6 bid could take, so the list may not restate a price.
+      expect(row[4], row[0]).toBe("5");
     }
+    const symbols = [...seeder.matchAll(/symbol: "([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(rows.map((row) => row[3]).sort()).toEqual(symbols);
     expect(src("doc/phase-5-launch/seed-list.csv")).not.toMatch(/aurum\.fi|acme\.dev|hydro\.dev/);
   });
 });

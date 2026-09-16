@@ -45,9 +45,9 @@ WHERE p.status = 'paid'
 ORDER BY p.\"paidAt\";"
 ```
 
-- Rows whose `domain` is in `DEMO_STARTUP_DOMAINS` (`lib/demoLabels.ts`) are the
-  seed, not a customer. The `ARRAY[...]` literal in Q4 below is that same list
-  typed out — if the seed list ever changes, the literal is what goes stale, and the
+- Rows whose `domain` is in `LAUNCH_INVENTORY_DOMAINS` (`lib/launchInventory.ts`)
+  are the seed, not a customer. The `ARRAY[...]` literal in Q4 below is that same
+  list typed out — if the seed list ever changes, the literal is what goes stale, and the
   copy in this file is the one to update with it.
 - For every other row: find the domain in whatever outbound log was kept for the
   launch (a file, a thread, a spreadsheet — write it on day one, because day three
@@ -98,9 +98,8 @@ ORDER BY pool DESC;"
 
 ## Q3 — Did the seed do its job?
 
-The seed exists so a stranger does not meet an empty board, and its label is
-retired the moment a real payment exists (`lib/demoLabels.ts`, R16-9). Whether
-that happened is a one-line read:
+The seed exists so a stranger does not meet an empty board. Whether a company
+ever bought its seat is a one-line read:
 
 ```sh
 psql "$DATABASE_URL" -c "
@@ -111,12 +110,12 @@ FROM \"Startup\" st LEFT JOIN \"Stake\" s ON s.\"startupId\" = st.id
 GROUP BY st.id, st.domain ORDER BY usd DESC NULLS LAST;"
 ```
 
-- `paid_for = true` on a demo domain means a real company later bought a listing
-  that was seeded as a placeholder: the label is already off that row, and the About
-  page's sentence about demo rows needs re-reading.
-- A demo row with no `paid_for` and no stake is one the cleanup script can take
-  (`scripts/clear-demo-data.ts`, dry-run first); a demo row with a stake is
-  inventory somebody is competing for and is **not** residue.
+- `paid_for = true` on an inventory domain means a real company later bought the
+  listing that was opened for it: the FAQ's sentence about seats it did not sell
+  needs re-reading (`lib/faqDocs.ts`).
+- An inventory row with no `paid_for` and no stake is one the cleanup script can
+  take (`scripts/clear-launch-inventory.ts`, dry-run first); an inventory row
+  with a stake is an open seat somebody is competing for and is **not** residue.
 - **Decision it feeds:** when the seed has served its purpose (a real stake exists
   on a marquee element), say so and stop defending the placeholder board.
 
@@ -126,7 +125,7 @@ GROUP BY st.id, st.domain ORDER BY usd DESC NULLS LAST;"
 psql "$DATABASE_URL" -c "
 SELECT e.symbol, e.\"totalPoolUsd\" AS pool, st.domain AS leader,
        s.\"amountUsd\" AS leader_usd, s.\"isLeader\",
-       st.domain = ANY(ARRAY['stripe.com','coinbase.com','adyen.com','squareup.com','nvidia.com','anthropic.com','cloudflare.com','supabase.com','huggingface.co']) AS seeded
+       st.domain = ANY(ARRAY['stripe.com','coinbase.com','nvidia.com','cloudflare.com','supabase.com','anthropic.com']) AS seeded
 FROM \"Element\" e
 JOIN \"Startup\" st ON st.id = e.\"currentLeaderId\"
 JOIN \"Stake\"   s  ON s.\"elementId\" = e.id AND s.\"startupId\" = st.id
@@ -183,3 +182,21 @@ needs a stable funnel reading, which is the read in Q2 above; the triggers:
 `doc/phase-6-v2/README.md`, so the rule is checkable by someone other than the
 person who wrote it, and re-read the `$50k` threshold against the pool that
 actually accrued.
+
+## Open decision — what a claimed tile's number means
+
+Unmade as of 2026-09-16, and cheap to make either way. A tile's face states one
+number (`lib/tileFace.ts`): on an unclaimed tile it is the `$5` floor, which is
+also the price of taking it, and on a claimed tile it is what the holder paid
+(`title` and aria name: `"C Carbon · #1 $5"`, `"claimed, leader pays $5"`). The
+buyer's actual price — the holder's total plus `TAKEOVER_MARGIN` — appears on
+`/elements/[sym]` (`take #1 for $6`) and in the claim modal, one click later.
+
+With every seat seeded at the floor the two readings collapse (`$5` held, `$6` to
+beat), so nothing is wrong on screen; the ambiguity only returns the day a tile
+is bought twice. The options: leave it (the face reports standing, the page
+reports price), or make the face the price of taking the tile (`$6`), which also
+changes the aria name and `lib/a11y.test.ts`'s vocabulary. Recommendation:
+**leave it until a second stake exists** — at that point the tile number and the
+page price diverge on a live tile, and the first outbid email is the natural
+moment to decide with a real example in hand.

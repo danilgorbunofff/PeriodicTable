@@ -57,23 +57,28 @@ amounts — adyen was $24, not $31; squareup $9, not $18):
 counts that mattered):
 
 - The data did **not** come from `mocks/startups.ts` (`MOCK_STAKES`, which is
-  local demo only). The prod seeder is **`prisma/launch-seed.ts`** — its 12
-  stakes match the live ladder exactly. It writes **9** domains, not 6, and 0 of
-  them ever had an email, a `Payment`, or a manage token.
+  local demo only). The prod seeder is **`prisma/launch-seed.ts`** — its stakes
+  matched the live ladder at the time of this write-up (then 9 domains / 12
+  stakes; the seeder today writes **6** domains / **18** seats at the floor, and
+  on 2026-09-16 prod read 9 domains / 27 seats / 24 tiles / $667 pooled, **0
+  paid**). Treat the table above as a snapshot and the database as the record:
+  `npm run db:check-board` prints the live shape. Neither the seeded rows nor the
+  extra domains ever had an email, a `Payment`, or a manage token.
 - A cleanup tool **did** exist: `launch-seed.ts --fresh` already implemented an
   FK-safe wipe. It is blanket, though — it clears `Report`/`EmailLog` too — so
   the scoped script below supersedes it.
 
-**The tool that did it: `scripts/clear-demo-data.ts`**
-(`npm run db:clear-demo`) — **dry run by default**; writing needs
-`-- --apply --allow-remote`. It is provenance-guarded: a demo domain is only
+**The tool that did it: `scripts/clear-launch-inventory.ts`**
+(`npm run db:clear-inventory`, renamed from `clear-demo-data` on 2026-09-16) —
+**dry run by default**; writing needs
+`-- --apply --allow-remote`. It is provenance-guarded: an inventory domain is only
 deleted while it still looks exactly as the seed left it (no email, no payment,
 no manage token/session, no operator moderation). Any deviation aborts the
 **entire** run rather than half-deleting. It computes the dry-run plan by
 executing the real statements inside a transaction and rolling back, so a dry
 run also proves the delete ordering is FK-valid. Element aggregates are
 recomputed through the shared `rankStakes`/`assertLedgerInvariants` path, never
-ad hoc. `lib/demoData.test.ts` guards the domain allowlist against drift from
+ad hoc. `lib/launchInventory.test.ts` guards the domain allowlist against drift from
 both seeder files.
 
 Deleted 59 rows: `firstClaim` 10, `report` 2, `clickEvent` 5, `stake` 12,
@@ -84,7 +89,10 @@ were both empty — no real payment or signup was ever at risk.
 
 **The local `.env` `DATABASE_URL` points at the production Neon database.**
 Running `npm run seed` or `npm run db:migrate` from this laptop mutates prod.
-Prefer `db:clear-demo`'s dry run as the pattern for anything touching data.
+Prefer `db:clear-inventory`'s dry run as the pattern for anything touching data
+(`npm run db:backfill-logos` is the second script written that way — dry run
+first, `-- --apply --allow-remote` to write, and it touches only stored
+`Startup.logoUrl` values that still name the icon service).
 
 Backup taken immediately before the cleanup (verified complete, contains all 9
 startups and 12 stakes): `prod-backup-20260910-213853.sql` in the session
@@ -274,7 +282,7 @@ newest production deployment, not GitHub's commit status (see the traps below).
       **`No pending migrations to apply.`** Migration files are authoritative again.
 - [x] **Demo/seed listings cleared from prod** (§1) — 59 rows across 7 tables;
       `/api/stats` → 0 claimed, 0 stakes, $0; checked with
-      `scripts/clear-demo-data.ts` (`npm run db:clear-demo`, dry run first)
+      `scripts/clear-launch-inventory.ts` (`npm run db:clear-inventory`, dry run first)
 - [x] Resend domain `periodictable.lol` verified (DNS via GoDaddy, mail rows intact)
 - [x] Resend key **deleted + recreated** after a chat exposure; direct-API test
       delivered to an inbox (landed in Gmail *spam* — expected for a bare test
@@ -665,7 +673,7 @@ newest production deployment, not GitHub's commit status (see the traps below).
 - ⚠️ **The local `.env` `DATABASE_URL` points at the production Neon database.**
   `npm run seed` and `npm run db:migrate` run straight against prod from this
   laptop. Anything that writes rows should be dry-run-first and guarded the way
-  `scripts/clear-demo-data.ts` is.
+  `scripts/clear-launch-inventory.ts` is.
 - **`migrate deploy` is now safe to run in a build** (baselined, §Done and proven).
   It also worked over Neon's **pooled** URL, so the usual `directUrl` advice for
   serverless is not currently required here — but the datasource still has no

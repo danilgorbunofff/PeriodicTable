@@ -157,7 +157,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "Independence & no endorsement",
         ps: [
           "This site is an independent creative project. It is not affiliated with, endorsed by, or connected to IUPAC or any scientific body. Element names, symbols, and atomic numbers are used referentially to describe the layout of the table; all trademarks, logos, and brand names shown in listings belong to their respective owners.",
-          "A listing on the table does not mean the listed company participates in, endorses, or is even aware of this site. Every link is submitted by whoever paid for it — except the listings marked \u201cdemo\u201d, which are placeholders the operator seeded before launch, are labelled as such on the table and in the feed, and are removed before any of them could be mistaken for a customer: no payment was made for them, so neither their stake nor the city on their feed row is real.",
+          "A listing on the table does not mean the listed company participates in, endorses, or is even aware of this site. Every link is submitted by whoever paid for it, with one exception: the operator's own launch inventory. A handful of seats were opened before launch, naming real companies and linking to their sites, so a stranger does not meet an empty table. Those seats were not paid for, not submitted, and not approved by the company named on them — the company is there because the seat exists, not because it agreed to anything, and it may not know the seat exists. A seat is a place on a leaderboard, not ownership, sponsorship, endorsement or awareness: any seat can be taken for a dollar over whatever it holds, and the operator releases any inventory seat nobody has paid for.",
           STAKE_SENTENCE,
         ],
       },
@@ -179,7 +179,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "Data, cookies and third parties",
         ps: [
           "We keep the minimum needed to run the leaderboard: the email and listing you give us, payment facts from Stripe, salted-hash click counts, your reports, our mail log, and our operator audit trail. The full inventory, with the purpose and the retention period of each item and every company we send it to, is on the Privacy page.",
-          "We do not collect your city or country from your payment provider, and we do not show one. The city on a live-feed row is a placeholder that exists only on seeded demo listings — no real settlement writes one.",
+          "We do not collect your city or country from your payment provider, and we do not show one. The city on a feed row was only ever written by the launch inventory, and it writes none now.",
           "No page of this site sets a cookie, and no third-party script or image is loaded by your browser on a normal page view: listing icons are fetched by our server and served from this domain, and analytics is off unless the operator turns it on. What is loaded, and when, is listed on the Privacy page.",
         ],
       },
@@ -313,7 +313,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         ps: [
           "The table, the leaderboards, the element pages and the live feed are public by design. Published: your listing's title, pitch, destination URL, domain and icon; the element it holds; the amount and the time of the stake; aggregate click counts; and the element's running totals.",
           "Never published: your email address, your payment reference, your card details, your reports, or the hashed IP behind a click. Row-level click logs are visible only to the operator.",
-          "The city and the stake shown on a \u201cdemo\u201d row are launch placeholders written by the demo seeder for its own rows \u2014 no money changed hands for them. We never receive a city or a country from Stripe, and no real settlement writes one — if you see a city on a row that is not marked \u201cdemo\u201d, it is a bug; tell us and we will fix it. (The About page said the opposite until this revision.)",
+          "The city on a feed row was only ever written by the launch inventory for its own rows, and it writes none now. We never receive a city or a country from Stripe, and no real settlement writes one — if a city appears on a row, it is a bug; tell us and we will fix it.",
         ],
       },
       {

@@ -2,16 +2,11 @@ import { prisma } from "@/lib/prisma";
 import { apiJson, READ_CACHE, apiRoute } from "@/lib/route";
 import { FACE_STAKE_WHERE } from "@/lib/moderation";
 import { cellOf } from "@/lib/gridGeometry";
-import { demoListingDomains, isDemoListing } from "@/lib/demoData";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listElements });
 
 async function listElements() {
-  // R16-9: the tile face names a holder and a price. For a seeded row that is a
-  // company that never paid anything, so the face has to say what it is —
-  // resolved once here, not per tile.
-  const demoDomains = await demoListingDomains();
   const elements = await prisma.element.findMany({
     orderBy: { id: "asc" },
     include: {
@@ -53,7 +48,6 @@ async function listElements() {
             domain: leader.startup.domain,
             logoUrl: leader.startup.logoUrl,
             amount: leader.amountUsd,
-            ...(isDemoListing(leader.startup.domain, demoDomains) ? { demo: true } : {}),
           }
         : null,
     };

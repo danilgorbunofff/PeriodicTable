@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { faviconFor, isUpstreamFaviconUrl } from "../lib/screenshots";
+import { logoSrc } from "../lib/screenshots";
 
 /** Favicon/logo with graceful fallback — an icy initial chip when the image
  *  is missing or fails to load (flaky favicon services, dead domains). */
@@ -20,11 +20,9 @@ export function Avatar({
   const [failed, setFailed] = useState(false);
   const dims = { width: size, height: size };
 
-  // R16-3: rows written before the icon proxy existed hold the icon service's
-  // own URL, and rendering one would send the visitor's IP to Google from a page
-  // the privacy policy says does not. They are served through our proxy instead,
-  // so both generations of data behave the same way.
-  const href = isUpstreamFaviconUrl(src) ? faviconFor(domain, size) : src;
+  // R16-3: both generations of stored icon (the icon service's own URL, and the
+  // proxy path) resolve here, so a legacy row behaves like a current one.
+  const href = logoSrc(src, domain, size);
 
   if (!href || failed) {
     return (
