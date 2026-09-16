@@ -9,6 +9,7 @@ import { Avatar } from "../../../components/Avatar";
 import { ReportListingButton } from "../../../components/ReportListingButton";
 import { faviconFor } from "../../../lib/screenshots";
 import { siteOrigin } from "../../../lib/siteUrl";
+import { MIN_STAKE } from "../../../lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -275,7 +276,7 @@ export default async function Profile({ params }: { params: { domain: string } }
         <div className="mt-6 rounded-card p-6 flex items-center gap-4 flex-wrap shadow-card" style={{ background: "linear-gradient(180deg,#FFEFC1,#FFCE4B)" }}>
           <div>
             <div className="font-display text-lg font-bold">Start your own empire</div>
-            <div className="text-sm">Grab a seat on any element — from $5.</div>
+            <div className="text-sm">{`Grab a seat on any element — from $${MIN_STAKE}.`}</div>
           </div>
           <Link href="/" className="ml-auto bg-visit text-white font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm">Claim</Link>
         </div>

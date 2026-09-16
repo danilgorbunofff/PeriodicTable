@@ -24,6 +24,7 @@ async function main() {
       "DATABASE_URL",
       "STRIPE_SECRET_KEY",
       "STRIPE_WEBHOOK_SECRET",
+      "ADMIN_TOKEN", // R19-8: this list is the strict one, all ten of lib/env.ts's
       "NEXT_PUBLIC_APP_URL",
       "TURNSTILE_SECRET",
       "CLICK_SALT",

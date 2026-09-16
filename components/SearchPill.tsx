@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { fetchJson, isSearchHits, type SearchHit } from "../lib/api";
 import { Avatar } from "./Avatar";
+import { MIN_STAKE } from "../lib/pricing";
 
 export type SearchPick = { symbol: string; elementName: string; domain?: string };
 
@@ -191,7 +192,7 @@ export function SearchPill({
                 >
                   <span className="text-sm font-extrabold w-8">{e.symbol}</span>
                   <span className="text-xs text-mutedink">{e.elementName}</span>
-                  <span className="text-xs text-mutedink ml-auto">from $5</span>
+                  <span className="text-xs text-mutedink ml-auto">{`from $${MIN_STAKE}`}</span>
                 </button>
               );
             })}

@@ -38,9 +38,28 @@ export function homeMetadata(env: Record<string, string | undefined> = process.e
     },
     twitter: {
       card: "summary_large_image",
+      ...twitterSite(env),
       title: CARD_TITLE,
       description: DESCRIPTION,
       images: [`${origin}/og/home`],
     },
   };
+}
+
+/**
+ * The `twitter:site` tag for a card, or nothing at all (R19-9).
+ *
+ * A share credits an account only if one exists. `NEXT_PUBLIC_TWITTER_HANDLE` is
+ * the single place a handle is configured: set it at T-0 in Vercel and every
+ * card credits the account that posted the link; leave it unset and the tag is
+ * omitted rather than rendered empty or pointed at a handle nobody owns (which
+ * would credit a stranger on every share). Element pages and the legal shell
+ * spread this too, so one variable names the channel everywhere.
+ */
+export function twitterSite(
+  env: Record<string, string | undefined> = process.env
+): { site: string } | Record<string, never> {
+  const handle = env.NEXT_PUBLIC_TWITTER_HANDLE?.trim();
+  if (!handle) return {};
+  return { site: handle.startsWith("@") ? handle : `@${handle}` };
 }

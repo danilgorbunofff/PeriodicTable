@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { ELEMENTS } from "./elements";
 import { LEGAL_REVISIONS, LEGAL_SLUGS } from "./legal";
+import { FAQ_PATH, FAQ_REVISED } from "./faq";
 import { buildSitemapEntries, type ElementStamp } from "./sitemapData";
 
 const at = (iso: string) => new Date(iso);
@@ -38,8 +39,9 @@ describe("buildSitemapEntries", () => {
       { symbol: "H", updatedAt: null },
       { symbol: "He", updatedAt: null },
     ]);
-    // Stakes and elements only: legal entries always carry their revision date,
-    // which is a real write to that URL rather than a render-time stamp.
+    // Stakes and elements only: the legal entries and `/faq` always carry their
+    // revision date, which is a real write to that URL rather than a render-time
+    // stamp, so only the head of the list can be undated.
     expect(cold.slice(0, 3).some((e) => "lastModified" in e)).toBe(false);
   });
 
@@ -54,7 +56,7 @@ describe("buildSitemapEntries", () => {
       "https://ptl-git-main.vercel.app",
       ELEMENTS.map((e) => ({ symbol: e.symbol, updatedAt: null }))
     );
-    expect(entries).toHaveLength(ELEMENTS.length + 1 + LEGAL_SLUGS.length);
+    expect(entries).toHaveLength(ELEMENTS.length + 1 + LEGAL_SLUGS.length + 1);
     const urls = entries.map((e) => e.url);
     expect(urls[0]).toBe("https://ptl-git-main.vercel.app/");
     expect(new Set(urls).size).toBe(urls.length);
@@ -66,7 +68,7 @@ describe("buildSitemapEntries", () => {
   it("lists every legal document, dated by its own revision (R16-13)", () => {
     const base = "https://www.periodictable.lol";
     const entries = buildSitemapEntries(base, []);
-    expect(entries).toHaveLength(1 + LEGAL_SLUGS.length);
+    expect(entries).toHaveLength(1 + LEGAL_SLUGS.length + 1);
     for (const slug of LEGAL_SLUGS) {
       const entry = entries.find((e) => e.url === `${base}/legal/${slug}`);
       expect(entry, `/legal/${slug} missing from the sitemap`).toBeDefined();
@@ -74,5 +76,12 @@ describe("buildSitemapEntries", () => {
     }
     expect(entries[0].url).toBe(`${base}/`);
     expect(entries[1].url).toBe(`${base}/legal/about`);
+    // The corpus stays a contiguous, index-stable block; the FAQ is appended
+    // after it for the same reason it is in the sitemap at all (R19-4): it is a
+    // static page whose only write is an edit to its words.
+    expect(entries.at(-1)).toEqual({
+      url: `${base}${FAQ_PATH}`,
+      lastModified: new Date(`${FAQ_REVISED}T00:00:00.000Z`),
+    });
   });
 });

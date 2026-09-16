@@ -1,4 +1,4 @@
-import { joinMin, reclaimFor, smallestFreeAmount } from "./pricing";
+import { TIE_CLEARANCE, joinMin, reclaimFor, smallestFreeAmount } from "./pricing";
 
 /**
  * What the checkout form may claim about a stake, given the board it can see
@@ -185,12 +185,12 @@ export function crownCopy({
         ? alreadyLead
           ? // Their own top-ups are never refused, but a $1 top-up lands exactly
             // on the quote's total, so clearing it costs one dollar more.
-            `Top-ups are $1+ — add $${need + 1} to clear that quote while it runs.`
+            `Top-ups are $1+ — add $${need + TIE_CLEARANCE} to clear that quote while it runs.`
           : `Top-ups are $1+ — $${priorTotal + need} takes #1, but that total is inside the quote until ${hhmm}.`
         : !boardComplete
-          ? `A bid below $${heldTotal} may still land while that quote runs — exact ties are refused, so stand $1 clear.`
+          ? `A bid below $${heldTotal} may still land while that quote runs — exact ties are refused, so stand $${TIE_CLEARANCE} clear.`
           : space.kind === "room"
-            ? `A first bid is $${space.amount}+ while that quote runs — exact ties are refused, so stand $1 clear.`
+            ? `A first bid is $${space.amount}+ while that quote runs — exact ties are refused, so stand $${TIE_CLEARANCE} clear.`
             : // Nothing free sits under the quote, so name the wall instead of an
               // amount that would be refused.
               `The lowest amount still free is $${smallestFreeAmount(existingTotals)}, and the quote covers it.`,
@@ -203,9 +203,9 @@ export function crownCopy({
         ? `👑 $${need} more reclaims #1 in ${elementName}!`
         : `👑 $${need} takes #1 in ${elementName}!`,
     joins: priorHere
-      ? `Top-ups are $1+ — $${need} more puts you back on top. Exact ties are rejected, so stand $1 clear.`
+      ? `Top-ups are $1+ — $${need} more puts you back on top. Exact ties are rejected, so stand $${TIE_CLEARANCE} clear.`
       : boardComplete
-        ? `A first bid is $${smallestFreeAmount(existingTotals)}+ — $${need} takes #1 right now. Exact ties are rejected, so stand $1 clear.`
-        : `Any $${joinMin()}+ amount joins the ladder — $${need} grabs #1 right now. Exact ties are rejected, so stand $1 clear.`,
+        ? `A first bid is $${smallestFreeAmount(existingTotals)}+ — $${need} takes #1 right now. Exact ties are rejected, so stand $${TIE_CLEARANCE} clear.`
+        : `Any $${joinMin()}+ amount joins the ladder — $${need} grabs #1 right now. Exact ties are rejected, so stand $${TIE_CLEARANCE} clear.`,
   };
 }

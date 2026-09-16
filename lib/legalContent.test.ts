@@ -61,7 +61,7 @@ const text = (slug: LegalSlug) => legalCanonicalText(slug);
 const DIGESTS: Record<LegalSlug, string> = {
   about: "78df6b30c09b8c39ee749e861373da556cbec00e68bd02451342134020cda1fd",
   rules: "a338b41854e569939324ff77c3e5856461a850800867cddf8c23bf52064b68de",
-  contact: "5d621152a09915d6eec4c07b3044450a44af8f5aceb9a4528a91356d2b4a365c",
+  contact: "745291c0457b00967ccd9c377c7b862d1511d03353c80ec3fddb520419982008",
   privacy: "7543e10c8633c3b3b3abafec37e0b056b36104e96649f3f78befe404bda0215d",
 };
 

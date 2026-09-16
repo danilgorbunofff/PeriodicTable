@@ -8,9 +8,10 @@ import { ChunkyButton } from "./ChunkyButton";
 import { IcyInput } from "./IcyInput";
 import { Avatar } from "./Avatar";
 import { fetchJson, isBoardRows, isElementDetail, type BoardRow, type ElementDetail } from "../lib/api";
-import { CONSENT_LINK_HREF, CONSENT_LINK_TEXT, CONSENT_STATEMENT, CONSENT_VERSION } from "../lib/legal";
+import { CONSENT_LINK_HREF, CONSENT_LINK_TEXT, CONSENT_STATEMENT, CONSENT_VERSION, LEGAL_LINKS } from "../lib/legal";
 import { DEMO_LABEL, DEMO_NOTE } from "../lib/demoLabels";
-import { classifyAndValidate } from "../lib/pricing";
+import { MIN_STAKE, TAKEOVER_MARGIN, classifyAndValidate } from "../lib/pricing";
+import { FAQ_LABEL, FAQ_PATH } from "../lib/faq";
 import { stakeQuote, crownCopy } from "../lib/stakeQuote";
 import { domainFromUrl, domainFromSocial, isEmail } from "../lib/validate";
 import {
@@ -29,10 +30,14 @@ import { track } from "../lib/analytics";
 import type { ElementNode } from "../lib/elements";
 
 export function HowItWorks({ open, onClose }: { open: boolean; onClose: () => void }) {
+  /* R19-6: the three steps are the first price copy a visitor reads, and they
+   * were the last place quoting it by hand — "$5" and "pay only the difference
+   * back to #1", where the charged rule is a $1 margin over the leader. Every
+   * number below comes from `lib/pricing.ts`, the module the checkout uses. */
   const steps = [
-    { icon: "🚩", bg: "#FFEFC1", t: "1 Claim", d: "Pick an open element and stake from $5. Your logo goes up as soon as payment settles." },
+    { icon: "🚩", bg: "#FFEFC1", t: "1 Claim", d: `Pick an open element and stake from $${MIN_STAKE}. Your logo goes up as soon as payment settles.` },
     { icon: "📈", bg: "#E0F2FE", t: "2 Stake to climb", d: "Rank is your total stake. Top up anytime — past stake still counts." },
-    { icon: "♻️", bg: "#DCFCE7", t: "3 Reclaim anytime", d: "Outbid? Pay only the difference back to #1. Never start over." },
+    { icon: "♻️", bg: "#DCFCE7", t: "3 Reclaim anytime", d: `Outbid? Cover the gap back to #1 plus $${TAKEOVER_MARGIN} — never start over.` },
   ];
   return (
     <Modal open={open} onClose={onClose} label="How claiming works">
@@ -51,7 +56,19 @@ export function HowItWorks({ open, onClose }: { open: boolean; onClose: () => vo
       </div>
       <p className="text-[11px] text-mutedink mt-3">Periodic data: IUPAC Standard. Classifications are illustrative, not a chemical statement.</p>
       <ChunkyButton className="w-full mt-3 text-sm px-5 h-12" onClick={onClose}>Got it</ChunkyButton>
-      <div className="text-center text-xs text-mutedink mt-2">About &amp; disclaimer · Rules &amp; payments</div>
+      {/* R19-5: this line named two documents and linked neither, in the one
+          modal a visitor opens to ask "what am I paying for". The FAQ answers
+          the price and rank questions in full; the four legal documents stay
+          reachable from here rather than only from the footer pill. */}
+      <div className="text-center text-xs text-mutedink mt-2 flex flex-wrap items-center justify-center gap-x-2">
+        <Link href={FAQ_PATH} className="font-bold hover:text-ink hover:underline">{FAQ_LABEL}</Link>
+        {LEGAL_LINKS.map((l) => (
+          <Fragment key={l.href}>
+            <span aria-hidden="true">·</span>
+            <Link href={l.href} className="hover:text-ink hover:underline">{l.label}</Link>
+          </Fragment>
+        ))}
+      </div>
     </Modal>
   );
 }
@@ -598,6 +615,12 @@ export function CheckoutPreview({
           quotes (R16-7). */}
       <div className="text-xs text-mutedink mt-2 text-center">
         🔒 Secure payment via Stripe · it&apos;s an ad buy, not a bet · rules version {CONSENT_VERSION}
+      </div>
+      {/* R19-4: this is the last screen before money moves, and it is where
+          "what happens when someone outbids me" gets asked. The consent label
+          above owns the *agreement* (R16-6); this owns the *questions*. */}
+      <div className="text-xs text-mutedink mt-1 text-center">
+        <Link href={FAQ_PATH} className="font-bold hover:text-ink hover:underline">{FAQ_LABEL}</Link>
       </div>
       <button onClick={onClose} className="block mx-auto text-xs text-mutedink mt-2">maybe later</button>
     </Modal>

@@ -6,6 +6,7 @@ import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { enqueueOutbox, drainDueWithin } from "@/lib/outbox";
 import { apiRoute, apiError } from "@/lib/route";
+import { SUPPORT } from "@/lib/legal";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postReport });
@@ -80,7 +81,10 @@ async function notifyOperator(report: {
     await enqueueOutbox(prisma, {
       type: "REPORT_EMAIL",
       payload: {
-        to: process.env.REPORT_NOTIFY_EMAIL ?? "abuse@periodictable.lol",
+        // R19-7: the notification goes to the published abuse mailbox, so the
+        // address a report is mailed to cannot differ from the one the contact
+        // page and `/faq` tell reporters to write to.
+        to: process.env.REPORT_NOTIFY_EMAIL ?? SUPPORT.abuse,
         id: report.id,
         domain: report.domain,
         stakeId: report.stakeId,

@@ -1,13 +1,13 @@
-domain,title,pitch,symbol,amount_usd,city
-aurum.fi,Aurum,Gold-grade treasury for onchain teams.,Au,88,Singapore
-acme.dev,Acme,Instant infra for ambitious startups.,C,50,Berlin
-beta.acme.dev,Acme Beta,Second seat on carbon — climbing.,C,24,Berlin
-gamma.tools,Gamma,"Third seat, watching the crown.",C,9,Oslo
-waferly.io,Waferly,Chip-grade CI that never flakes.,Si,34,Prague
-aurum.fi,Aurum,Gold-grade treasury for onchain teams.,Pt,42,Singapore
-darkpool.gg,Darkpool,Stealth infra for funds that move quietly.,DM,66,Zurich
-hydro.dev,Hydro,The lightest edge runtime.,H,12,Austin
-hydro.dev,Hydro,The lightest edge runtime.,He,10,Austin
-ferrous.cloud,Ferrous,Ironclad Postgres hosting.,Fe,21,Toronto
-hydro.dev,Hydro,The lightest edge runtime.,O,15,Austin
-darkpool.gg,Darkpool,Stealth infra for funds that move quietly.,U,39,Zurich
+domain,title,pitch,symbol,amount_usd,city,clicks
+coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Au,88,San Francisco,412
+stripe.com,Stripe,Payments infrastructure for the internet.,C,50,San Francisco,267
+adyen.com,Adyen,The financial technology platform of choice.,C,24,Amsterdam,55
+squareup.com,Square,Financial services for local commerce.,C,9,San Francisco,12
+nvidia.com,NVIDIA,Accelerated computing for the AI era.,Si,34,Santa Clara,98
+coinbase.com,Coinbase,The easiest place to buy and sell crypto.,Pt,42,San Francisco,84
+anthropic.com,Anthropic,AI safety and research.,DM,66,San Francisco,190
+cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,H,12,San Francisco,41
+cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,He,10,San Francisco,28
+supabase.com,Supabase,Open source Postgres at the edge.,Fe,21,Remote-first,73
+cloudflare.com,Cloudflare,The connectivity cloud for a faster internet.,O,15,San Francisco,46
+huggingface.co,Hugging Face,The AI community building the future.,U,39,New York,76

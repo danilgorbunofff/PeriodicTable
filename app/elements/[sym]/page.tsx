@@ -6,6 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { ELEMENTS, findElementBySymbol } from "@/lib/elements";
 import { OG_CARD } from "@/lib/ogCard";
 import { siteOrigin } from "@/lib/siteUrl";
+import { twitterSite } from "@/lib/shareMeta";
+import { MIN_STAKE, takeLeadPrice } from "@/lib/pricing";
+import { FAQ_LABEL, FAQ_PATH } from "@/lib/faq";
+import { LEGAL_LINKS } from "@/lib/legal";
 
 export const dynamicParams = true;
 // The data window, and therefore the document's: Next derives
@@ -22,6 +26,26 @@ export const revalidate = 60;
 
 export async function generateStaticParams() {
   return ELEMENTS.map((e) => ({ sym: e.symbol }));
+}
+
+/** R19-5: the footnotes on both branches of this page — the live one and the
+ * outage shell — used to carry only the IUPAC line, so the page a buyer picks a
+ * symbol on linked none of the documents a buyer needs (the phase-19 doc found
+ * zero `/legal/` links here). Same two destinations in both branches, written
+ * once: the FAQ for "what does this cost me", the rules for the contract. */
+function FootnoteLinks() {
+  const rules = LEGAL_LINKS.find((l) => l.href === "/legal/rules");
+  return (
+    <p className="text-[11px] text-mutedink mt-2">
+      <Link href={FAQ_PATH} className="font-bold hover:text-ink hover:underline">{FAQ_LABEL}</Link>
+      {rules && (
+        <>
+          {" · "}
+          <Link href={rules.href} className="hover:text-ink hover:underline">{rules.label}</Link>
+        </>
+      )}
+    </p>
+  );
 }
 
 export async function generateMetadata({ params }: { params: { sym: string } }): Promise<Metadata> {
@@ -47,7 +71,7 @@ export async function generateMetadata({ params }: { params: { sym: string } }):
     },
     // Declared rather than inherited: without these, X falls back to the root
     // layout's card and every element page shares as the home card.
-    twitter: { card: "summary_large_image", title, description, images: [card] },
+    twitter: { card: "summary_large_image", ...twitterSite(), title, description, images: [card] },
   };
 }
 
@@ -122,22 +146,25 @@ export default async function ElementPage({ params }: { params: { sym: string } 
               : "Live standings load with a database connection."}
           </p>
           <Link
-            href={`/?el=${encodeURIComponent(el.symbol)}&stake=5`}
+            href={`/?el=${encodeURIComponent(el.symbol)}&stake=${MIN_STAKE}`}
             className="mt-4 inline-block bg-cta font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm"
           >
-            Claim a spot — from $5
+            Claim a spot — from ${MIN_STAKE}
           </Link>
           <p className="text-[11px] text-mutedink mt-3">
             Periodic data: IUPAC Standard. Classifications are illustrative, not a chemical statement.
           </p>
+          <FootnoteLinks />
         </div>
       </main>
     );
   }
   // Same "row 0 is not necessarily the leader" rule as /api/elements/[sym]:
-  // a reversed $0 stake must not price the takeover at $1.
+  // a reversed $0 stake must not price the takeover at $1. R19-6: the price
+  // itself comes from `takeLeadPrice`, the function the checkout charges from,
+  // rather than from a `+ 1` written next to the copy that prints it.
   const lead = element.stakes.find((s) => s.amountUsd > 0);
-  const takeLead = lead ? lead.amountUsd + 1 : 5;
+  const takeLead = takeLeadPrice(lead?.amountUsd);
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
@@ -168,7 +195,7 @@ export default async function ElementPage({ params }: { params: { sym: string } 
               </tr>
             ))}
             {element.stakes.length === 0 && (
-              <tr><td className="px-4 py-3 text-mutedink">No bids yet — be the first for $5.</td></tr>
+              <tr><td className="px-4 py-3 text-mutedink">{`No bids yet — be the first for $${MIN_STAKE}.`}</td></tr>
             )}
             {hiddenStakes > 0 && (
               <tr>
@@ -190,6 +217,7 @@ export default async function ElementPage({ params }: { params: { sym: string } 
         <p className="text-[11px] text-mutedink mt-3">
           Periodic data: IUPAC Standard. Classifications are illustrative, not a chemical statement.
         </p>
+        <FootnoteLinks />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       </div>
     </main>

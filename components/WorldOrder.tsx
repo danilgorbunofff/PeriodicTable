@@ -4,6 +4,7 @@ import { Avatar } from "./Avatar";
 import useSWR from "swr";
 import { fetchJson, isTableOrderRows, type TableOrderRow } from "../lib/api";
 import { DEMO_LABEL, DEMO_NOTE } from "../lib/demoLabels";
+import { NO_STAKES_YET } from "../lib/activityFace";
 
 export function WorldOrder({
   onClose,
@@ -78,6 +79,16 @@ export function WorldOrder({
         {!data && !error
           ? [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-[52px] rounded-xl bg-icy animate-pulse mb-1" />)
           : null}
+        {/* R19-3: a zero-stake board is the state the first cohort meets, and it
+            rendered as a blank panel over a footer — the same picture a failed
+            load gives. The words come from the activity card, so the two empty
+            surfaces cannot describe launch day differently. */}
+        {data && !error && rows.length === 0 && (
+          <div className="rounded-2xl bg-icy p-3 text-sm">
+            <span className="font-extrabold">?</span> {NO_STAKES_YET}
+            <div className="mt-1 text-[11px] font-bold text-mutedink">rank is total stake · the ladder fills in the order people join</div>
+          </div>
+        )}
         {rows.map((r) => {
           const logo = r.logoUrl;
           // Podium: #1 keeps its gold card; #2/#3 mirror it in silver/bronze

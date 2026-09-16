@@ -7,6 +7,7 @@ import { Modal } from "./Modal";
 import type { ElementNode } from "../lib/elements";
 import { fetchJson, isElementDetail, type ElementDetail } from "../lib/api";
 import { FAMILY_FILL } from "../lib/familyFill";
+import { MIN_STAKE, takeLeadPrice } from "../lib/pricing";
 import { track } from "../lib/analytics";
 
 type ReportState = { domain: string; state: "pending" | "done" | "error" } | null;
@@ -39,8 +40,14 @@ export function TerritoryView({
   // is sent until the user confirms in the modal (no accidental reports).
   const [confirm, setConfirm] = useState<{ stakeId: string; domain: string } | null>(null);
   const top = rows[0];
-  const takeLead = data?.prices.takeLead ?? (top ? top.amount + 1 : 5);
-  const joinMin = data?.prices.joinMin ?? 5;
+  // These two are the fallbacks for a payload that arrived without prices, and
+  // they are prices the button actually sends: R19-6 moved them onto the same
+  // functions the server charges from. The server's rule that row 0 is not
+  // necessarily the leader applies here too — a $0 row must not price the
+  // takeover at $1 (`lib/pricing.test.ts`).
+  const leader = rows.find((r) => r.amount > 0);
+  const takeLead = data?.prices.takeLead ?? takeLeadPrice(leader?.amount);
+  const joinMin = data?.prices.joinMin ?? MIN_STAKE;
   const totalStaked = data?.pool ?? 0;
   // Every element (standard + exotic) links to its Wikipedia article.
   // Titles are single capitalized words ("Carbon") except "Dark Matter" →
@@ -95,7 +102,7 @@ export function TerritoryView({
               </a>
             </h2>
             <div className="mt-1.5 text-xs font-extrabold text-ink/70 whitespace-nowrap">
-              {rows.length ? `${rows.length} bidding · $${totalStaked} staked` : "no bids yet · $5 to be the first"}
+              {rows.length ? `${rows.length} bidding · $${totalStaked} staked` : `no bids yet · $${MIN_STAKE} to be the first`}
             </div>
           </div>
           <button

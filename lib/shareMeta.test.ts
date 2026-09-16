@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { homeMetadata } from "./shareMeta";
+import { homeMetadata, twitterSite } from "./shareMeta";
 
 const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 const ORIGIN = "https://www.periodictable.lol";
@@ -43,6 +43,31 @@ describe("home share metadata (R01-1)", () => {
   it("follows the configured host rather than a hardcoded one", () => {
     const preview = homeMetadata({ NEXT_PUBLIC_APP_URL: "https://ptl-git-main.vercel.app" });
     expect((preview.openGraph!.images as { url: string }[])[0].url).toBe("https://ptl-git-main.vercel.app/og/home");
+  });
+});
+
+/* R19-9: a card credits an account only if one exists. The failure this pins is
+   not a missing tag — it is a tag naming a handle nobody owns, which credits a
+   stranger on every share and is invisible in our own previews. */
+describe("X attribution is configured, not invented (R19-9)", () => {
+  it("omits twitter:site entirely while no account exists", () => {
+    expect(twitterSite({})).toEqual({});
+    expect(twitterSite({ NEXT_PUBLIC_TWITTER_HANDLE: "   " })).toEqual({});
+    expect(homeMetadata({ NEXT_PUBLIC_APP_URL: ORIGIN })).not.toHaveProperty("twitter.site");
+  });
+
+  it("credits the configured handle, with the @ the tag requires", () => {
+    expect(twitterSite({ NEXT_PUBLIC_TWITTER_HANDLE: "periodictablelol" })).toEqual({ site: "@periodictablelol" });
+    expect(twitterSite({ NEXT_PUBLIC_TWITTER_HANDLE: "@periodictablelol" })).toEqual({ site: "@periodictablelol" });
+    const meta = homeMetadata({ NEXT_PUBLIC_APP_URL: ORIGIN, NEXT_PUBLIC_TWITTER_HANDLE: "periodictablelol" });
+    expect(meta.twitter).toMatchObject({ site: "@periodictablelol", card: "summary_large_image" });
+  });
+
+  it("every card that declares its own twitter block spreads the same helper", () => {
+    // One variable must name the channel on the board, on an element page and in
+    // the legal shell; a per-page handle is how two of the three go stale.
+    expect(src("app/elements/[sym]/page.tsx")).toMatch(/\.\.\.twitterSite\(\)/);
+    expect(src("lib/legalMeta.ts")).toMatch(/\.\.\.twitterSite\(env\)/);
   });
 });
 

@@ -77,7 +77,9 @@ describe("R05-7 report notice", () => {
   });
 
   it("is sent to the abuse inbox, never to the person who reported", () => {
-    expect(reportRoute).toMatch(/REPORT_NOTIFY_EMAIL \?\? "abuse@periodictable\.lol"/);
+    // R19-7 re-pointed this assertion: the address is the published constant
+    // now, not a literal, so the route and the contact page cannot drift.
+    expect(reportRoute).toMatch(/REPORT_NOTIFY_EMAIL \?\? SUPPORT\.abuse/);
     // The reporter is never an address this route knows: the payload it mails
     // carries only the moderation facts, minus the hashed IP it stores.
     const payload = /payload: \{[\s\S]*?\n      \},/.exec(reportRoute)?.[0] ?? "";

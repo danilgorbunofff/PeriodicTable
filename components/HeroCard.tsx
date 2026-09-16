@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Card } from "./Card";
 import { ChunkyButton } from "./ChunkyButton";
+import { MIN_STAKE } from "../lib/pricing";
 import { IconBtn } from "./IconBtn";
 
 /** Centered chevron (an SVG, not a text glyph — ‹/› glyphs carry uneven
@@ -70,7 +71,7 @@ export function HeroCard({
         </h1>
         <div className="mt-[13px] flex items-center gap-[9px] flex-nowrap">
           <ChunkyButton className="text-sm px-[18px] h-10 whitespace-nowrap shrink-0 !rounded-full !border-b-[3px] [@media(pointer:coarse)]:min-h-[44px]" onClick={onClaim}>
-            Claim an element · from $5
+            {`Claim an element · from $${MIN_STAKE}`}
           </ChunkyButton>
           <IconBtn label="Board" onClick={onBoard}>🏆</IconBtn>
           <IconBtn label="How it works" onClick={onHow}>i</IconBtn>

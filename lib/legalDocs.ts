@@ -273,6 +273,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
       {
         h: "Everything else",
         ps: [
+          "Anything that does not fit the headings above goes to hi@periodictable.lol. That is also the address this site's own mail is sent from — receipts, outbid notices, confirmation links — so replying to one of those reaches a person rather than a no-reply box (R19-7).",
           "Press, partnerships, and general questions: hello@periodictable.lol. These are plain mailboxes with no ticket system behind them: we aim to reply within 2–3 business days, and if a week passes, send it again rather than assuming it arrived.",
           "Privacy requests (access, correction, deletion) go to privacy@periodictable.lol; the Privacy page describes what we can do and how long it takes.",
           "Postal address for legal correspondence, service of process and complaints: see the operator details on the About page.",

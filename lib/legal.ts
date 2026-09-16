@@ -45,6 +45,7 @@ export const LEGAL_REVISION_LOG: Record<LegalSlug, { version: string; note: stri
     { version: "2026-09-16", note: "Named the seller and the statement descriptor, published the tax position, defined what a stake buys, and versioned the document." },
   ],
   contact: [
+    { version: "2026-09-16", note: "Revised the same day to publish hi@periodictable.lol, the address this site's own mail is sent from: the sender header, the receipts and the outbid notices all used it while no page named it, so a reply had nowhere to land (R19-7)." },
     { version: "2026-09-16", note: "Replaced the copyright/DMCA heading with the process that actually runs, and said what a billing request must contain." },
   ],
   privacy: [
@@ -66,15 +67,19 @@ export const LEGAL_LINKS = [
   { href: "/legal/contact", label: "Contact", short: "Contact" },
 ] as const;
 
-/** The four mailboxes the documents publish. They are constants because the
+/** The mailboxes the product publishes (R19-7). They are constants because the
  * receipt has to name the same billing address the contact page does — a
  * mismatch there is how a payer ends up disputing a charge instead of asking
- * about it. */
+ * about it. `hi` is the odd one out and is listed here on purpose: it is the
+ * address outbound mail is sent from, and until phase 19 it was published
+ * nowhere, so a recipient reading the `From:` line had no page telling them
+ * what it was. The legal corpus now names it and `/faq` repeats it. */
 export const SUPPORT = {
   billing: "payments@periodictable.lol",
   abuse: "abuse@periodictable.lol",
   privacy: "privacy@periodictable.lol",
   hello: "hello@periodictable.lol",
+  hi: "hi@periodictable.lol",
 } as const;
 
 /** The receipt's tax line (R16-4). The checkout adds no tax — prices are the

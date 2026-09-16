@@ -8,8 +8,19 @@
 
 export const MIN_STAKE = 5;
 
+/** R19-6: the takeover margin — what a claim must beat the leader by. It is a
+ * number buyer-facing copy states as a rule ("$1 more than the leader"), so it
+ * is named here and quoted from here rather than written as `+ 1` in three
+ * places that cannot be cited. */
+export const TAKEOVER_MARGIN = 1;
+
+/** R19-6: the tie clearance — the smallest step that separates two totals, and
+ * what both tie refusals below ask for. Named so buyer-facing copy can cite the
+ * number instead of writing "$1" as prose in a third place. */
+export const TIE_CLEARANCE = 1;
+
 export const takeLeadPrice = (leaderTotal?: number) =>
-  leaderTotal == null ? MIN_STAKE : leaderTotal + 1;
+  leaderTotal == null ? MIN_STAKE : leaderTotal + TAKEOVER_MARGIN;
 
 export const joinMin = () => MIN_STAKE;
 
@@ -27,7 +38,7 @@ export const smallestFreeAmount = (existingTotals: number[], floor: number = MIN
 export const reclaimFor = (
   leaderTotal: number | undefined,
   userTotal: number | undefined
-) => (leaderTotal == null ? MIN_STAKE : Math.max(1, leaderTotal + 1 - (userTotal ?? 0)));
+) => (leaderTotal == null ? MIN_STAKE : Math.max(1, leaderTotal + TAKEOVER_MARGIN - (userTotal ?? 0)));
 
 /** First-ever stake on an empty tile: $5 floor. */
 export const validateFirstJoin = (amount: number): string | null => {
@@ -43,7 +54,7 @@ export const validateJoin = (amount: number, existingTotals: number[]): string |
   const floor = validateFirstJoin(amount);
   if (floor) return floor;
   if (existingTotals.includes(amount)) {
-    return ` $${amount} is already on the board — add $1 to stand clear of the tie.`.trim();
+    return ` $${amount} is already on the board — add $${TIE_CLEARANCE} to stand clear of the tie.`.trim();
   }
   return null;
 };
@@ -57,7 +68,7 @@ export const validateTopUpAmount = (
 ): string | null => {
   if (!Number.isInteger(amount) || amount < 1) return "Whole dollars only, min $1 top-up.";
   if (otherTotals.includes(priorTotal + amount)) {
-    return `$${priorTotal + amount} would tie a bid already on the board — add $1 to stand clear.`;
+    return `$${priorTotal + amount} would tie a bid already on the board — add $${TIE_CLEARANCE} to stand clear.`;
   }
   return null;
 };

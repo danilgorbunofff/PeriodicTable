@@ -6,6 +6,8 @@
  * escapeXml() before interpolation (R01-8): the card's safety must not depend on
  * lib/validate.ts having rejected every hostile domain before storage.
  */
+import { MIN_STAKE } from "./pricing";
+
 export const OG_CARD = { width: 1200, height: 630 } as const;
 export const OG_SITE = "periodictable.lol";
 /** Text column: 1200 − 80 (pad) − 220 (tile) − 60 (gap) − 80 (pad). */
@@ -59,7 +61,7 @@ export function ogCard(input: {
       ? `#1 ${clampDomain(input.leader.domain)} $${input.leader.amountUsd}`
       : input.unavailable
         ? "Live standings unavailable"
-        : "Unclaimed · from $5";
+        : `Unclaimed · from $${MIN_STAKE}`;
   return { symbol: input.symbol, name: input.name, headline };
 }
 

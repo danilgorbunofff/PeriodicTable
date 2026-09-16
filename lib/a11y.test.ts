@@ -357,6 +357,9 @@ describe("R05-3 bypass block and landmarks (static)", () => {
       "app/legal/[slug]/page.tsx",
       "app/pay/[paymentId]/PaySimulator.tsx",
       "lib/boundaryChrome.tsx",
+      // The FAQ is a static document like the legal pages — one shell, one
+      // landmark (R19-4).
+      "app/faq/page.tsx",
     ];
     for (const p of once) expect((src(p).match(/id="main"/g) ?? []).length, p).toBe(1);
     // Two branches, same as the element shells: an outage answer is a different

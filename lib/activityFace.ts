@@ -36,6 +36,11 @@ export type ActivityFace = {
 const DOT_LIVE = { className: "bg-green-500 shadow-[0_0_8px_#22c55e]", ping: true };
 const DOT_LAST_KNOWN = { className: "bg-amber-400", ping: false };
 
+/** R19-3: the sentence a brand-new board says. The activity card and the Table
+ * Order panel are the two surfaces a stranger meets first, and on launch day
+ * both are empty — so they say it the same way, from here, once. */
+export const NO_STAKES_YET = "No stakes yet — the first claim lands here.";
+
 export function activityFace(state: LiveState, rows: ActivityRow[] | undefined): ActivityFace {
   const first = rows?.[0];
   const header: ActivityHeader =
@@ -44,7 +49,7 @@ export function activityFace(state: LiveState, rows: ActivityRow[] | undefined):
       : state === "loading"
         ? { kind: "loading", text: "loading…" }
         : !first
-          ? { kind: "empty", text: "No stakes yet — the first claim lands here." }
+          ? { kind: "empty", text: NO_STAKES_YET }
           : {
               kind: "lead",
               symbol: first.elementSymbol.toUpperCase(),
