@@ -31,7 +31,17 @@ export type AuditAction =
   | "TAKE_LAPSED"
   /** R09-7: a dethroned holder could not be told it lost #1 — no address on
    *  the startup and none on the funding payment. */
-  | "OUTBID_UNNOTIFIED";
+  | "OUTBID_UNNOTIFIED"
+  /** R10-5/R10-6: the person behind an address used an unsubscribe link, or
+   *  asked to be mailed again ("leave receipts alone"). The address rides in
+   *  `detail`: it is the record of a consent decision, and the row it flips is
+   *  the only place that decision lives. */
+  | "EMAIL_UNSUBSCRIBED"
+  | "EMAIL_RESUBSCRIBED"
+  /** R10-7: the provider reported an address it could not deliver to; the
+   *  address is now refused for list mail. `detail` carries the provider's
+   *  event and reason — a bounce is only actionable with both. */
+  | "EMAIL_UNDELIVERABLE";
 
 export async function audit(
   entry: {

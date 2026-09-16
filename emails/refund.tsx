@@ -32,7 +32,7 @@ export function refundHtml(p: RefundTemplateProps): string {
       <div style="font-size:13px;color:#888;font-weight:700;letter-spacing:1px;">PERIODICTABLE.LOL</div>
       <h1 style="font-size:22px;margin:12px 0 8px;">$${p.amountUsd} refunded</h1>
       <p style="font-size:15px;color:#444;line-height:1.5;">
-        We reversed the $${p.amountUsd} you paid for <strong>${p.elementSymbol} (${p.elementName})</strong>.
+        We reversed the $${p.amountUsd} you paid for <strong>${esc(p.elementSymbol)} (${esc(p.elementName)})</strong>.
         That stake no longer counts toward ${esc(p.domain)} and its place on the board is gone.
       </p>
       <p style="font-size:15px;color:#444;line-height:1.5;">
@@ -40,7 +40,7 @@ export function refundHtml(p: RefundTemplateProps): string {
         you paid with. Banks usually post it within 5&ndash;10 business days.
       </p>
       <p style="font-size:12px;color:#999;margin-top:20px;">
-        ${p.providerRef ? `reference ${p.providerRef} · ` : ""}it&apos;s an ad buy, not a bet ·
+        ${p.providerRef ? `reference ${esc(p.providerRef)} · ` : ""}it&apos;s an ad buy, not a bet ·
         <a href="${p.unsubUrl}">unsubscribe</a>
       </p>
     </div>

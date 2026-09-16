@@ -306,12 +306,19 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
           dedupeKey: `receipt-${paymentId}`,
           payload: {
             to: receiptTo,
-            unsubToken: payer.unsubToken,
             elementSymbol: element.symbol,
             elementName: element.name,
-            amountUsd: payment.amountUsd,
+            // R10-4: the figure the rank was computed from is the *applied*
+            // stake total, not this payment. For a reclaim (or any path that
+            // adds to a stake the payer already holds) the charge is only the
+            // increment, so reporting it as "your stake" understates the
+            // position the rest of the mail — and every outbid/refund that
+            // follows — is about. The charge is stated separately when the two
+            // differ, never folded in.
+            amountUsd: result.stake.amountUsd,
             rank: result.stake.rank,
             domain: payer.domain,
+            ...(result.stake.amountUsd !== payment.amountUsd ? { topUpUsd: payment.amountUsd } : {}),
             ...(lapsedTakeTotal != null ? { lapsedTakeTotal } : {}),
           },
         });
@@ -341,7 +348,6 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
             dedupeKey: `outbid-${paymentId}`,
             payload: {
               to: victimEmail,
-              unsubToken: victim.unsubToken,
               elementSymbol: element.symbol,
               victimDomain: victim.domain,
               victimTotal: result.info.oldLeader.amountUsd,
@@ -528,7 +534,6 @@ export async function reversePayment(paymentId: string, event: ReversalEvent): P
               dedupeKey: `refund-${paymentId}`,
               payload: {
                 to: refundTo,
-                unsubToken: payer.unsubToken,
                 elementSymbol: element.symbol,
                 elementName: element.name,
                 amountUsd: locked.amountUsd,

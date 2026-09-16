@@ -9,7 +9,14 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
-import { sendOutbidEmail, sendReceiptEmail, sendRefundEmail, sendReportEmail, sendWaitlistEmail } from "./email";
+import {
+  sendOutbidEmail,
+  sendReceiptEmail,
+  sendRefundEmail,
+  sendReportEmail,
+  sendWaitlistEmail,
+  type SendOutcome,
+} from "./email";
 import { persistPreview } from "./screenshots";
 
 export const OUTBOX_MAX_ATTEMPTS = 5;
@@ -25,14 +32,18 @@ export type OutboxType =
 
 export type ReceiptPayload = {
   to: string;
-  unsubToken: string;
   elementSymbol: string;
   elementName: string;
+  /** R10-4: the applied stake total — the number the rank came from. */
   amountUsd: number;
   rank: number;
   domain: string;
   /** R09-2: set when the take quote had lapsed before settlement. */
   lapsedTakeTotal?: number | null;
+  /** R10-4: set when the payment was only an increment on a stake the buyer
+   * already held (reclaim), so the charge and the resulting total are stated
+   * as the two different facts they are. */
+  topUpUsd?: number | null;
 };
 
 /** R08-2: the buyer's notice that their payment was reversed. Separate type
@@ -40,7 +51,6 @@ export type ReceiptPayload = {
  * wording of the same one — a refund is not a receipt. */
 export type RefundPayload = {
   to: string;
-  unsubToken: string;
   elementSymbol: string;
   elementName: string;
   amountUsd: number;
@@ -50,7 +60,6 @@ export type RefundPayload = {
 
 export type OutbidPayload = {
   to: string;
-  unsubToken: string;
   elementSymbol: string;
   victimDomain: string;
   victimTotal: number;
@@ -69,19 +78,35 @@ export type ReportEmailPayload = {
   reason: string;
   createdAt: string;
 };
-export type WaitlistEmailPayload = { to: string; domain: string | null; source: string };
+export type WaitlistEmailPayload = {
+  to: string;
+  domain: string | null;
+  source: string;
+};
 
 /** Idempotent enqueue (atomicity note): implemented as upsert, NOT
  * create-catch-P2002 — a unique violation inside an interactive transaction
  * poisons the whole Postgres transaction, so catching it would roll back the
  * payment + stake along with the duplicate. Upsert never raises. */
+/**
+ * Queue one unit of work, keyed.
+ *
+ * The key is the contract: it makes the queue idempotent, it is how a failed
+ * send is named in the mail health report, and it is the handle an operator
+ * retries. A blank key is therefore refused rather than stored — every keyless
+ * row would collide on the same `dedupeKey` (the column is non-null and unique)
+ * and quietly disappear into the first one, which is a lost delivery that no
+ * surface can show.
+ */
 export async function enqueueOutbox(
   db: Prisma.TransactionClient,
   event: { type: OutboxType; payload: object; dedupeKey: string }
 ): Promise<void> {
+  const dedupeKey = event.dedupeKey.trim();
+  if (!dedupeKey) throw new Error(`${event.type} needs a dedupe key`);
   await db.outboxEvent.upsert({
-    where: { dedupeKey: event.dedupeKey },
-    create: { type: event.type, payload: event.payload, dedupeKey: event.dedupeKey },
+    where: { dedupeKey },
+    create: { type: event.type, payload: event.payload, dedupeKey },
     update: {},
   });
 }
@@ -103,27 +128,54 @@ export function attachPreview(startupId: string, previewImgUrl: string) {
   });
 }
 
-async function handleOne(type: string, payload: Record<string, unknown>): Promise<void> {
-  switch (type) {
-    case "RECEIPT_EMAIL":
-      await sendReceiptEmail(payload as unknown as ReceiptPayload);
-      return;
-    case "OUTBID_EMAIL":
-      await sendOutbidEmail(payload as unknown as OutbidPayload);
-      return;
-    case "REFUND_EMAIL":
-      await sendRefundEmail(payload as unknown as RefundPayload);
-      return;
-    case "REPORT_EMAIL": {
-      const p = payload as unknown as ReportEmailPayload;
-      await sendReportEmail({ ...p, createdAt: new Date(p.createdAt) });
+/**
+ * A mail that failed must fail its row (R10-1).
+ *
+ * The senders report the provider's answer rather than throwing, because a
+ * direct caller wants the same record the log gets. The outbox is where that
+ * answer becomes a retryable failure: `processOutboxRowById` stamps
+ * `completedAt` only on success, so a completed row can only ever mean a
+ * delivered one. A *suppressed* send is not a failure — the address asked us to
+ * stop, so retrying would deliver nothing (R10-5).
+ */
+function assertDelivered(outcome: SendOutcome): void {
+  if (outcome.status === "error") {
+    throw new Error(outcome.error ?? `email delivery failed (${outcome.status})`);
+  }
+}
+
+async function handleOne(row: { type: string; payload: Record<string, unknown>; dedupeKey: string }): Promise<void> {
+  // The dedupe key travels into the log so a failed row and its attempts can be
+  // reconciled afterwards (R10-11).
+  const key = row.dedupeKey;
+  switch (row.type) {
+    case "RECEIPT_EMAIL": {
+      const p = row.payload as unknown as ReceiptPayload;
+      assertDelivered(await sendReceiptEmail({ ...p, dedupeKey: key }));
       return;
     }
-    case "WAITLIST_EMAIL":
-      await sendWaitlistEmail(payload as unknown as WaitlistEmailPayload);
+    case "OUTBID_EMAIL": {
+      const p = row.payload as unknown as OutbidPayload;
+      assertDelivered(await sendOutbidEmail({ ...p, dedupeKey: key }));
       return;
+    }
+    case "REFUND_EMAIL": {
+      const p = row.payload as unknown as RefundPayload;
+      assertDelivered(await sendRefundEmail({ ...p, dedupeKey: key }));
+      return;
+    }
+    case "REPORT_EMAIL": {
+      const p = row.payload as unknown as ReportEmailPayload;
+      assertDelivered(await sendReportEmail({ ...p, createdAt: new Date(p.createdAt), dedupeKey: key }));
+      return;
+    }
+    case "WAITLIST_EMAIL": {
+      const p = row.payload as unknown as WaitlistEmailPayload;
+      assertDelivered(await sendWaitlistEmail({ ...p, dedupeKey: key }));
+      return;
+    }
     case "PREVIEW_GENERATE": {
-      const p = payload as unknown as PreviewPayload;
+      const p = row.payload as unknown as PreviewPayload;
       await persistPreview({
         startupId: p.startupId,
         url: p.url,
@@ -136,8 +188,40 @@ async function handleOne(type: string, payload: Record<string, unknown>): Promis
       // durable record Phase 6 forwards. Marking complete = recorded.
       return;
     default:
-      throw new Error(`unknown outbox type: ${type}`);
+      throw new Error(`unknown outbox type: ${row.type}`);
   }
+}
+
+/**
+ * The operator's view of mail that failed and was never delivered (R10-1).
+ *
+ * A failure is unresolved while the log holds an `error` row for a dedupe key
+ * with no later successful row for the same key: the row an operator would
+ * retry, named by that key. Deliberately bounded (the newest `limit` failures
+ * are examined): this is a health number, not an audit export.
+ */
+export async function failedMailHealth(limit = 500): Promise<{ failed: number; oldestKey: string | null }> {
+  const errors = await prisma.emailLog.findMany({
+    where: { status: "error" },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { dedupeKey: true },
+  });
+  if (errors.length === 0) return { failed: 0, oldestKey: null };
+  const keys = [...new Set(errors.map((e) => e.dedupeKey).filter((k): k is string => !!k))];
+  const recovered = keys.length
+    ? await prisma.emailLog.findMany({
+        where: { dedupeKey: { in: keys }, status: { in: ["sent", "logged"] } },
+        select: { dedupeKey: true },
+      })
+    : [];
+  const delivered = new Set(recovered.map((r) => r.dedupeKey));
+  const unresolved = errors.filter((e) => !e.dedupeKey || !delivered.has(e.dedupeKey));
+  // The list is newest-first, so the last entry is the oldest failure. A row
+  // with no key cannot be named — only keys are actionable, so the oldest
+  // *named* key is what the operator is given.
+  const oldestKey = unresolved.filter((e) => !!e.dedupeKey).pop()?.dedupeKey ?? null;
+  return { failed: unresolved.length, oldestKey };
 }
 
 /** Process a single row by id (shared by inline drain + job worker).
@@ -146,7 +230,7 @@ export async function processOutboxRowById(id: string): Promise<"completed" | "f
   const row = await prisma.outboxEvent.findUnique({ where: { id } });
   if (!row || row.completedAt || row.attempts >= OUTBOX_MAX_ATTEMPTS) return "skipped";
   try {
-    await handleOne(row.type, row.payload as Record<string, unknown>);
+    await handleOne({ type: row.type, payload: row.payload as Record<string, unknown>, dedupeKey: row.dedupeKey });
     await prisma.outboxEvent.update({ where: { id: row.id }, data: { completedAt: new Date() } });
     return "completed";
   } catch (e) {

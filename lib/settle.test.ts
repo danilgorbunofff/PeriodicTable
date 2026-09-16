@@ -150,6 +150,8 @@ const T4 = 9996;
 // from zero (a $5 leader to quote against, and a crown to take away).
 const T3 = 9986;
 const LAPSE_EMAIL = "lapse-t@example.com";
+const TOPUP_EMAIL = "topup-t@example.com";
+const RAIDER_EMAIL = "topup-raider-t@example.com";
 const VICTIM_EMAIL = "victim-funding@example.com";
 const WINNER2_EMAIL = "winner2-t@example.com";
 let keyN = 0;
@@ -465,5 +467,117 @@ describe.skipIf(!hasDb)("lapsed takes and unreachable victims (R09-2, R09-7)", (
     expect(miss?.detail).toBe("no-address:settle-victim2-t.dev");
     // The winner's own receipt is unaffected: only the notice is missing.
     expect(await prisma.outboxEvent.findUnique({ where: { dedupeKey: `receipt-${payment.id}` } })).not.toBeNull();
+  });
+});
+
+/* R10-4: a payment that adds to a stake the payer already holds is charged as
+   the difference, and the receipt has to say so. The failure mode is not a
+   wrong total — the stake is right throughout — it is a mail that states "$3"
+   about a position of $8, which every later outbid and refund then repeats. */
+describe.skipIf(!hasDb)("a payment that tops up a stake already held (R10-4)", () => {
+  // Its own tile: the assertions below are about the rank the remaining
+  // payments produced, so the board has to start empty.
+  const T5 = 9985;
+  const TOPUP_DOMAIN = "settle-topup-t.dev";
+  const RAIDER_DOMAIN = "settle-topup-raider-t.dev";
+
+  beforeAll(async () => {
+    if (!hasDb) return;
+    await prisma.stake.deleteMany({ where: { elementId: T5 } });
+    await prisma.element.upsert({
+      where: { id: T5 },
+      create: { id: T5, symbol: "TST5", name: "Test TST5", atomicMass: "0", gridRow: 0, gridCol: 0, family: "EXOTIC_THEORETICAL", tier: "EXOTIC" },
+      update: {},
+    });
+  });
+
+  afterAll(async () => {
+    if (!hasDb) return;
+    // This suite's nested hook runs before the file-level one, so it has to
+    // unwind the money rows itself before the tile can go.
+    const domains = [TOPUP_DOMAIN, RAIDER_DOMAIN];
+    await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: domains } } } } });
+    await purgeSettledOutbox(prisma, { startup: { domain: { in: domains } } });
+    await prisma.activityLog.deleteMany({ where: { domain: { in: domains } } });
+    await prisma.claimReservation.deleteMany({ where: { startup: { domain: { in: domains } } } });
+    await prisma.payment.deleteMany({ where: { startup: { domain: { in: domains } } } });
+    await prisma.auditLog.deleteMany({ where: { startup: { domain: { in: domains } } } });
+    await prisma.emailLog.deleteMany({ where: { to: { in: [TOPUP_EMAIL, RAIDER_EMAIL] } } });
+    await prisma.firstClaim.deleteMany({ where: { elementId: T5 } });
+    await prisma.stake.deleteMany({ where: { elementId: T5 } });
+    await prisma.element.deleteMany({ where: { id: T5 } });
+    await prisma.startup.deleteMany({ where: { domain: { in: domains } } });
+  });
+
+  async function settle(domain: string, amountUsd: number, path: "JOIN" | "RECLAIM", email: string) {
+    const startup = await fixtureStartup(domain);
+    const payment = await prisma.payment.create({
+      data: {
+        elementId: T5,
+        startupId: startup.id,
+        amountUsd,
+        path,
+        provider: "DEV",
+        idempotencyKey: key("settle-topup"),
+        status: "PENDING",
+        email,
+      },
+    });
+    const out = await settlePayment(payment.id, {
+      provider: "dev",
+      eventId: key("dev-topup"),
+      eventType: "dev.test",
+      paid: true,
+    });
+    expect(out.outcome).toBe("applied");
+    return { startup, payment };
+  }
+
+  type ReceiptPayload = { to: string; amountUsd: number; topUpUsd?: number; rank: number };
+  const receiptOf = async (paymentId: string) =>
+    (await prisma.outboxEvent.findUniqueOrThrow({ where: { dedupeKey: `receipt-${paymentId}` } }))
+      .payload as ReceiptPayload;
+
+  const props = (p: ReceiptPayload, domain: string) => ({
+    elementSymbol: "TST5",
+    elementName: "Test TST5",
+    amountUsd: p.amountUsd,
+    rank: p.rank,
+    topUpUsd: p.topUpUsd ?? null,
+    domain,
+    viewUrl: "https://periodictable.lol/s/x",
+    unsubUrl: "https://periodictable.lol/api/unsubscribe?token=x",
+  });
+
+  it("states both the charge and the position, and only when the two differ", async () => {
+    await settle(RAIDER_DOMAIN, 5, "JOIN", RAIDER_EMAIL);
+    // Ties the $5 leader, so the first payment buys #2 and covers the whole stake.
+    const first = await settle(TOPUP_DOMAIN, 5, "JOIN", TOPUP_EMAIL);
+    const topUp = await settle(TOPUP_DOMAIN, 3, "RECLAIM", TOPUP_EMAIL);
+
+    const stake = await prisma.stake.findUniqueOrThrow({
+      where: { elementId_startupId: { elementId: T5, startupId: topUp.startup.id } },
+    });
+    expect(stake.amountUsd).toBe(8);
+    expect(stake.rank).toBe(1);
+
+    const plain = await receiptOf(first.payment.id);
+    expect(plain.to).toBe(TOPUP_EMAIL);
+    expect(plain.amountUsd).toBe(5);
+    expect(plain.rank).toBe(2);
+    expect(plain.topUpUsd).toBeUndefined();
+
+    const credited = await receiptOf(topUp.payment.id);
+    expect(credited.amountUsd).toBe(8);
+    expect(credited.topUpUsd).toBe(3);
+    expect(credited.rank).toBe(1);
+
+    // The rank is the stake's, and the two figures are stated as two facts.
+    const html = receiptHtml(props(credited, topUp.startup.domain));
+    expect(html).toContain("Your $3 top-up adds to the stake you already held: <strong>$8</strong> now stands for you on TST5, at <strong>#1</strong>.");
+
+    const plainHtml = receiptHtml(props(plain, first.startup.domain));
+    expect(plainHtml).toContain("Your $5 stake puts you <strong>#2</strong> on TST5.");
+    expect(plainHtml).not.toContain("top-up");
   });
 });

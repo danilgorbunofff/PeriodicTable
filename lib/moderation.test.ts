@@ -22,6 +22,7 @@ import { POST as outboxPOST } from "../app/api/jobs/outbox/route";
 import { POST as shotPOST } from "../app/api/jobs/screenshot/route";
 import { POST as checkoutPOST } from "../app/api/checkout/route";
 import { GET as unsubGET, POST as unsubPOST } from "../app/api/unsubscribe/route";
+import { suppressionFor } from "./email";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -71,6 +72,11 @@ afterAll(async () => {
     return;
   }
   delete penv.ADMIN_TOKEN;
+  // The unsubscribe case suppresses by address, so the refusal rows and the
+  // audit rows that carry the address (no startupId) are cleaned by hand; the
+  // domain-scoped audit delete below cannot see them (R10-5).
+  await prisma.emailAddress.deleteMany({ where: { email: { in: ["modvis-t@example.com", "modhide-t@example.com"] } } });
+  await prisma.auditLog.deleteMany({ where: { detail: { in: ["modvis-t@example.com", "modhide-t@example.com"] } } });
   // Reservations before payments — the FK is restrictive.
   await prisma.claimReservation.deleteMany({ where: { elementId: T7 } });
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
@@ -269,21 +275,36 @@ describe.skipIf(!hasDb)("unsubscribe semantics (P1-18)", () => {
     expect(await res.text()).toContain("<form");
     expect((await prisma.startup.findUniqueOrThrow({ where: { domain: "modvis-t.dev" } })).email).not.toBeNull();
   });
-  it("POST clears idempotently; unknown tokens succeed silently", async () => {
+  /* R10-5: a token issued before the address model still works — the link in an
+   * old inbox must not go dead — but what the click does has changed. It used to
+   * clear `Startup.email`, which is a *delivery address*, not a permission: the
+   * next payment carrying the same address re-mailed the same person, and a
+   * receipt addressed to `payment.email` was untouched. The refusal is now a row
+   * on the address, and the address itself stays on the listing. */
+  it("POST stops mail at the address, not by deleting it; idempotent; unknown tokens succeed silently", async () => {
     const before = await prisma.startup.findUniqueOrThrow({ where: { domain: "modvis-t.dev" } });
+    const email = before.email as string;
+    const seen = await prisma.auditLog.count({ where: { action: "EMAIL_UNSUBSCRIBED", detail: email } });
     const res = await unsubPOST(
       req("/api/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: before.unsubToken }) })
     );
     expect(res.status).toBe(200);
-    expect((await prisma.startup.findUniqueOrThrow({ where: { domain: "modvis-t.dev" } })).email).toBeNull();
+    expect(await suppressionFor(email)).toBe("unsubscribe");
+    const after = await prisma.startup.findUniqueOrThrow({ where: { domain: "modvis-t.dev" } });
+    expect(after.email).toBe(email); // the address is not the permission
+    expect(await prisma.auditLog.count({ where: { action: "EMAIL_UNSUBSCRIBED", detail: email } })).toBe(seen + 1);
+
     const again = await unsubPOST(
       req("/api/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: before.unsubToken }) })
     );
     expect(again.status).toBe(200);
+    expect(await prisma.emailAddress.count({ where: { email } })).toBe(1);
+
     const unknown = await unsubPOST(
       req("/api/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: "nope" }) })
     );
     expect(unknown.status).toBe(200);
+    expect((await unknown.json()) as object).toEqual({ ok: true });
   });
 });
 

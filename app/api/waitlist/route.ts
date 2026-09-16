@@ -6,6 +6,7 @@ import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { hashIp } from "@/lib/clicks";
 import { audit } from "@/lib/audit";
+import { suppressionFor } from "@/lib/email";
 import { enqueueOutbox, drainDueWithin } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
@@ -37,13 +38,18 @@ export async function POST(req: NextRequest) {
     typeof body.source === "string" && body.source.length > 0 && body.source.length <= 64
       ? body.source
       : "checkout-paused";
+  // R10-6: the join is stored either way, but an address that asked us to stop
+  // is not mailed. The UI copy promised "we'll only email you if you ask again";
+  // the door back is the unsubscribe link in the message they already have,
+  // which offers to start mail again.
+  const suppressed = await suppressionFor(email);
   const entry = await prisma.waitlistEntry.upsert({
     where: { email },
     create: { email, domain, source },
-    update: { domain, source, consentAt: new Date() },
+    update: { domain, source, consentAt: new Date(), ...(suppressed ? { unsubscribedAt: new Date() } : {}) },
   });
   await audit({ action: "WAITLIST_JOINED", detail: email, actorRef: hashIp(ip) });
-  await confirmWaitlist({ email, domain, source });
+  if (!suppressed) await confirmWaitlist({ email, domain, source });
   return NextResponse.json({ ok: true, id: entry.id });
 }
 

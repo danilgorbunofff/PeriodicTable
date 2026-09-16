@@ -9,12 +9,13 @@
    the worker's claim query is FIFO and the suite leaves undrained settlePayment
    residue behind. A hardcoded "10 minutes ago" is not early enough. */
 import { hasTestDb, testPrisma } from "./testDb"; // must stay first
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   OUTBOX_MAX_ATTEMPTS,
   claimDueOutbox,
   drainDue,
+  failedMailHealth,
   processOutboxRowById,
 } from "./outbox";
 import { POST as outboxRetryPOST } from "../app/api/admin/outbox/retry/route";
@@ -22,6 +23,9 @@ import { POST as outboxRetryPOST } from "../app/api/admin/outbox/retry/route";
 const prisma = testPrisma();
 const hasDb = hasTestDb;
 const TAG = "p6-ob-";
+/** Mail fixtures live under their own address so the EmailLog rows a send writes
+ *  can be cleaned without touching any other file's. */
+const MAIL_TO = `${TAG}receipt@example.com`;
 let keyN = 0;
 const key = () => `${TAG}${Date.now()}-${keyN++}`;
 
@@ -81,6 +85,9 @@ afterAll(async () => {
   }
   delete penv.ADMIN_TOKEN;
   await prisma.outboxEvent.deleteMany({ where: { dedupeKey: { contains: TAG } } });
+  await prisma.emailLog.deleteMany({ where: { dedupeKey: { contains: TAG } } });
+  await prisma.emailLog.deleteMany({ where: { to: { contains: TAG } } });
+  await prisma.emailAddress.deleteMany({ where: { email: { contains: TAG } } });
   await prisma.$disconnect();
 });
 
@@ -242,5 +249,124 @@ describe.skipIf(!hasDb)("outbox row lifecycle", () => {
       );
     expect((await post({})).status).toBe(400);
     expect((await post({ dedupeKey: `${TAG}does-not-exist` })).status).toBe(404);
+  });
+
+  /* R10-1, the bug's own signature: a row stamped complete with `attempts === 0`
+     — nothing ever failed it — while the log holds the provider's refusal. That
+     pair is what the operator retries; sending the mail twice would be worse than
+     not at all, which is why the "delivered" direction is asserted too. */
+  const receiptPayload = () => ({
+    to: MAIL_TO,
+    elementSymbol: "TST1",
+    elementName: "Test One",
+    amountUsd: 7,
+    rank: 1,
+    domain: "p6-ob.dev",
+  });
+  const postRetry = (dedupeKey: string) =>
+    outboxRetryPOST(
+      req("/api/admin/outbox/retry", {
+        method: "POST",
+        // Spelled out rather than interpolated: this suite's copy of the header
+        // must read exactly like the ones above it.
+        headers: { "Content-Type": "application/json", authorization: "Bearer " + ADMIN },
+        body: JSON.stringify({ dedupeKey }),
+      })
+    );
+
+  it("a provider refusal fails its row, and the operator retry puts it back in flight", async () => {
+    const row = await mk({ type: "RECEIPT_EMAIL", payload: receiptPayload(), completedAt: new Date() });
+    const logged = await prisma.emailLog.create({
+      data: {
+        to: MAIL_TO,
+        template: "receipt",
+        status: "error",
+        dedupeKey: row.dedupeKey,
+        error: "resend 403: domain is not verified",
+      },
+    });
+
+    // The log agrees that the mail never arrived, so the row is revived...
+    expect((await postRetry(row.dedupeKey)).status).toBe(200);
+    const revived = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: row.id } });
+    expect(revived.completedAt).toBeNull(); // still completed ⇒ the worker skips it
+    expect(revived.attempts).toBe(0);
+    expect(revived.nextAttemptAt.getTime()).toBeLessThanOrEqual(Date.now());
+
+    // ...and the retry is a retry: with the provider still refusing, the send
+    // fails *the row* instead of being logged as an error and stamped complete.
+    penv.RESEND_API_KEY = "re_test";
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response('{"message":"domain is not verified"}', { status: 403 })
+    );
+    try {
+      expect(await processOutboxRowById(row.id)).toBe("failed");
+    } finally {
+      vi.unstubAllGlobals();
+      delete penv.RESEND_API_KEY;
+    }
+    const failed = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: row.id } });
+    expect(failed.attempts).toBe(1);
+    expect(failed.completedAt).toBeNull();
+    expect(failed.lastError).toContain("not verified");
+
+    const attempt = await prisma.emailLog.findFirstOrThrow({
+      where: { dedupeKey: row.dedupeKey },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(attempt.id).not.toBe(logged.id);
+    expect(attempt.status).toBe("error");
+    expect(attempt.providerStatus).toBe(403); // the operator's next clue
+  });
+
+  it("does not revive a completed row the log calls delivered", async () => {
+    // The other half of the gate: a delivered mail is also completed with zero
+    // attempts, so without this check the retry would be a way to send a receipt
+    // (or an outbid notice) twice.
+    const delivered = await mk({ type: "RECEIPT_EMAIL", payload: receiptPayload(), completedAt: new Date() });
+    await prisma.emailLog.create({
+      data: { to: MAIL_TO, template: "receipt", status: "sent", dedupeKey: delivered.dedupeKey },
+    });
+
+    const res = await postRetry(delivered.dedupeKey);
+    expect(res.status).toBe(409);
+    expect((await res.json()) as { code?: string }).toMatchObject({ code: "ALREADY_DONE" });
+    const untouched = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: delivered.id } });
+    expect(untouched.completedAt).not.toBeNull();
+  });
+
+  it("counts the mail failures nobody has resolved, and names the oldest", async () => {
+    const before = await failedMailHealth();
+    const stuck = `${TAG}stuck-${Date.now()}`;
+    const newer = `${TAG}newer-${Date.now()}`;
+    await prisma.emailLog.createMany({
+      data: [
+        // Dated to the epoch so the naming rule is deterministic: it is the
+        // oldest *named* failure that gets handed to the operator.
+        {
+          to: MAIL_TO,
+          template: "receipt",
+          status: "error",
+          dedupeKey: stuck,
+          error: "resend 422: no mailbox",
+          createdAt: new Date(0),
+        },
+        { to: MAIL_TO, template: "waitlist", status: "error", dedupeKey: newer, error: "socket hang up" },
+      ],
+    });
+
+    const withFailures = await failedMailHealth();
+    expect(withFailures.failed).toBe(before.failed + 2);
+    expect(withFailures.oldestKey).toBe(stuck);
+
+    // A failure stops being unresolved the moment something for that key was
+    // delivered: the health number is about mail the buyer never received.
+    await prisma.emailLog.create({
+      data: { to: MAIL_TO, template: "receipt", status: "sent", dedupeKey: stuck },
+    });
+    const recovered = await failedMailHealth();
+    expect(recovered.failed).toBe(before.failed + 1);
+    expect(recovered.oldestKey).not.toBe(stuck);
   });
 });

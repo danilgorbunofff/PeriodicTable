@@ -261,6 +261,10 @@ model WaitlistEntry {
   domain    String? // normalized optional interest
   source    String   @default("checkout-paused")
   consentAt DateTime @default(now())
+  // Set when this address left the waitlist (R10-6). The row is the record
+  // that consent was withdrawn; deleting it would make a later re-join
+  // indistinguishable from a first one.
+  unsubscribedAt DateTime?
   createdAt DateTime @default(now())
 }
 
@@ -375,14 +379,67 @@ model ClickEvent {
 model EmailLog {
   id            String   @id @default(cuid())
   to            String
-  template      String // outbid | receipt
+  // Every sender in lib/email.ts: outbid | receipt | refund | report | waitlist.
+  template      String
   elementSymbol String?
   amountUsd     Int?
-  status        String   @default("sent") // sent | suppressed | error
+  // sent   — the provider accepted it
+  // logged — no provider configured, the send is rehearsed in the log only
+  // error  — the provider refused it or the call failed; `error` carries why
+  // suppressed:<reason> — never sent, because the address asked us to stop or
+  //   the provider told us it can no longer receive (R10-5/R10-7): unsubscribe
+  //   | invalid | bounce | complaint | manual (`SuppressionReason`,
+  //   lib/email.ts:57). The reason lives in the status rather
+  //   than a new column because the log's first question is always "was this
+  //   sent", and the prefix answers it without a join.
+  status        String   @default("sent")
   detail        String?
+  // The outbox row's dedupe key. Only delivery knows the key, so the log can
+  // only be reconciled with the queue if the sender passes it down (R10-11).
+  dedupeKey     String?
+  // Provider acceptance evidence, when a real send happened. `providerStatus`
+  // is the HTTP status of the send attempt (R10-1).
+  providerMessageId String?
+  providerStatus    Int?
+  // Non-null exactly when the row is not `sent`/`logged`: the provider's
+  // answer (status + body, truncated) or the failure that stopped the attempt.
+  error         String?
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt @default(now())
 
   @@index([createdAt(sort: Desc)])
+  @@index([dedupeKey])
+  @@index([status])
+}
+
+// One row per address the product mails: its standing plus the opaque handle
+// its messages carry (R10-5/R10-7).
+//
+// Before this, "unsubscribe" only cleared Startup.email, which is a *delivery
+// address*, not a permission: the next payment that captured the same address
+// re-mailed it, and a receipt is not the message the person asked to stop
+// (they asked us to stop mailing this address). The key is therefore the
+// address, not the listing.
+//
+// The handle lives here because the address is the only thing that can be
+// suppressed, while the token in a footer can only ever name a *listing*
+// (`Startup.unsubToken`): a mail sent to `payment.email` because the listing
+// has none had a token that resolved to nothing, so the person clicked
+// "unsubscribe" and was silently ignored. Minting the token per address makes
+// the link point at the address that received the message, whatever carried
+// it. `reason` is null while the address may be mailed — the row is the
+// address's standing record, not only its refusal.
+model EmailAddress {
+  id        String   @id @default(cuid())
+  email     String   @unique // normalized lowercase
+  token     String   @unique @default(cuid())
+  reason    String? // null (may be mailed) | unsubscribe | invalid | bounce | complaint | manual
+  source    String? // where the change came from: unsubscribe | resend | manual
+  detail    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
+
+  @@index([reason])
 }
 
 model Report {

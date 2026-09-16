@@ -173,7 +173,8 @@ function HomeInner() {
         }
       }
     }
-    if (unsub === "done") toast("You're unsubscribed. Past stake still counts.");
+    if (unsub === "done") toast("Mail to that address is off — receipts included. Your stake still counts.");
+    if (unsub === "on") toast("Mail is on again: receipts and outbid notices will arrive.");
     if (unsub === "unknown") toast("Already unsubscribed or unknown link.");
     if (paid || unsub || canceled || elParam) window.history.replaceState({}, "", window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps

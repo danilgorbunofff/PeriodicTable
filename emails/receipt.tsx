@@ -4,6 +4,8 @@
  * actually settled at (R09-2: a lapsed take is applied at its stale amount and
  * must not be receipted as the #1 it was quoted for).
  */
+import { esc } from "./escape";
+
 export type ReceiptTemplateProps = {
   elementSymbol: string;
   elementName: string;
@@ -14,6 +16,10 @@ export type ReceiptTemplateProps = {
    * the figure the quote held, so the receipt can say the rank is the board's
    * answer rather than the quote's. */
   lapsedTakeTotal?: number | null;
+  /** R10-4: set when this payment added to a stake the buyer already held, so
+   * the mail can state both the charge and the resulting position instead of
+   * letting "$3" read as the whole stake. */
+  topUpUsd?: number | null;
   /** Public profile link. Listing edits are not offered in v1 — the profile
    * is set at checkout and is final, so this is a "view", not a "manage". */
   viewUrl: string;
@@ -32,13 +38,19 @@ export function receiptHtml(p: ReceiptTemplateProps) {
         Your $${p.lapsedTakeTotal} take quote lapsed before this payment cleared, so it settled as an ordinary stake at <strong>#${p.rank}</strong>.
       </p>`
     : "";
+  // R10-4: a reclaim payment is charged as the difference, so the receipt has to
+  // say what the charge did to the position — one line per fact, never a
+  // substituted number.
+  const stake = p.topUpUsd
+    ? `Your $${p.topUpUsd} top-up adds to the stake you already held: <strong>$${p.amountUsd}</strong> now stands for you on ${esc(p.elementSymbol)}, at <strong>#${p.rank}</strong>.`
+    : `Your $${p.amountUsd} stake puts you <strong>#${p.rank}</strong> on ${esc(p.elementSymbol)}.`;
   return `<!doctype html><html><body style="margin:0;background:#f4f4f0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
   <div style="max-width:520px;margin:0 auto;padding:24px 16px;">
     <div style="background:#fff;border-radius:20px;padding:28px;border:1px solid #eee;">
       <div style="font-size:13px;color:#888;font-weight:700;letter-spacing:1px;">PERIODICTABLE.LOL</div>
-      <h1 style="font-size:22px;margin:12px 0 8px;">${headline}</h1>
+      <h1 style="font-size:22px;margin:12px 0 8px;">${esc(headline)}</h1>
       <p style="font-size:15px;color:#444;line-height:1.5;">
-        Your $${p.amountUsd} stake puts you <strong>#${p.rank}</strong> on ${p.elementSymbol}.
+        ${stake}
         Every click from your tile is a verified redirect — watch 🟢 clicks delivered climb on your profile.
       </p>${lapse}
       <a href="${p.viewUrl}" style="display:inline-block;margin-top:16px;background:#FFCE4B;color:#111;font-weight:800;padding:14px 28px;border-radius:999px;text-decoration:none;font-size:15px;">View your spot →</a>

@@ -9,6 +9,7 @@ import {
   type CredentialHealth,
 } from "@/lib/env";
 import { probeStripeKey } from "@/lib/stripe";
+import { failedMailHealth } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
 
@@ -63,9 +64,26 @@ export async function GET(req: NextRequest) {
     const finding = credentialFinding("STRIPE_SECRET_KEY", health);
     if (finding) findings.push(finding);
   }
+  // R10-1: money bug adjacent — mail that failed and was never delivered is
+  // invisible to every existing surface. The outbox row is retried by the
+  // worker, but a failure that exhausts its attempts (or a send that reported
+  // failure without failing its row) just stops, and the buyer never learns
+  // what they bought. This is a health *number* plus the dedupe key of the
+  // oldest unresolved failure, which is the one an operator retries via
+  // /api/admin/outbox/retry. Deliberately not a `required` finding: a failed
+  // mail does not make the deployment unservable, and the endpoint must keep
+  // meaning "config" for the pinger. Read-only and best-effort — a database
+  // that cannot answer reports null rather than turning this into a 500.
+  let mail: { failedCount: number; oldestUnretriedKey: string | null } | null = null;
+  try {
+    const health = await failedMailHealth();
+    mail = { failedCount: health.failed, oldestUnretriedKey: health.oldestKey };
+  } catch {
+    mail = null;
+  }
   const ok = configFindingsOk(findings);
   return NextResponse.json(
-    { ok, env: getAppEnv(), findings, stripeKey },
+    { ok, env: getAppEnv(), findings, stripeKey, mail },
     { status: ok ? 200 : 503 }
   );
 }

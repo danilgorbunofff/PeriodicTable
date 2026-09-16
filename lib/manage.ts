@@ -16,12 +16,19 @@
  * - Tokens are single-use (consumedAt), short-lived (15 min), purpose-bound.
  * - Sessions are short-lived (60 min), revocable by expiry, cookie httpOnly.
  * - Request endpoint never reveals whether a domain exists (no oracle).
- * - Raw tokens are returned by requestManageToken ONLY outside production
- *   (dev convenience); production never delivers them.
+ * - A link is only minted for the address the listing itself carries
+ *   (`Startup.email`), so asking is not enough to manage someone else's listing
+ *   (R10-2).
+ * - Raw tokens are returned by requestManageToken ONLY under the development
+ *   app env. `!isProduction()` was the previous test, and it was wrong: a
+ *   preview deployment reports preview, not production, and per
+ *   doc/PROD-READINESS-CHECKLIST.md l.16 the preview class may point at the
+ *   production database — so the "dev convenience" handed out working tokens
+ *   for real listings.
  */
 import { createHash, randomBytes } from "crypto";
 import { prisma } from "./prisma";
-import { isProduction } from "./env";
+import { getAppEnv, isProduction } from "./env";
 import { audit } from "./audit";
 
 export const MANAGE_TOKEN_TTL_MS = 15 * 60_000;
@@ -46,7 +53,13 @@ export async function requestManageToken(params: {
   const email = normalizeEmail(params.email);
   if (!email) return { sent: true }; // no oracle: same shape for bad input
   const startup = await prisma.startup.findUnique({ where: { domain } });
-  if (startup) {
+  // R10-2: the caller must already control the address the listing carries. The
+  // mint used to accept whatever address was supplied and never compare it with
+  // `Startup.email`, so on any non-production deployment — including a preview
+  // deployment pointed at the production database — a stranger could take over
+  // any listing with one unauthenticated request. The comparison is the check
+  // the module's own "verified owner" language assumed and never made.
+  if (startup && startup.email && normalizeEmail(startup.email) === email) {
     const raw = randomBytes(32).toString("hex");
     await prisma.manageToken.create({
       data: {
@@ -57,12 +70,16 @@ export async function requestManageToken(params: {
         expiresAt: new Date(Date.now() + MANAGE_TOKEN_TTL_MS),
       },
     });
-    await audit({ action: "MANAGE_LINK_REQUESTED", startupId: startup.id, detail: email });
+    // The actor is the address that controls the listing's own address, not an
+    // anonymous "system" request: the audit trail must not read like a stranger
+    // was here when the owner asked (R10-2).
+    await audit({ action: "MANAGE_LINK_REQUESTED", startupId: startup.id, actorType: "owner", actorRef: email, detail: email });
     // v1: listing edits are not shipped (no UI, no delivery) — see README
     // "Ownership". Production deliberately drops the link instead of
-    // half-delivering it; the token simply expires unused. Dev still returns
-    // the raw token so the token/session logic stays testable.
-    if (!isProduction()) return { sent: true, debugToken: raw };
+    // half-delivering it; the token simply expires unused. Development still
+    // returns the raw token so the token/session logic stays testable — and only
+    // development, since that is the one env whose database is a local one.
+    if (getAppEnv() === "development") return { sent: true, debugToken: raw };
     // TODO(v2): ship the management pages, then enqueue the link via OutboxEvent.
     console.warn(`manage link requested for ${domain}, but listing management is not shipped (v1); link not sent`);
     return { sent: true };

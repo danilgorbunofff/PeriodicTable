@@ -169,6 +169,19 @@ const PROD_ENV_ADVISORIES: {
     satisfied: (env) => !!env.UPSTASH_REDIS_REST_URL && !!env.UPSTASH_REDIS_REST_TOKEN,
     detail: "Upstash is unconfigured: rate limits fall back to per-instance memory and fail open (lib/rateStore.ts)",
   },
+  {
+    // R10-7: without this secret the Resend webhook refuses every delivery
+    // (verifyResendWebhook fails closed), so a hard bounce or a spam complaint
+    // reaches Resend's dashboard and nothing else — and we keep mailing an
+    // address that refused us. `operator`, not `required`: the site still
+    // serves, and it takes a dashboard visit to create the webhook endpoint,
+    // but it is not a "nice to have" either.
+    key: "RESEND_WEBHOOK_SECRET",
+    severity: "operator",
+    satisfied: (env) => !!env.RESEND_WEBHOOK_SECRET,
+    detail:
+      "Resend bounce/complaint webhooks cannot authenticate: set RESEND_WEBHOOK_SECRET (whsec_…) so /api/webhooks/resend can suppress addresses the provider rejects",
+  },
 ];
 
 /**

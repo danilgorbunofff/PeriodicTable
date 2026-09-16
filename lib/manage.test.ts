@@ -83,21 +83,75 @@ describe.skipIf(!hasDb)("magic-link lifecycle", () => {
       pitch: "Manage pitch here",
       url: "https://manage-t.dev",
       linkType: "product",
-      email: null,
+      email: "owner@manage-t.dev",
     });
+    const before = await prisma.manageToken.count();
     const req = await requestManageToken({ domain: "manage-t.dev", email: "owner@manage-t.dev" });
     expect(req.sent).toBe(true);
-    expect(typeof req.debugToken).toBe("string");
-    const consumed = await consumeManageToken(req.debugToken as string);
+    // R10-2: the raw token is a development-only convenience. Under the test app
+    // env the request still mints, but the response never carries it.
+    expect(req.debugToken).toBeUndefined();
+    expect(await prisma.manageToken.count()).toBe(before + 1);
+    const minted = await prisma.manageToken.findFirstOrThrow({
+      where: { startup: { domain: "manage-t.dev" } },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(minted.email).toBe("owner@manage-t.dev");
+    // The audit names the address that controls the listing's own address, so
+    // "owner" in the trail is a fact rather than an assumption (R10-2).
+    const requested = await prisma.auditLog.findFirstOrThrow({
+      where: { startupId: minted.startupId, action: "MANAGE_LINK_REQUESTED" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(requested.actorType).toBe("owner");
+    expect(requested.actorRef).toBe("owner@manage-t.dev");
+
+    // The consume/session half is driven with a token this test knows the raw
+    // form of, since the route no longer hands one back outside development.
+    const startup = await prisma.startup.findUniqueOrThrow({ where: { domain: "manage-t.dev" } });
+    await prisma.manageToken.create({
+      data: {
+        startupId: startup.id,
+        email: "owner@manage-t.dev",
+        tokenHash: hashToken("manage-raw-token"),
+        purpose: "profile-manage",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const consumed = await consumeManageToken("manage-raw-token");
     expect(consumed.ok).toBe(true);
     if (!consumed.ok) return;
     expect(consumed.domain).toBe("manage-t.dev");
     // Single-use: replay fails.
-    expect((await consumeManageToken(req.debugToken as string)).ok).toBe(false);
+    expect((await consumeManageToken("manage-raw-token")).ok).toBe(false);
     // Session resolves, unknown token does not.
     const session = await getManageSession(consumed.sessionToken);
     expect(session?.domain).toBe("manage-t.dev");
     expect(await getManageSession("bogus")).toBeNull();
+  });
+
+  /* R10-2 (P0): the mint used to accept whatever address the caller supplied and
+   * never compare it with the listing, so one unauthenticated POST produced a
+   * working token for someone else's startup on every deployment whose app env
+   * was not `production` — including a preview deployment pointed at the
+   * production database. Asking is not owning: nothing is minted unless the
+   * request comes from the address the listing itself carries. */
+  it("mints nothing for a stranger's address, and nothing for a listing with no address", async () => {
+    const startup = await prisma.startup.findUniqueOrThrow({ where: { domain: "manage-t.dev" } });
+    const before = await prisma.manageToken.count();
+    expect(await requestManageToken({ domain: "manage-t.dev", email: "attacker@d10.dev" })).toEqual({
+      sent: true,
+    });
+    expect(await prisma.manageToken.count()).toBe(before);
+
+    // `Startup.email = null` is not "anyone may manage it": there is no address
+    // to compare against, so the request fails closed the same way.
+    await prisma.startup.update({ where: { id: startup.id }, data: { email: null } });
+    expect(await requestManageToken({ domain: "manage-t.dev", email: "owner@manage-t.dev" })).toEqual({
+      sent: true,
+    });
+    expect(await prisma.manageToken.count()).toBe(before);
+    await prisma.startup.update({ where: { id: startup.id }, data: { email: "owner@manage-t.dev" } });
   });
   it("expired tokens do not consume", async () => {
     const startup = await prisma.startup.findUniqueOrThrow({ where: { domain: "manage-t.dev" } });

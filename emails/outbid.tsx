@@ -2,11 +2,17 @@
  * Subject: `You were knocked off C (Carbon) 👑`
  * Body: `B (b.com) just took #1 with $21. Reclaim it for $2.00 → [Reclaim now]`
  */
+import { esc } from "./escape";
+
 export type OutbidTemplateProps = {
   elementSymbol: string;
   winnerDomain: string;
   winnerAmount: number;
   reclaim: number;
+  /** R09-5 (mail half): set when the reclaim figure is below the first-join
+   * floor, so the mail can say what happens if the stake it refers to is gone
+   * by the time the link is clicked. */
+  reentryFloor?: number | null;
   reclaimUrl: string;
   unsubUrl: string;
 };
@@ -16,15 +22,23 @@ export function outbidSubject(p: { elementSymbol: string }): string {
 }
 
 export function outbidHtml(p: OutbidTemplateProps): string {
+  const symbol = esc(p.elementSymbol);
+  const floor = p.reentryFloor
+    ? `<p style="font-size:13px;color:#666;line-height:1.5;margin:12px 0 0;">
+        That $${p.reclaim} is the difference on the stake you still hold. If your stake has been
+        refunded in the meantime, a first bid on ${symbol} starts at $${p.reentryFloor} — the link
+        below will tell you which one you are.
+      </p>`
+    : "";
   return `<!doctype html><html><body style="margin:0;background:#f4f4f0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
   <div style="max-width:520px;margin:0 auto;padding:24px 16px;">
     <div style="background:#fff;border-radius:20px;padding:28px;border:1px solid #eee;">
       <div style="font-size:13px;color:#888;font-weight:700;letter-spacing:1px;">PERIODICTABLE.LOL</div>
-      <h1 style="font-size:22px;margin:12px 0 8px;">You were knocked off ${p.elementSymbol} 👑</h1>
+      <h1 style="font-size:22px;margin:12px 0 8px;">You were knocked off ${symbol} 👑</h1>
       <p style="font-size:15px;color:#444;line-height:1.5;">
-        <strong>${p.winnerDomain}</strong> just took #1 with $${p.winnerAmount}.
+        <strong>${esc(p.winnerDomain)}</strong> just took #1 with $${p.winnerAmount}.
         Reclaim it for <strong>$${p.reclaim}.00</strong> and take the crown back.
-      </p>
+      </p>${floor}
       <a href="${p.reclaimUrl}" style="display:inline-block;margin-top:16px;background:#FFCE4B;color:#111;font-weight:800;padding:14px 28px;border-radius:999px;text-decoration:none;font-size:15px;">Reclaim now</a>
       <p style="font-size:12px;color:#999;margin-top:20px;">
         your past stake still counts, so nothing&apos;s wasted · it&apos;s an ad buy, not a bet ·

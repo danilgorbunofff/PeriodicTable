@@ -180,6 +180,7 @@ describe("getProdConfigReport", () => {
     ADMIN_TOKEN: "opaque-admin",
     UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
     UPSTASH_REDIS_REST_TOKEN: "x",
+    RESEND_WEBHOOK_SECRET: "whsec_VGVzdFNlY3JldA==",
   };
 
   it("reports exactly REQUIRED_PROD_ENV when nothing is set (drift guard)", async () => {
@@ -239,6 +240,24 @@ describe("getProdConfigReport", () => {
     });
     expect(getProdConfigReport(fakeEnv(noAdmin)).ok).toBe(false);
     expect(() => requireProdEnv(fakeEnv(noAdmin))).toThrow(/ADMIN_TOKEN/);
+  });
+
+  /* R10-7: the second advisory. Without the webhook secret the provider's own
+   * evidence — a hard bounce, a spam complaint — never reaches the code, so we
+   * keep mailing an address that refused us. It is not `required`: the site
+   * serves fine, and setting it takes a dashboard visit. It must therefore not
+   * fail `ok` (that would page on every tick) but must be visible in findings. */
+  it("reports a missing RESEND_WEBHOOK_SECRET as an operator finding, not a failure", async () => {
+    const { getProdConfigReport, requireProdEnv } = await import("./env");
+    const noWebhook: Env = { ...FULL };
+    delete noWebhook.RESEND_WEBHOOK_SECRET;
+
+    const report = getProdConfigReport(fakeEnv(noWebhook));
+    expect(report.findings.map((f) => [f.key, f.severity])).toEqual([["RESEND_WEBHOOK_SECRET", "operator"]]);
+    expect(report.findings[0].detail).toContain("/api/webhooks/resend");
+    expect(report.ok).toBe(true);
+    prodEnv();
+    expect(() => requireProdEnv(fakeEnv(noWebhook))).not.toThrow();
   });
 });
 
