@@ -65,7 +65,7 @@ are written in the same transaction).
   denormalized aggregates inside the caller's transaction and assert the invariants before commit.
 - **The operator** — the only reader of `ProviderEvent`. A terminal rejection (`rejected`) is
   answered 200, so the record is the entire signal.
-- **`/api/jobs/reconcile`** (`app/api/jobs/reconcile/route.ts:46`) — read-only recomputation of the
+- **`/api/jobs/reconcile`** (`app/api/jobs/reconcile/route.ts` — `:46` at authoring; the `apiRoute` export is `:12-14` and `getReconcileStatus` `:103` today) — read-only recomputation of the
   PAID ledger; 503 when a PAID payment's stake does not match what the ledger says.
 
 ## 3. Intended behaviour
@@ -256,7 +256,7 @@ is lost is the operator's ability to answer "did this event apply, and was the a
 
 ### 5.5 Reconcile (P6)
 
-`GET /api/jobs/reconcile` (`app/api/jobs/reconcile/route.ts:46`), authorised by `jobAuth`
+`GET /api/jobs/reconcile` (`app/api/jobs/reconcile/route.ts:46` at authoring; `:12-14,103` today), authorised by `jobAuth`
 (`:48`), reads only PAID rows (`:51-56`) and recomputes each one against the ledger. Baseline on the
 converged DB:
 
@@ -342,7 +342,7 @@ rather than carried over — the invariants themselves are unchanged.
 | I6 | A reversal unwinds the stake before the payment reads REFUNDED | `reverseStakeTx` (`:447`) + REFUNDED (`:452-455`) + audit (`:457-466`) in one `withTxnRetry` transaction (`:438`); `ledger-invariant:reverse-no-stake:` `lib/recompute.ts:145`; `ledger-invariant:reverse-below-zero:` `lib/recompute.ts:147` |
 | I7 | A stake can never exist without a ranked leader | `ledger-invariant:apply-without-leader` `lib/recompute.ts:212` |
 | I8 | The three denormalized aggregates are never half-written | recompute + assert inside the same `MONEY_TX` transaction (`lib/recompute.ts:27-130`, assert at `:97`), retried by `withTxnRetry` `lib/txn.ts:40` with `MONEY_TX` `lib/txn.ts:29` |
-| I9 | Reconcile can never change a status | `app/api/jobs/reconcile/route.ts` — read-only file, PAID-only filter `:83`, no write statement |
+| I9 | Reconcile can never change a status | `app/api/jobs/reconcile/route.ts` — read-only file, PAID-only filter `:83` at authoring (`:111` today), no write statement |
 | I10 | A retryable failure is retried, a deterministic one is not | `app/api/webhooks/stripe/route.ts:222-228` (200 for `rejected`, 500 for a throw); terminal reasons `lib/settle.ts:371-373`, `:534-537` |
 
 ### 5.9 What happens to a customer whose payment settles while the stake application fails
@@ -368,7 +368,7 @@ Walked through the code paths, in order:
    nothing auto-refunds, and no alert fires. `PaymentStatus` never gets a value that says "captured
    but unapplied"; `CANCELED` is unwritten (§5.3) and `FAILED` means a provider failure, not ours.
 6. The only detector is the operator running `/api/jobs/reconcile` — and it is structurally blind to
-   this shape: it filters PAID rows (`app/api/jobs/reconcile/route.ts:51-56`). A PAID row always has
+   this shape: it filters PAID rows (`app/api/jobs/reconcile/route.ts:51-56` at authoring; the `where: { status: "PAID" }` query is `:105-115` today). A PAID row always has
    `appliedAt` (I1), so a captured-but-unapplied payment is never in its input set. Nor is it on a
    cron (`vercel.json` schedules `/api/jobs/outbox` and `/api/jobs/screenshot` only), so even the
    divergence case would be discovered by hand.
@@ -424,7 +424,7 @@ and four in `lib/reconcile.test.ts` (DB).
   that unwinds the stake and writes REFUNDED (`:501`), resolves the recipient the way settle does
   (`locked.email ?? startup.email`), and drains on the same bounded inline path
   (`:521-525`, `SETTLE_MAIL_DRAIN_BUDGET_MS`). The template is `emails/refund.tsx` behind
-  `sendRefundEmail()` (`lib/email.ts:157`, `template: "refund"` at `:170`), wired into the outbox as
+  `sendRefundEmail()` (`lib/email.ts:157` at authoring — `:756` today; `template: "refund"` at `:170`, `:774` today), wired into the outbox as
   its own type (`lib/outbox.ts:112-113`) — a receipt for money going back would document a purchase
   that no longer stands. `lib/phase8.test.ts` asserts the reversal transaction contains the enqueue,
   that no `RECEIPT_EMAIL` was added to it, that the template quotes the provider reference only when
@@ -435,13 +435,14 @@ and four in `lib/reconcile.test.ts` (DB).
   `7ce73a9`, before this doc was authored) has polled `GET /api/jobs/reconcile` every ten minutes with
   `exit 1` on a non-200 since then. The missing halves were the route's answer for the shape §5.9
   describes and the workflow's own reading of it. Server side: `unapplied` (ERROR deliveries with no
-  later success covering them, `app/api/jobs/reconcile/route.ts:131-143`), `stale` (advisory PENDING
-  rows older than the provider session, `:144-154`), `failing = divergent || unapplied` (`:156`) →
-  **503** (`:188`). Client side: the reconcile step runs before the config step only when not
+  later success covering them, `app/api/jobs/reconcile/route.ts:131-143` at authoring,
+  `:165-190` today), `stale` (advisory PENDING rows older than the provider session, `:144-154` at authoring,
+  `:208-224` today), `failing = divergent || unapplied` (`:156` at authoring, `:226` today) →
+  **503** (`:188` at authoring, `:285` today). Client side: the reconcile step runs before the config step only when not
   cancelled, saves the body, and fails the run with an `::error::` line naming both counts
   (`.github/workflows/outbox-tick.yml:83-104`) — a 200 carrying `divergent: 1` used to be a green run.
   *Not taken:* the finding's other arm, putting the job in `vercel.json`. Hobby allows two cron slots
-  and both hold the daily mail jobs (`app/api/jobs/reconcile/route.ts:194`); a ten-minute tick is also
+  and both hold the daily mail jobs (`app/api/jobs/reconcile/route.ts:194` at authoring; `outboxHealth()` `:200-206` today); a ten-minute tick is also
   better latency than a daily one. The four DB tests assert the grace window ("does not page on a
   rejected delivery that may still be retrying"), the live rejection ("fails ok on a rejected capture
   that was never applied"), the superseded-vs-live distinction on a PAID row, and that `stale` is
@@ -467,7 +468,7 @@ and four in `lib/reconcile.test.ts` (DB).
   the row instead of cancelling it, and sweeping rows that have a session URL (those are R08-3's
   `stale` list, because a session that exists may still be paid).
 - **R08-6 — a declined attempt is recorded as declined.** `stripePayloadIsDeclined()`
-  (`lib/stripe.ts:426`, `DECLINED_EVENT_TYPES` at `:424`) is applied in the webhook's `IGNORED` branch,
+  (`lib/stripe.ts:426` at authoring — `:502` today; `DECLINED_EVENT_TYPES` at `:424`, `:500` today) is applied in the webhook's `IGNORED` branch,
   so a declined card attempt reaches the register as `declined-attempt` instead of the generic
   `unrelated-event` (`app/api/webhooks/stripe/route.ts:126-133`) and the buyer's payment row is
   untouched. *Not taken:* the finding's other half — terminating the payment row on
@@ -476,12 +477,12 @@ and four in `lib/reconcile.test.ts` (DB).
   that can still be completed. The register now distinguishes "the buyer was refused" from "we do not
   know why this arrived" without asserting the second. §9 Q4 is where the terminal-state decision sits.
 - **R08-7 — the delivery keeps its subject.** `ProviderEvent` carries `elementId`/`startupId`
-  (`prisma/schema.prisma:336-337`), plain columns with no relation and no FK, so they survive any
+  (`prisma/schema.prisma:336-337` at authoring; `:346-347` today), plain columns with no relation and no FK, so they survive any
   element or startup edit; `recordProviderEvent` resolves them from the payment at write time so no
   call site can forget (`lib/settle.ts:121-127`). Migration
   `prisma/migrations/0007_provider_event_attribution/migration.sql` adds them with a backfill in
   0003's shape (`:15-19`) and the index the reconcile report needs (`:23`,
-  `@@index([outcome, createdAt])` at `prisma/schema.prisma:345`). The reproduction was re-run against
+  `@@index([outcome, createdAt])` at `prisma/schema.prisma:345` at authoring; `:356` today). The reproduction was re-run against
   the migration, on a scratch database holding migrations 0000-0006, a payment and a delivery row:
 
   ```
@@ -617,8 +618,8 @@ element is ever re-pointed.
   enqueues no second row. The recipient is resolved the way settle resolves it
   (`locked.email ?? startup.email`), and the payload carries the amount, the element, the buyer's
   domain, the unsubscribe token and `providerRef` — the reference a buyer quotes to their bank. The
-  template is `emails/refund.tsx` behind `sendRefundEmail()` (`lib/email.ts:157`, `template: "refund"`
-  at `:170`), wired as its own outbox type (`lib/outbox.ts:112-113`), and the reversal drains its mail
+  template is `emails/refund.tsx` behind `sendRefundEmail()` (`lib/email.ts:157` at authoring — `:756` today,
+  `template: "refund"` at `:170`, `:774` today), wired as its own outbox type (`lib/outbox.ts:112-113`), and the reversal drains its mail
   on the same bounded inline path settle uses (`lib/settle.ts:521-525`,
   `SETTLE_MAIL_DRAIN_BUDGET_MS`). No `RECEIPT_EMAIL` and no `OUTBID_EMAIL` were added: nobody won
   anything, and a receipt would document a purchase that no longer stands. Verification is §5.10; the
@@ -631,8 +632,9 @@ element is ever re-pointed.
 - **Severity.** P2
 - **Category.** ops
 - **Evidence.** `vercel.json` crons: `/api/jobs/outbox` at `0 4 * * *` and
-  `/api/jobs/screenshot` at `30 4 * * *` only. `app/api/jobs/reconcile/route.ts:46` exposes GET; the
-  comment at `:96-100` says POST is intentionally not in the cron list. Terminal rejections reach the
+  `/api/jobs/screenshot` at `30 4 * * *` only. `app/api/jobs/reconcile/route.ts:46` exposed GET at authoring; the
+  `apiRoute` export block is `:12-14` today (GET plus the POST body-secret arm R14-8 later added) and the cron
+  comment is `:89-94` today. Terminal rejections reach the
   operator only as `ERROR` rows: `app/api/webhooks/stripe/route.ts:127-137` (money), `:139-161`
   (references), `:186-189` (`settle` rejected) — all answered 200, so the provider will not retry and
   cannot page anyone. Observed divergence probe: a hand-written ledger divergence made
@@ -648,15 +650,15 @@ element is ever re-pointed.
   `7ce73a9` — before this doc was authored — so the endpoint was never unpolled and the 2026-09-15
   evidence behind this finding came from reading `vercel.json` and nothing else. What was genuinely
   missing is now in place on both sides. Route: `unapplied` (an `ERROR` delivery with no later success
-  covering the same payment, `app/api/jobs/reconcile/route.ts:131-143`), the advisory `stale` block
-  (`:144-154`) for PENDING rows older than their provider session, and `failing = divergent || unapplied`
-  → **503** (`:156`, `:188`) — so §5.9's captured-but-unapplied shape is no longer invisible to a
+  covering the same payment, `app/api/jobs/reconcile/route.ts:131-143` at authoring, `:165-190` today), the advisory
+  `stale` block (`:144-154` at authoring, `:208-224` today) for PENDING rows older than their provider session, and
+  `failing = divergent || unapplied` → **503** (`:156`, `:188` at authoring; `:226`, `:285` today) — so §5.9's captured-but-unapplied shape is no longer invisible to a
   report whose input set was PAID rows only. Workflow: the reconcile step keeps
   `if: ${{ !cancelled() }}`, saves its body, and fails the run with an `::error::` line naming both
   counts (`.github/workflows/outbox-tick.yml:83-104`); before this, a 200 carrying
   `{"divergent":{"count":1}}` was a green run, which is the alerting half of the finding. *Not taken:*
   the finding's `vercel.json` arm — the Hobby plan allows two cron slots and both hold the daily mail
-  jobs (`app/api/jobs/reconcile/route.ts:194`), and a ten-minute tick beats a third cron's latency
+  jobs (`app/api/jobs/reconcile/route.ts:194` at authoring; `outboxHealth()` `:200-206` today), and a ten-minute tick beats a third cron's latency
   anyway. §5.10 carries the four DB tests and the step-body harness that proves a failing body exits
   non-zero.
 - **Status.** fixed
@@ -757,8 +759,8 @@ element is ever re-pointed.
   payment id we recognise (and keep `unrelated-event` for the rest), so the row terminates like the
   expired-session case; surface the failed state on `/pay/{id}`. Test: failed intent → payment
   FAILED, no stake, one `FAILED` event row.
-- **Fix.** The register now says what it knows. `stripePayloadIsDeclined()` (`lib/stripe.ts:426`,
-  `DECLINED_EVENT_TYPES` at `:424`) routes a `payment_intent.payment_failed` delivery to a
+- **Fix.** The register now says what it knows. `stripePayloadIsDeclined()` (`lib/stripe.ts:426` at authoring, `:502` today,
+  `DECLINED_EVENT_TYPES` at `:424`, `:500` today) routes a `payment_intent.payment_failed` delivery to a
   `declined-attempt` detail in the webhook's `IGNORED` branch
   (`app/api/webhooks/stripe/route.ts:126-133`), so an operator reading `ProviderEvent` can tell a
   refused card from a delivery the app could not classify — with the payment row, deliberately,
@@ -787,7 +789,7 @@ element is ever re-pointed.
   the payment is gone. Test: attempted delete with events present is refused (or the event still
   names its element).
 - **Fix.** Attribution is copied, not joined. `ProviderEvent.elementId`/`startupId`
-  (`prisma/schema.prisma:336-337`) are plain nullable columns with **no** relation and no foreign key,
+  (`prisma/schema.prisma:336-337` at authoring; `:346-347` today) are plain nullable columns with **no** relation and no foreign key,
   so an element or startup edit can neither restrict nor null them; `recordProviderEvent` resolves both
   from the payment at write time (`lib/settle.ts:121-127`, so no call site can forget them), and the
   webhook's two pre-payment deliveries keep writing `paymentId: null` explicitly
@@ -795,7 +797,7 @@ element is ever re-pointed.
   `prisma/migrations/0007_provider_event_attribution/migration.sql` adds the columns, backfills rows
   that still have a payment (`:15-19`, the shape 0003 used) and adds
   `ProviderEvent_outcome_createdAt_idx` for R08-3's scan (`:23`,
-  `@@index([outcome, createdAt])` at `prisma/schema.prisma:345`). Proven re-runnably in §5.10: a row
+  `@@index([outcome, createdAt])` at `prisma/schema.prisma:345` at authoring; `:356` today). Proven re-runnably in §5.10: a row
   written before the migration gains `elementId=1 | startupId=mig-s`, and deleting its payment leaves
   both in place with `paymentId` NULL, so §5.7's orphan is attributable. *Not taken:*
   `onDelete: Restrict`, which would make a payment with any recorded delivery undeletable and break
@@ -919,6 +921,7 @@ recorded rather than taken.
   pass: sections 1-12, findings R08-1…R08-7, UNKNOWN U08-1…U08-4, and no fix-verification section —
   §5.10 was added by the same day's fix pass.
 - 2026-09-15 (working tree) — fix pass for R08-1…R08-7, each cited in §7 with its verification in §5.10, the invariant table's citations refreshed against the post-fix tree (§5.8), the criteria in §8 ticked with a fix-pass block added, and §9 Q1-Q3 annotated and Q4 raised from R08-6's fix. `lib/settle.ts`: `providerEventUpdate()` (`:93`) as the single precedence rule for the register — a row whose stored outcome is anything but `ERROR` is terminal and the patch is `null`; `recordProviderEvent()` (`:114`) as the register's only writer (attribution resolved from the payment at `:121-127`, early return before the upsert at `:138`); `recordEvent()` (`:176`) reduced to a wrapper; `REFUND_EMAIL` enqueued inside the reversal transaction (`:478-479`, `dedupeKey: refund-${paymentId}`) and drained on the bounded inline path (`:521-525`). `app/api/webhooks/stripe/route.ts`: all seven register writes go through `recordProviderEvent`, the `IGNORED` branch tags a declined attempt (`:132`), and the two pre-payment deliveries keep `paymentId: null` (`:63,79`). `emails/refund.tsx` (new), `sendRefundEmail()` (`lib/email.ts:157`), outbox type `REFUND_EMAIL` (`lib/outbox.ts:112-113`). `app/api/jobs/reconcile/route.ts`: `unapplied` (`:131-143`), advisory `stale` (`:144-154`), `failing = divergent || unapplied` → 503 (`:156`, `:188`), the Hobby cron note (`:194`). `.github/workflows/outbox-tick.yml` (the correction to R08-3's premise — this workflow has polled reconcile every ten minutes since `7ce73a9`): the abandoned-checkout step (`:71`), the reconcile step with `if: ${{ !cancelled() }}` and jq body checks that fail the run with both counts (`:83-104`). `lib/abandonedCheckouts.ts` + `app/api/jobs/abandoned-checkouts/route.ts` (new; `CHECKOUT_ABANDON_TTL_MS` 24 h, `ABANDON_MAX_BATCH` 50, conditional `updateMany`, `CHECKOUT_ABANDONED` audit at `lib/audit.ts:27`). `lib/stripe.ts`: `DECLINED_EVENT_TYPES` (`:424`) and `stripePayloadIsDeclined()` (`:426`). Schema: `ProviderEvent.elementId`/`startupId` (`:336-337`) and `@@index([outcome, createdAt])` (`:345`), with migration `prisma/migrations/0007_provider_event_attribution/migration.sql` adding both columns, a `UPDATE … FROM "Payment"` backfill in 0003's shape, and the index. `lib/applyPayment.ts` deleted. Tests: new `lib/phase8.test.ts` (24), new `lib/abandonedCheckouts.test.ts` (7, DB), four additions to `lib/reconcile.test.ts` (DB), one migration-backfill replay on a scratch database. Verification §5.10: `TEST_DATABASE_URL=… npm run test:ci` 45 files / 647 passed / 0 skipped (CI's skip gate satisfied), plain `npx vitest run` 39 passed + 6 skipped files / 565 passed + 82 skipped, `npx tsc --noEmit` clean, `npx eslint lib app` clean, all against a local `postgres:16-alpine` on CI's port 55433. Deliberately not taken, each recorded with its finding: `markFailed` on the checkout failure path (R08-4 — the sweep closes that row instead), the finding's `vercel.json` cron arm (R08-3 — Hobby's two slots are taken), terminating the payment on `payment_intent.payment_failed` (R08-6 — the session can still be paid), `onDelete: Restrict` on the register (R08-7), cancelling reservations in the sweep (R08-5), and the `cancel_url` callback (R08-5). No live Stripe delivery: U08-1…U08-4 all stand.
+- 2026-09-16 (working tree, PR `26` final-verification audit) — citation refresh across §2, I9, §5.11, R08-5/R08-6/R08-7 and Q3: today-lines for the reconcile route (`:12-14`, `:103`, `:105-115`, `:111`, `:165-190`, `:208-224`, `:226`, `:285`, `outboxHealth()` `:200-206`), `stripePayloadIsDeclined()` (`:502`, `DECLINED_EVENT_TYPES` `:500`), `sendRefundEmail()` (`:756`, `template` `:774`), the `ProviderEvent` attribution columns (`:346-347`) and the outcome index (`:356`). The dated fix-pass record above keeps its 2026-09-15 lines.
 
 ## 12. UNKNOWN log
 
