@@ -64,6 +64,7 @@ jobs:
             NEXT_PUBLIC_APP_URL=https://ci.example.com \
             TURNSTILE_SECRET=ci CLICK_SALT=ci-random-value CRON_SECRET=ci \
             RESEND_API_KEY=ci EMAIL_FROM=ci@example.com \
+            ADMIN_TOKEN=ci-rehearse-admin \
             node scripts/check-prod-env.mjs
       - name: production build (with database — no hidden Prisma errors)
         run: |
