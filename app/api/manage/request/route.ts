@@ -12,8 +12,9 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: reque
  * same shape (no oracle for domain enumeration). Rate-limited per IP.
  *
  * NOT SHIPPED IN v1: listing edits have no UI and production emails nothing,
- * so the note below must not promise delivery (see lib/manage.ts). Non-production
- * still returns the raw token for dev convenience.
+ * so the note below must not promise delivery (see lib/manage.ts). The raw token
+ * leaves this route only in a development process that set DEV_MANAGE_TOKENS=1
+ * (R14-7), under the name `__devToken`.
  */
 async function requestManageLink(req: NextRequest) {
   const ip = clientIp(req.headers);
@@ -36,6 +37,6 @@ async function requestManageLink(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     note: "Listing management is not enabled — your listing is set at checkout and is final.",
-    ...(result.debugToken ? { debugToken: result.debugToken } : {}),
+    ...(result.__devToken ? { __devToken: result.__devToken } : {}),
   });
 }

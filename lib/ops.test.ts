@@ -16,6 +16,7 @@ import {
   jobGate,
   ADMIN_LIMIT,
   JOB_LIMIT,
+  AUTH_REJECTION_LIMIT,
 } from "./jobs";
 import { isDiscoverable, isDirectVisible } from "./moderation";
 
@@ -70,26 +71,45 @@ afterEach(() => {
 
 const headers = (h: Record<string, string>) => new Headers(h);
 
-describe("clientIp trust order", () => {
-  it("prefers cf-connecting-ip, then x-real-ip, then xff, then default", () => {
+describe("clientIp trust order (R14-2)", () => {
+  it("trusts cf-connecting-ip only when cf-ray proves the request went through it", () => {
     expect(
       clientIp(
         headers({
+          "cf-ray": "8f1a1b2c3d4e5f60-AMS",
           "cf-connecting-ip": "1.1.1.1",
           "x-real-ip": "2.2.2.2",
           "x-forwarded-for": "3.3.3.3",
         }),
       ),
     ).toBe("1.1.1.1");
+    // A caller that sets the header itself has no cf-ray to go with it, so the
+    // pair is not believed and the chain decides.
     expect(
-      clientIp(
-        headers({ "x-real-ip": "2.2.2.2", "x-forwarded-for": "3.3.3.3" }),
-      ),
-    ).toBe("2.2.2.2");
-    expect(clientIp(headers({ "x-forwarded-for": "3.3.3.3, 4.4.4.4" }))).toBe(
-      "3.3.3.3",
-    );
+      clientIp(headers({ "cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "3.3.3.3, 4.4.4.4" })),
+    ).toBe("4.4.4.4");
+  });
+
+  it("takes the rightmost hop a caller cannot write, not the leftmost", () => {
+    expect(clientIp(headers({ "x-forwarded-for": "9.9.9.9, 4.4.4.4, 5.5.5.5" }))).toBe("5.5.5.5");
+    // Junk on the right is skipped rather than used as a bucket.
+    expect(clientIp(headers({ "x-forwarded-for": "4.4.4.4, unknown, " }))).toBe("4.4.4.4");
+    expect(clientIp(headers({ "x-forwarded-for": "203.0.113.7, [2001:db8::1]" }))).toBe("2001:db8::1");
+  });
+
+  it("falls back to x-real-ip, then to one shared bucket", () => {
+    expect(clientIp(headers({ "x-real-ip": "2.2.2.2" }))).toBe("2.2.2.2");
+    expect(clientIp(headers({ "x-forwarded-for": "not-an-address" }))).toBe("0.0.0.0");
     expect(clientIp(headers({}))).toBe("0.0.0.0");
+  });
+
+  it("refuses to let an unshaped header rotate the bucket (R14-2)", () => {
+    // The review's rotation: each request carried a different header and each
+    // landed in a fresh bucket. Every shape a caller can invent without an edge
+    // writing it collapses to the same answer.
+    for (const junk of ["", " ", "unknown", "a".repeat(50), "1.1.1.1<script>", "::"]) {
+      expect(clientIp(headers({ "x-forwarded-for": junk, "x-real-ip": junk }))).toBe("0.0.0.0");
+    }
   });
 });
 
@@ -169,6 +189,19 @@ describe("rateLimitAsync", () => {
       },
     });
     expect(await rateLimitAsync("x", 1, 1000)).toBe(true);
+  });
+  it("fails closed when the caller asks it to (R14-2)", async () => {
+    // The callers in front of mail and money choose this: if the store cannot
+    // answer, the request is refused rather than waved through, because the
+    // limiter is the only thing counting what that route is about to spend.
+    setSharedRateLimitStore({
+      incr: async () => {
+        throw new Error("redis down");
+      },
+    });
+    expect(await rateLimitAsync("y", 1, 1000, { onStoreError: "closed" })).toBe(false);
+    // Explicit "open" is the historical behaviour, for callers that say so.
+    expect(await rateLimitAsync("y", 1, 1000, { onStoreError: "open" })).toBe(true);
   });
 });
 
@@ -385,17 +418,67 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
       token ? { headers: withBearer(token) } : undefined,
     );
 
-  it("checks the credential before it spends budget, so probing is free", async () => {
+  it("checks the credential before it spends budget, so probing is free (R14-2)", async () => {
     set("ADMIN_TOKEN", "gate-a");
     // The review's reproduction: fifty consecutive unauthorised calls, all 200
     // for the job route it probed. Refusals must not consume the operator's own
-    // budget either, or a stranger could lock the operator out of triage.
-    for (let i = 0; i < ADMIN_LIMIT + 1; i++) {
+    // budget either, or a stranger could lock the operator out of triage — they
+    // are metered separately, by source address, and only for the prober.
+    for (let i = 0; i < AUTH_REJECTION_LIMIT; i++) {
       const denied = await adminGate(adminReq("wrong"), "admin/probe-free");
       expect(denied?.status).toBe(403);
       expect(denied?.headers.get("x-request-id")).toBeTruthy();
     }
+    // The operator's own call still passes after a full hour of probing: the
+    // refusal meter is not the credential budget.
     expect(await adminGate(adminReq("gate-a"), "admin/probe-free")).toBeNull();
+    // And the prober has spent their allowance on this route, so the gate stops
+    // answering them at all.
+    const throttled = await adminGate(adminReq("wrong"), "admin/probe-free");
+    expect(throttled?.status).toBe(429);
+    const body = (await throttled!.json()) as { error: string; code: string };
+    expect(body.code).toBe("RATE_LIMITED");
+    // Per route: the same source may still be refused properly elsewhere.
+    expect((await adminGate(adminReq("wrong"), "admin/probe-free-2"))?.status).toBe(403);
+  });
+
+  it("logs every refusal by shape and source, and never the value (R14-10)", async () => {
+    const CANARY = "wrong-gate-token-canary";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      set("ADMIN_TOKEN", "gate-shape");
+      // A prober with a bearer token and one with no credential at all are
+      // different events, and the line says which one happened.
+      await adminGate(adminReq(CANARY), "admin/probe-log-bearer");
+      await adminGate(adminReq(), "admin/probe-log-none");
+      const lines = warn.mock.calls.map((c) => String(c[0]));
+      expect(lines[0]).toContain("auth: refused (bearer token, 403)");
+      expect(lines[0]).toContain("/api/admin/probe-log-bearer");
+      expect(lines[0]).toContain("from 0.0.0.0");
+      expect(lines[1]).toContain("auth: refused (no credential, 403)");
+      expect(lines[1]).toContain("admin/probe-log-none");
+
+      // The alert threshold escalates exactly the twentieth refusal on a route:
+      // the review's hundred wrong tokens crosses it in the first minute, and a
+      // line per guess would be the flood the operator is meant to see instead.
+      for (let i = 0; i < 20; i++) await adminGate(adminReq(CANARY), "admin/probe-log-alert");
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(String(error.mock.calls[0][0])).toContain("(a rate no operator reaches by hand)");
+      expect(String(error.mock.calls[0][0])).toContain("20 this hour");
+
+      // A log line is a durable artefact on a platform we do not own: the value
+      // tried, and the value stored, must not be legible in it.
+      set("ADMIN_TOKEN", "gate-real-value");
+      await adminGate(adminReq("gate-real-value"), "admin/probe-log-ok");
+      await adminGate(adminReq("gate-real-value-typo"), "admin/probe-log-typo");
+      const everything = [...warn.mock.calls, ...error.mock.calls].map((c) => String(c[0])).join("\n");
+      expect(everything).not.toContain(CANARY);
+      expect(everything).not.toContain("gate-real-value");
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it(`meters allowed admin calls per credential per route (${ADMIN_LIMIT}/window)`, async () => {
@@ -441,16 +524,18 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
     });
   });
 
-  it(`meters job calls per credential, including the body/query secret path (${JOB_LIMIT}/window)`, async () => {
+  it(`meters job calls per caller, including the credential-free rehearsal arm (${JOB_LIMIT}/window)`, async () => {
     set("CRON_SECRET", "gate-secret");
     // The calls below carry no credential at all — they rely on the local
-    // rehearsal arm of jobAuth, which R13-2 now decides by the database host.
-    // (`?secret=` only names the budget; it never authenticates.)
+    // rehearsal arm of jobAuth, which R13-2 decides by the database host, so
+    // they all share the "unauthenticated" budget. R14-8 deleted the `?secret=`
+    // query term that used to name it: a query string is part of the request a
+    // caller writes, so it must not be able to buy a fresh bucket.
     set("DATABASE_URL", LOCAL_DB);
     for (let i = 0; i < JOB_LIMIT; i++) {
       expect(
         await jobGate(
-          jobReq(undefined, "jobs/probe-limit?secret=gate-secret"),
+          jobReq(undefined, "jobs/probe-limit"),
           "jobs/probe-limit",
           null,
         ),
@@ -465,14 +550,14 @@ describe("adminGate / jobGate — the metered gates (R11-4)", () => {
     expect(((await over!.json()) as { code: string }).code).toBe(
       "RATE_LIMITED",
     );
-    // Same secret, different endpoint: its own budget.
+    // The same caller on a different endpoint has its own budget — and inventing
+    // a secret per request does not create one.
     expect(
-      await jobGate(
-        jobReq(undefined, "jobs/probe-limit-2?secret=gate-secret"),
-        "jobs/probe-limit-2",
-        null,
-      ),
+      await jobGate(jobReq(undefined, "jobs/probe-limit-2"), "jobs/probe-limit-2", null),
     ).toBeNull();
+    // A real credential is a different caller: it is not billed for the probing
+    // above, which is the whole reason the key is the credential and not the IP.
+    expect(await jobGate(jobReq("gate-secret"), "jobs/probe-limit", null)).toBeNull();
   });
 });
 

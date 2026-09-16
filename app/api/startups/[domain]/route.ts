@@ -63,8 +63,10 @@ async function patchStartup(req: NextRequest, { params }: { params: { domain: st
     linkType: string;
     logoUrl?: string;
   } = { title: input.title, pitch: input.pitch, url: input.url, linkType: input.linkType };
-  if (body.logoUrl != null && body.logoUrl !== "") {
-    data.logoUrl = body.logoUrl.trim();
+  // R14-5: store the value validateProfileInput normalised rather than
+  // body.logoUrl.trim(). Absent or empty still means "leave the logo alone".
+  if (input.logoUrl) {
+    data.logoUrl = input.logoUrl;
     changed.push("logoUrl");
   }
   const startup = await prisma.startup.update({ where: { domain }, data });

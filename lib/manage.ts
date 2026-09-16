@@ -25,6 +25,13 @@
  *   doc/PROD-READINESS-CHECKLIST.md l.16 the preview class may point at the
  *   production database — so the "dev convenience" handed out working tokens
  *   for real listings.
+ * - R14-7: that development check is now one of two gates. `getAppEnv()` is a
+ *   classification, and a classification can be wrong (an env var set on the
+ *   wrong project, a future precedence change); DEV_MANAGE_TOKENS=1 is a
+ *   deliberate act by the person running the process. Both must hold, and a
+ *   deployment the Vercel project never sets that variable on cannot hand a
+ *   capability to a caller however the env is classified. The field is named
+ *   `__devToken` so a response dump cannot read like a shipped feature.
  */
 import { createHash, randomBytes } from "crypto";
 import { prisma } from "./prisma";
@@ -45,10 +52,20 @@ export function normalizeEmail(raw: string): string | null {
   return email;
 }
 
+/**
+ * R14-7. Two independent gates, both required: the app env is `development`
+ * (which already excludes a preview deployment and any production build) *and*
+ * the operator asked for the token. Neither gate alone is a decision anyone
+ * should have to get right twice — see the module docblock.
+ */
+export function devManageTokenEnabled(): boolean {
+  return getAppEnv() === "development" && process.env.DEV_MANAGE_TOKENS === "1";
+}
+
 export async function requestManageToken(params: {
   domain: string;
   email: string;
-}): Promise<{ sent: true; debugToken?: string }> {
+}): Promise<{ sent: true; __devToken?: string }> {
   const domain = params.domain.trim().toLowerCase();
   const email = normalizeEmail(params.email);
   if (!email) return { sent: true }; // no oracle: same shape for bad input
@@ -78,8 +95,8 @@ export async function requestManageToken(params: {
     // "Ownership". Production deliberately drops the link instead of
     // half-delivering it; the token simply expires unused. Development still
     // returns the raw token so the token/session logic stays testable — and only
-    // development, since that is the one env whose database is a local one.
-    if (getAppEnv() === "development") return { sent: true, debugToken: raw };
+    // development, and only when DEV_MANAGE_TOKENS=1 (R14-7).
+    if (devManageTokenEnabled()) return { sent: true, __devToken: raw };
     // TODO(v2): ship the management pages, then enqueue the link via OutboxEvent.
     console.warn(`manage link requested for ${domain}, but listing management is not shipped (v1); link not sent`);
     return { sent: true };

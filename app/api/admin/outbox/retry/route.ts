@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { adminGate } from "@/lib/jobs";
 import { apiJson, apiError, apiRoute } from "@/lib/route";
+import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
@@ -31,11 +32,16 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
  * RESEND_API_KEY and nothing reached the buyer. The refusal therefore names what
  * the register saw for the key (`delivery`), because the queue alone cannot: both
  * rows are completed with zero attempts.
+ *
+ * R14-9: the reset is audited (`OUTBOX_RETRY`), with the operator's name when the
+ * body carries one. A retry is the one privileged action here whose effect is
+ * that mail goes out, so a leaked ADMIN_TOKEN used to resend receipts must not be
+ * the one operator action with no row in the trail.
  */
 async function retryOutbox(req: NextRequest) {
   const denied = await adminGate(req, "admin/outbox/retry");
   if (denied) return denied;
-  let body: { dedupeKey?: string };
+  let body: { dedupeKey?: string; operator?: string };
   try {
     body = await req.json();
   } catch {
@@ -43,6 +49,8 @@ async function retryOutbox(req: NextRequest) {
   }
   if (!body.dedupeKey)
     return apiError("dedupeKey is required.", { status: 400 });
+
+  const operator = typeof body.operator === "string" ? body.operator.slice(0, 120) : "operator";
   const row = await prisma.outboxEvent.findUnique({
     where: { dedupeKey: body.dedupeKey },
   });
@@ -94,6 +102,14 @@ async function retryOutbox(req: NextRequest) {
       // completedAt set would make the worker skip it (processOutboxRowById).
       ...(row.completedAt ? { completedAt: null } : {}),
     },
+  });
+  // R14-9: written after the reset, so the row records a retry that happened.
+  // The key leads the detail because it is what an operator greps for.
+  await audit({
+    action: "OUTBOX_RETRY",
+    actorType: "operator",
+    actorRef: operator,
+    detail: `${reset.dedupeKey} ${reset.type}${row.completedAt ? " (completed row revived)" : ""}`.slice(0, 300),
   });
   return apiJson({ ok: true, dedupeKey: reset.dedupeKey, type: reset.type });
 }

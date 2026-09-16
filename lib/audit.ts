@@ -46,7 +46,13 @@ export type AuditAction =
    *  the record; `detail` carries per-scope counts only, never the address or
    *  the hashed IP that was erased, or the erasure would recreate the data it
    *  removes. */
-  | "SUBJECT_ERASED";
+  | "SUBJECT_ERASED"
+  /** R14-9: an operator reset a terminally-failed outbox delivery so the next
+   *  worker pass resends it. `actorRef` is the operator name (or "operator"
+   *  when the caller sent none) and `detail` carries the dedupe key with the
+   *  event type, because this route is the one privileged action whose effect
+   *  is to make mail go out — it must not be the one that leaves no trace. */
+  | "OUTBOX_RETRY";
 
 export async function audit(
   entry: {

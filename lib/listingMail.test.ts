@@ -1,5 +1,6 @@
-/* R10-3 (the subject states the rank the stake actually got) and R10-9's
- * listing half (every field these templates print is escaped).
+/* R10-3 (the subject states the rank the stake actually got), R10-9's listing
+ * half (every field these templates print is escaped), and R14-4 (the subject
+ * slot is plain text, stated so it is not "finished" by escaping it).
  *
  * Template-level facts, so no database and no route: `report`/`waitlist`
  * escaping is covered beside its senders in intakeMail.test.ts, and this is
@@ -10,8 +11,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { receiptHtml, receiptSubject } from "@/emails/receipt";
-import { outbidHtml } from "@/emails/outbid";
-import { refundHtml } from "@/emails/refund";
+import { outbidHtml, outbidSubject } from "@/emails/outbid";
+import { refundHtml, refundSubject } from "@/emails/refund";
+import { reportSubject } from "@/emails/report";
+import { waitlistSubject } from "@/emails/waitlist";
 
 const HOSTILE = "<img src=x onerror=alert(1)>";
 const ESCAPED = "&lt;img src=x onerror=alert(1)&gt;";
@@ -87,5 +90,22 @@ describe("the listing templates escape what they print (R10-9)", () => {
     }
     // The reference is the buyer's quote to their bank, printed as text.
     expect(refund).toContain(`reference ${ESCAPED}`);
+  });
+});
+
+describe("the subject slot is a plain-text channel, not an HTML one (R14-4)", () => {
+  it("passes values through verbatim instead of entity-encoding them", () => {
+    // The R14-4 fix states this explicitly so nobody "finishes" it by wrapping
+    // the subject builders in esc(): a mailbox renders entities literally, so
+    // escaping here would show `a&amp;b.com` in the inbox. What makes that safe
+    // is the charset of every value a subject can carry — an element constant,
+    // or a hostname from `new URL().hostname` / the domain regex.
+    expect(reportSubject({ domain: "a&b.com" })).toBe("[report] a&b.com");
+    expect(receiptSubject({ elementSymbol: "C", elementName: "Carbon", rank: 1 })).toBe(
+      "You're #1 in C (Carbon) 🎉"
+    );
+    expect(outbidSubject({ elementSymbol: "C" })).toBe("You were knocked off C 👑");
+    expect(refundSubject({ elementSymbol: "C", amountUsd: 5 })).toBe("Refunded: your $5 stake on C");
+    expect(waitlistSubject()).toBe("You're on the waitlist");
   });
 });

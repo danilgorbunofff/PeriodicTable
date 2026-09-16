@@ -101,6 +101,32 @@ describe("unsubscribe route (RFC 8058, address-scoped)", () => {
     expect(await res.text()).toContain("Link expired");
   });
 
+  it("the HTML confirm page carries its own CSP and never reflects a crafted token (R14-6)", async () => {
+    if (!hasDb) return;
+    const crafted = await unsubGET(
+      req(`/api/unsubscribe?token=${token}%22%3E%3Cscript%3Ealert(1)%3C/script%3E`)
+    );
+    const csp = crafted.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("default-src 'none'");
+    // No script-src at all, not even 'self': the page runs no script.
+    expect(csp).not.toContain("script-src");
+    expect(csp).toContain("form-action 'self'");
+    const html = await crafted.text();
+    // Only a token we minted resolves, and a token with a payload appended does
+    // not, so the crafted value never reaches the document at all: the page is
+    // the same dead link an unknown token gets, and nothing of the payload —
+    // not even the script tag — is reflected as markup. The whitelist and the
+    // escape are the second lock behind that lookup; the byte-identical
+    // reflection of a *live* token is pinned by the test above.
+    expect(html).toContain("Link expired");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("alert(1)");
+
+    // The resolved-token page is the same document, so it carries the same policy.
+    const real = await unsubGET(req(`/api/unsubscribe?token=${token}`));
+    expect(real.headers.get("content-security-policy")).toBe(csp);
+  });
+
   it("the confirm-page POST takes the token from the body and stops mail at the address", async () => {
     if (!hasDb) return;
     const res = await formPost(`token=${token}&action=unsubscribe`);

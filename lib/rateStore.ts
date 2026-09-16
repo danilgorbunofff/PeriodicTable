@@ -6,9 +6,12 @@
  * - `rateLimitAsync()` uses shared atomic storage when Upstash is configured
  *   (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN) and the same memory
  *   store otherwise. All request routes use the async variant.
- * - The shared store fails OPEN (allows the request, logs once): abuse
- *   controls must degrade, never 500 traffic. Production without Upstash
- *   logs a loud warning at first use.
+ * - The shared store fails OPEN by default (allows the request, logs the
+ *   error): abuse controls must degrade, never 500 traffic. Production without
+ *   Upstash logs a loud warning at first use.
+ * - R14-2: the callers that stand in front of outbound mail or of money pass
+ *   `onStoreError: "closed"` — see rateLimitAsync() below for why that is a
+ *   deliberate split rather than a global inversion.
  */
 import { rateLimit as syncBucket } from "./rateLimit";
 
@@ -85,13 +88,63 @@ export function setSharedRateLimitStore(store: RateLimitStore | null): void {
   warnedNoUpstash = false;
 }
 
-/** Async fixed-window check: true when under the limit. Fails open on store errors. */
-export async function rateLimitAsync(key: string, limit: number, windowMs: number): Promise<boolean> {
+/** How a limiter treats an unusable store: `open` lets the request through,
+ *  `closed` refuses it. */
+export type StoreErrorPolicy = "open" | "closed";
+
+/** R14-2: store failures are counted, and the count is what the log says. Before
+ *  this the only trace of an outage was one console.error per request carrying
+ *  the raw driver error — indistinguishable in a log stream from a single bad
+ *  request, and silent about the fact that every limiter in the app had stopped
+ *  working. Per process, because an outage is per process. */
+const STORE_FAILURE_WINDOW_MS = 3_600_000;
+let storeFailureWindow = 0;
+let storeFailureCount = 0;
+
+function noteStoreFailure(): number {
+  const window = Math.floor(Date.now() / STORE_FAILURE_WINDOW_MS);
+  if (window !== storeFailureWindow) {
+    storeFailureWindow = window;
+    storeFailureCount = 0;
+  }
+  storeFailureCount += 1;
+  return storeFailureCount;
+}
+
+/**
+ * Async fixed-window check: true when under the limit.
+ *
+ * A store error is fail-OPEN by default: an Upstash outage must not 500 the
+ * site, and most callers are plain abuse controls whose absence is a
+ * degradation (doc 20 §R20-8 accepts exactly that for the public surface).
+ *
+ * Outbound mail and money are the exception (R14-2). `/api/waitlist`,
+ * `/api/checkout`, `/api/report` and the Resend webhook pass
+ * `onStoreError: "closed"`, because each of them *sends something* (mail, a
+ * provider session, a webhook-driven suppression) on the strength of the
+ * limiter: an outage that silently lifts their cap turns a capacity control into
+ * an open relay. Their honest answer during an outage is a retryable 429 — the
+ * caller loses a request, nobody loses money — and the failure is loud in the
+ * log with its running count, so an outage cannot look like calm.
+ */
+export async function rateLimitAsync(
+  key: string,
+  limit: number,
+  windowMs: number,
+  opts: { onStoreError?: StoreErrorPolicy } = {}
+): Promise<boolean> {
   try {
     return (await sharedRateLimitStore().incr(key, windowMs)) <= limit;
   } catch (e) {
-    console.error("rate-limit store failed open:", e);
-    return true;
+    const failures = noteStoreFailure();
+    const policy = opts.onStoreError ?? "open";
+    // Only the key's prefix is logged: the rest is a credential hash or an
+    // address, and neither belongs in a log line.
+    console.error(
+      `rate-limit: store failed ${failures}x this hour — failing ${policy} for "${key.split(":")[0]}"`,
+      e
+    );
+    return policy === "open";
   }
 }
 

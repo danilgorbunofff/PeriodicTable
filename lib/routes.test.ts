@@ -284,7 +284,10 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     checkoutPOST(
       req("/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "cf-connecting-ip": ip },
+        // `cf-ray` is the proof that `cf-connecting-ip` was written by the edge
+        // and not by the caller (R14-2): without it the hop is ignored and every
+        // probe here would share the header-less `0.0.0.0` bucket.
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": ip, "cf-ray": `${ip}-probe` },
         body: JSON.stringify({
           elementSym: sym,
           amountUsd,

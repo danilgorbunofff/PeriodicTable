@@ -205,8 +205,10 @@ export const isReportStatus = (v: unknown): v is ReportStatus =>
 /** Waitlist POST response. */
 export type WaitlistResponse = { ok: true; id: string };
 
-/** Management link request/verify/session responses. */
-export type ManageResponse = { ok: true; note: string; debugToken?: string } | { ok: true; domain: string };
+/** Management link request/verify/session responses.
+ *  `__devToken` is the development-only raw token (R14-7): a doubled underscore
+ *  so the shape cannot be mistaken for a shipped feature in a response dump. */
+export type ManageResponse = { ok: true; note: string; __devToken?: string } | { ok: true; domain: string };
 
 // ---------- shape guards (fetchJson validation) ----------
 

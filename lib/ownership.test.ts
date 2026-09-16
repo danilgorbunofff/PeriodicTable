@@ -115,6 +115,39 @@ describe("validateProfileInput", () => {
     });
     expect(badLogo.ok).toBe(false);
   });
+  it("returns the normalised logo URL so the caller stores the checked value (R14-5)", () => {
+    const r = validateProfileInput({
+      url: "https://newstartup.dev",
+      title: "New name",
+      pitch: "New pitch that is long enough",
+      logoUrl: "  HTTPS://NewStartup.DEV/logo.png  ",
+    });
+    expect(r.ok && r.logoUrl).toBe("https://newstartup.dev/logo.png");
+
+    // Absent and empty both mean "no logo was sent", never "a logo called ''".
+    for (const logoUrl of [undefined, ""]) {
+      const none = validateProfileInput({
+        url: "https://newstartup.dev",
+        title: "New name",
+        pitch: "New pitch that is long enough",
+        logoUrl,
+      });
+      expect(none.ok && none.logoUrl).toBeNull();
+    }
+  });
+  it("refuses logo URLs that cannot be stored as one (R14-5)", () => {
+    const base = { url: "https://newstartup.dev", title: "New name", pitch: "New pitch that is long enough" };
+    for (const logoUrl of [
+      "https://user:pw@newstartup.dev/logo.png", // credentials in a public payload
+      "https://newstartup.dev/logo.png\nX-Injected: 1", // control characters
+      `https://newstartup.dev/${"a".repeat(2100)}`, // unbounded length
+      "https://127.0.0.1/logo.png", // not a public host
+    ]) {
+      const r = validateProfileInput({ ...base, logoUrl });
+      expect(r.ok, logoUrl).toBe(false);
+      expect(!r.ok && r.field).toBe("logoUrl");
+    }
+  });
   it("existing profiles cannot be retargeted via checkout fields (static contract)", () => {
     const src = readFileSync(join(__dirname, "..", "app", "api", "checkout", "route.ts"), "utf8");
     // No startup.update/upsert path may remain in the checkout route.

@@ -21,6 +21,7 @@ import { withTxnRetry, MONEY_TX } from "@/lib/txn";
 import { audit } from "@/lib/audit";
 import { joinSpace } from "@/lib/stakeQuote";
 import { apiRoute } from "@/lib/route";
+import { checkMoneyPath } from "@/lib/moneyPath";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +153,10 @@ async function idempotentReplay(
 // rather than per request: the environment cannot change while this instance
 // lives, so a second line would only repeat the first.
 let partialConfigLogged = false;
+// Same once-per-process shape for the R14-1(b) refusal: the verdict cannot change
+// while the instance lives, and a per-request line is what the log becomes when
+// someone points a load test at a shop that is up but unserviceable.
+let prodConfigRefusedLogged = false;
 
 async function postCheckout(req: NextRequest) {
   // R07-5: this warning used to sit *below* the paused guard, so the environment
@@ -169,6 +174,25 @@ async function postCheckout(req: NextRequest) {
         (paymentsLiveServer()
           ? "falling back to the dev simulator (permitted outside production only)"
           : "payments are paused, and the simulator is unavailable on this deployment")
+    );
+  }
+  // R14-1(b): a shop that intends to charge must be able to service the charge
+  // (lib/moneyPath.ts). 503 rather than the paused 403 — the deployment wants
+  // money, so a retry is the right answer for the buyer and the log line is the
+  // operator's signal.
+  const money = checkMoneyPath();
+  if (!money.ok) {
+    if (!prodConfigRefusedLogged) {
+      prodConfigRefusedLogged = true;
+      console.error(
+        "checkout: PAYMENTS_LIVE is set but the production configuration is incomplete — " +
+          `refusing new payments (${money.required.length} required); ` +
+          `GET /api/jobs/config lists them for an authenticated caller:\n- ${money.required.join("\n- ")}`
+      );
+    }
+    return NextResponse.json(
+      { error: "Checkout is temporarily unavailable. Try again shortly." },
+      { status: 503 }
     );
   }
   if (!paymentsLiveServer()) {
@@ -242,7 +266,15 @@ async function postCheckout(req: NextRequest) {
   // Abuse: 5 NEW checkout attempts / IP / hour (spec 03). 429, never 500. The
   // bot gates and the pure shape checks run first, so the throttle sits in
   // front of every row-creating path and behind none that only reads.
-  if (!(await rateLimitAsync(`checkout:${ip}`, 5, 3_600_000))) {
+  //
+  // Phase 14: fails CLOSED on a rate-store outage (R14-2). This is the money
+  // path — an outage that silently lifts the only per-source bound on
+  // row-creating requests is a worse answer than a retryable 429.
+  if (
+    !(await rateLimitAsync(`checkout:${ip}`, 5, 3_600_000, {
+      onStoreError: "closed",
+    }))
+  ) {
     return NextResponse.json({ error: "Too many checkout attempts. Try again later." }, { status: 429 });
   }
 

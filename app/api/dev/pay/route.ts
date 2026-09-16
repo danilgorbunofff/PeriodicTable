@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { apiRoute, apiError } from "@/lib/route";
+import { getAppEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postDevPay });
@@ -14,17 +15,25 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postD
  * Dev-only payment simulator (Phase 2: same settle service as production).
  *
  * This route invents a paid `Payment`, so it is the most dangerous endpoint in
- * the app and its gate is the deployment, not the provider mode: the mode is
+ * the app and its first gate is the deployment, not the provider mode: the mode is
  * derived from credential presence alone, so a production box whose
  * STRIPE_WEBHOOK_SECRET was missing read as 'dev' and this route granted stakes
  * for free to anyone holding a paymentId (R07-1). A paymentId is not a secret —
  * it is in the /pay/<id> URL — so that gate was the only thing in the way.
  *
  * Gates, in order, cheapest and least dependent first:
- *   1. devSimulatorEnabled() — false in production and false whenever Stripe
- *      credentials are configured, so production can never mint a stake here.
- *      Checked before the body is parsed and before the database is touched,
- *      so a refused request costs nothing and reveals nothing.
+ *   0. the app environment (R14-1) — `404` on any production process, before the
+ *      flag is consulted. R07-2's devSimulatorEnabled() already requires a
+ *      development|test environment, so the two agree today, and the second gate
+ *      is the point: a *flag* is a variable an operator can set back, "this is
+ *      production" is not. It answers 404 rather than 403 because on a production
+ *      deployment the route does not exist, and a 403 only tells a prober that a
+ *      simulator sits one environment variable away. Same idiom as
+ *      app/api/emails/preview/route.ts:40.
+ *   1. devSimulatorEnabled() — false whenever Stripe credentials are configured,
+ *      so a configured production box cannot mint a stake here either. Checked
+ *      before the body is parsed and before the database is touched, so a
+ *      refused request costs nothing and reveals nothing.
  *   2. the per-IP budget (R11-4) — the simulator settles a payment per call and
  *      had no limiter at all, in the one mode where the provider gate is also
  *      the fallback (see the paragraph above).
@@ -33,6 +42,9 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postD
  *      Stripe migration cannot be settled through a simulator (R07-6).
  */
 async function postDevPay(req: NextRequest) {
+  if (getAppEnv() === "production") {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
   if (!devSimulatorEnabled()) {
     return NextResponse.json({ error: "Simulator disabled on this deployment." }, { status: 403 });
   }

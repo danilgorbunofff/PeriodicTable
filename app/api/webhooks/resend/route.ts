@@ -66,6 +66,14 @@ function recipientOf(data: ResendPayload["data"]): string | null {
  */
 async function postResendWebhook(req: NextRequest) {
   const ip = clientIp(req.headers);
+  // Fail OPEN, deliberately (R14-2). The other mail and money routes (waitlist,
+  // report, checkout) fail closed on a rate-store outage; this one must not. Its
+  // own contract — below — is that a 4xx/5xx is "we failed", which the provider
+  // answers by retrying a delivery we would fail again and, eventually, by
+  // disabling the endpoint: the suppression decisions this route records (bounces,
+  // complaints) would be lost for good, which is worse than serving an
+  // unauthenticated flood that is signature-checked before it touches the database
+  // and can change nothing without a valid signature.
   if (!(await rateLimitAsync(`resend:${ip}`, 120, 60_000))) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   }

@@ -8,7 +8,8 @@
  *
  * Delivery itself is covered by the DB-gated suites; these are the template
  * and static-wiring halves. The recipient split matters: the report notice goes
- * to us, the waitlist confirmation goes to the address that asked for it.
+ * to us, the waitlist confirmation goes to the address that asked for it —
+ * and since R14-3 it goes there once per address, under a per-source ceiling.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -130,9 +131,30 @@ describe("R05-7 route wiring", () => {
     }
   });
 
-  it("dedupes per entity, and per hour for a re-submitted address", () => {
+  it("dedupes per entity, and per hashed address per day", () => {
     expect(reportRoute).toMatch(/dedupeKey: `report-mail:\$\{report\.id\}`/);
-    expect(waitlistRoute).toMatch(/dedupeKey: `waitlist-mail:\$\{entry\.email\}:/);
+    // R14-3: the key carries a salted reference rather than the address (the
+    // queue is read by the cron and by operators), and is bucketed by day so two
+    // instances racing the same join enqueue one row, not one per day of history.
+    expect(waitlistRoute).toMatch(
+      /dedupeKey: `waitlist-mail:\$\{addressRef\(entry\.email\)\}:\$\{Math\.floor\(Date\.now\(\) \/ WAITLIST_RECIPIENT_WINDOW_MS\)\}`/,
+    );
+  });
+
+  it("mails only a first-time address, and caps new recipients per source (R14-3)", () => {
+    // The mail is what the caller was previously able to direct at will: the
+    // route handed their string to the provider, so one POST was an anonymous
+    // relay into any inbox, sent from the domain that carries receipts.
+    expect(waitlistRoute).toMatch(/const known = await prisma\.waitlistEntry\.findUnique/);
+    expect(waitlistRoute).toMatch(/if \(!suppressed && !known\) await confirmWaitlist\(/);
+    // The ceiling on distinct new recipients per source per day, counted on the
+    // shared store and fail-closed: an unusable store must not lift the cap on
+    // outbound mail the way it lifts a traffic limit.
+    expect(waitlistRoute).toMatch(/const WAITLIST_NEW_RECIPIENTS = 5;/);
+    expect(waitlistRoute).toMatch(
+      /rateLimitAsync\(\s*`waitlist-new:\$\{entry\.ip\}`,\s*WAITLIST_NEW_RECIPIENTS,\s*WAITLIST_RECIPIENT_WINDOW_MS,\s*\{ onStoreError: "closed" \}/,
+    );
+    expect(waitlistRoute).toMatch(/rateLimitAsync\(`waitlist:\$\{ip\}`, 10, 3_600_000, \{\s*onStoreError: "closed"/);
   });
 
   it("the worker knows both types", () => {

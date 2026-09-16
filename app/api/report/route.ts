@@ -16,10 +16,18 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postR
  * envelope (R11-5) — it used to answer 200 `{ok:true, note:"rate-limited"}`,
  * which is a success to every `res.ok` check on the client and to any uptime
  * probe counting 2xx, so a throttled report looked like a filed one.
+ *
+ * Phase 14: the check fails CLOSED on a rate-store outage (R14-2). This route
+ * sends mail to the abuse inbox, so an outage that silently lifts the cap turns
+ * it into an open relay for it; a retryable 429 costs the reporter a click.
  */
 async function postReport(req: NextRequest) {
   const ip = clientIp(req.headers);
-  if (!(await rateLimitAsync(`report:${ip}`, 10, 3_600_000))) {
+  if (
+    !(await rateLimitAsync(`report:${ip}`, 10, 3_600_000, {
+      onStoreError: "closed",
+    }))
+  ) {
     return apiError("Too many requests. Try again later.", { status: 429, code: "RATE_LIMITED" });
   }
   let body: { stakeId?: string; domain?: string; reason?: string };

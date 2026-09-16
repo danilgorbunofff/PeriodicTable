@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { resolveUnsubTarget, suppressionFor, suppressEmail, unsuppressEmail } from "@/lib/email";
+import { esc } from "@/emails/escape";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,9 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: confir
  *   `List-Unsubscribe` headers in lib/email.ts) get the same treatment.
  * - Tokens issued before this fix were the listing's (`Startup.unsubToken`) and
  *   still resolve, so the unsubscribe link in an old inbox keeps working.
+ * - The confirm page is the only HTML document this API serves, and it reflects
+ *   the token, so it declares its own `Content-Security-Policy` and escapes the
+ *   reflected value on top of the character whitelist (R14-6).
  */
 
 type Standing = { email: string; suppressed: boolean; listing: string | null };
@@ -57,12 +61,35 @@ async function standing(token: string): Promise<Standing | null> {
   return { email, suppressed: (await suppressionFor(email)) !== null, listing: startup?.domain ?? null };
 }
 
+/** R14-6: this is the only HTML document the API surface serves, and it is
+ * built by string concatenation around a caller-supplied token. The site-wide
+ * policy in next.config.mjs allows inline script; a policy declared here is
+ * enforced *in addition* to that one (a browser requires every delivered policy
+ * to pass), so this response refuses scripts, frames, images, connections,
+ * fonts and objects outright.
+ *
+ * `default-src 'none'` alone would also refuse the inline `style=` attributes
+ * the page is laid out with — `style-src-attr` falls back through `style-src`
+ * to `default-src` — so CSS keeps the one allowance it has site-wide, and
+ * `form-action 'self'` keeps the confirm POST it posts back to. */
+const UNSUB_CSP = [
+  "default-src 'none'",
+  "style-src 'unsafe-inline'",
+  "base-uri 'none'",
+  "form-action 'self'",
+].join("; ");
+
 function page(body: string): NextResponse {
   return new NextResponse(
     `<!doctype html><html><body style="margin:0;background:#f4f4f0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
 <div style="max-width:440px;margin:60px auto;padding:28px;background:#fff;border-radius:20px;border:1px solid #eee;text-align:center;">
 ${body}</div></body></html>`,
-    { headers: { "Content-Type": "text/html; charset=utf-8" } }
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy": UNSUB_CSP,
+      },
+    }
   );
 }
 
@@ -74,9 +101,11 @@ function button(action: string, label: string, primary: boolean): string {
 
 async function confirmUnsubscribe(req: NextRequest) {
   const raw = req.nextUrl.searchParams.get("token") ?? "";
-  // The token is a cuid we minted; anything else cannot resolve, so sanitizing
-  // the hidden field only keeps a crafted value from breaking the markup.
-  const field = raw.replace(/[^A-Za-z0-9_-]/g, "");
+  // The token is a cuid we minted, so the whitelist is what makes the reflected
+  // value safe; esc() after it is the second lock R14-6 asks for. It cannot
+  // alter a value that survived the whitelist, so the token the confirm form
+  // posts back is byte-identical to the one in the link that opened it.
+  const field = esc(raw.replace(/[^A-Za-z0-9_-]/g, ""));
   const current = await standing(raw);
 
   if (!current) {

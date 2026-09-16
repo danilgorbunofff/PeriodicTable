@@ -24,10 +24,22 @@
  * by calls that were allowed, not by the refusals a prober generates. Refusals
  * from here also carry the shared {error, code} envelope and a request id
  * (R11-3) — they were the only 401/403s in the app that did not.
+ *
+ * Phase 14 finished the job (R14-2, R14-8, R14-10):
+ * - `?secret=` no longer names the caller budget: a query string is the one part
+ *   of a URL that is guaranteed to end up in access logs, browser history and
+ *   Referer headers, and it never authenticated anything (R14-8). Only the
+ *   bearer header and a body secret count, and the body form is on its way out
+ *   with the deployment that still uses it.
+ * - Refusals are metered per source address and logged (R14-10). Formerly a
+ *   hundred wrong tokens produced a hundred answers and no evidence at all.
+ * - The refusal path fails CLOSED on a rate-store outage, because the caller was
+ *   already being refused (R14-2).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
 import { isLocalDatabase, isProduction } from "./env";
+import { clientIp } from "./ip";
 import { rateLimitAsync } from "./rateStore";
 import { apiError } from "./route";
 
@@ -98,6 +110,14 @@ export const ADMIN_WINDOW_MS = 60_000;
  * credential is hashed rather than stored — a Redis key is a log line on a
  * platform we do not own, and the token is the thing that must not appear in
  * one. The route is in the key so a busy endpoint cannot exhaust the others.
+ *
+ * R14-8 removed the `?secret=` term that used to sit between the two: it never
+ * authenticated anything (jobAuth reads the header and the body only), and the
+ * only thing it did was copy a secret out of the request body and into the
+ * budget key — which meant a caller could spend a fresh budget by inventing a
+ * new secret per request, and that a real secret could be pasted into a URL
+ * without complaint. Bearer, then a body secret, then the shared
+ * "unauthenticated" bucket that the local-rehearsal arm runs in.
  */
 function callerKey(
   prefix: string,
@@ -107,11 +127,7 @@ function callerKey(
 ): string {
   const bearer =
     req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
-  const credential =
-    bearer ??
-    extra ??
-    req.nextUrl.searchParams.get("secret") ??
-    "unauthenticated";
+  const credential = bearer ?? extra ?? "unauthenticated";
   const digest = createHash("sha256")
     .update(`${credential}:${process.env.CLICK_SALT ?? "ptl-dev-salt"}`)
     .digest("hex")
@@ -139,29 +155,130 @@ async function throttle(
   });
 }
 
+/* ------------------------------------------------------------------ *
+ * Refusal metering and reporting (Phase 14, R14-2 / R14-10)
+ * ------------------------------------------------------------------ */
+
+/**
+ * How many refusals one address may generate per route per hour before the gate
+ * stops answering them, and how many make the log call that rate anomalous.
+ *
+ * Sizing: an operator mistyping a token a few times, or a browser retrying a
+ * stale one, stays an order of magnitude below sixty. The review's reproduction
+ * — a hundred consecutive wrong tokens — crosses it in the first minute.
+ */
+export const AUTH_REJECTION_LIMIT = 60;
+export const AUTH_REJECTION_WINDOW_MS = 60 * 60_000;
+const AUTH_REJECTION_ALERT = 20;
+
+type CredentialShape = "bearer token" | "body secret" | "no credential";
+
+/** Per-process refusal counters, for the log line only — the limiter itself is
+ *  the shared store. Bounded: an attacker arriving from many addresses must not
+ *  be able to grow a map in the process that is answering them. */
+const refusalCounters = new Map<string, { window: number; count: number }>();
+
+function noteRefusal(
+  route: string,
+  shape: CredentialShape,
+  ip: string,
+  status: number,
+): void {
+  const window = Math.floor(Date.now() / AUTH_REJECTION_WINDOW_MS);
+  const key = `${route}:${ip}`;
+  const seen = refusalCounters.get(key);
+  const count = seen && seen.window === window ? seen.count + 1 : 1;
+  if (refusalCounters.size > 5_000) refusalCounters.clear();
+  refusalCounters.set(key, { window, count });
+  // The shape is logged, never the value: a prober with no header at all is a
+  // different event from one guessing tokens, and a log must not become the
+  // place a leaked secret is legible. Past the alert threshold the line is
+  // escalated once per AUTH_REJECTION_ALERT refusals instead of every time.
+  const line =
+    `auth: refused (${shape}, ${status}) on /api/${route} from ${ip} — ` +
+    `${count} this hour`;
+  if (count % AUTH_REJECTION_ALERT === 0) {
+    console.error(`${line} (a rate no operator reaches by hand)`);
+  } else {
+    console.warn(line);
+  }
+}
+
+/** Which kind of credential a request presented — never its value. */
+function credentialShape(
+  req: NextRequest,
+  bodySecret?: string | null,
+): CredentialShape {
+  if (req.headers.get("authorization")) return "bearer token";
+  return bodySecret ? "body secret" : "no credential";
+}
+
+/**
+ * Records one refusal and answers it, or answers 429 once this address has spent
+ * the hour's refusal allowance on this route.
+ *
+ * The refusal budget is deliberately NOT the caller budget above. That one is
+ * keyed on the credential and exists to bound legitimate work, so it cannot bill
+ * a prober — every wrong token would land in the same "unauthenticated" bucket
+ * and the operator's own calls would be throttled along with the attack. This
+ * budget is keyed on the source address, which is the only identity a refusal
+ * has. 429 is also the one answer here that confirms nothing: it does not say
+ * whether the guess was close.
+ *
+ * Called from the gates rather than from `jobAuth`/`adminAuth`, so the 401/403
+ * envelopes keep their single definition and the credential check stays a pure
+ * function with no store dependency.
+ */
+async function refuse(
+  req: NextRequest,
+  route: string,
+  shape: CredentialShape,
+  denied: NextResponse,
+): Promise<NextResponse> {
+  const ip = clientIp(req.headers);
+  noteRefusal(route, shape, ip, denied.status);
+  // Fail CLOSED on a store outage: the caller was refused anyway, so the only
+  // question is whether the answer says 401/403 or 429. Refusing keeps the cost
+  // of guessing nonzero while the store is unavailable.
+  const under = await rateLimitAsync(
+    `authdenied:${route}:${ip}`,
+    AUTH_REJECTION_LIMIT,
+    AUTH_REJECTION_WINDOW_MS,
+    { onStoreError: "closed" },
+  );
+  if (under) return denied;
+  return apiError("Too many requests. Try again later.", {
+    status: 429,
+    code: "RATE_LIMITED",
+  });
+}
+
 /**
  * The operator gate: auth, then metering. Every `/api/admin/**` handler starts
  * with this (`route` is the path under `/api/`, e.g. `"admin/reports"`), which
  * is what `lib/contracts.test.ts` asserts — a route that calls `adminAuth()`
- * directly is unmetered and fails the suite.
+ * directly is unmetered and fails the suite. A refusal is logged and billed to
+ * the source address (R14-10, R14-2).
  */
 export async function adminGate(
   req: NextRequest,
   route: string,
 ): Promise<NextResponse | null> {
   const denied = adminAuth(req);
-  if (denied) return denied;
+  if (denied) return refuse(req, route, credentialShape(req), denied);
   return throttle("admin", route, req, ADMIN_LIMIT, ADMIN_WINDOW_MS, null);
 }
 
-/** The job gate: `jobAuth` (Bearer, body or query secret) plus metering. */
+/** The job gate: `jobAuth` (Bearer header or body secret — the query form is
+ * gone, R14-8) plus metering, with refusals logged and billed to the source
+ * address (R14-10, R14-2). */
 export async function jobGate(
   req: NextRequest,
   route: string,
   bodySecret?: string | null,
 ): Promise<NextResponse | null> {
   const denied = jobAuth(req, bodySecret);
-  if (denied) return denied;
+  if (denied) return refuse(req, route, credentialShape(req, bodySecret), denied);
   return throttle(
     "job",
     route,

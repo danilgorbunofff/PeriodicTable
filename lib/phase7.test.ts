@@ -199,6 +199,41 @@ describe("the gates, statically (R07-1, R07-2, R07-6)", () => {
     expect(devPay).not.toMatch(/getProviderMode/);
   });
 
+  it("/api/dev/pay is not on a production deployment at all (R14-1)", () => {
+    // Gate 0, ahead of the flag: devSimulatorEnabled() already requires a
+    // development|test environment, and the review asked for the environment
+    // check to be its own gate anyway — a flag is a variable an operator can set
+    // back, "this is production" is not. 404, because on production the route
+    // does not exist, and a 403 would advertise one variable's distance from it.
+    expect(devPay).toMatch(/if \(getAppEnv\(\) === "production"\) \{/);
+    expect(devPay).toMatch(/status: 404/);
+    // The gate on the environment, not the flag — prose mentions both names, so
+    // anchor on the two conditions as they are actually written.
+    expect(devPay.indexOf('if (getAppEnv() === "production") {')).toBeLessThan(
+      devPay.indexOf("if (!devSimulatorEnabled()) {")
+    );
+    expect(devPay.indexOf('if (getAppEnv() === "production") {')).toBeLessThan(devPay.indexOf("await req.json()"));
+  });
+
+  it("checkout gates the sale on the whole production config, not just the Stripe pair (R14-1)", () => {
+    // A payment needs a receipt, a drain, and someone who can retry it; the
+    // Stripe pair is only the part that is visible from the outside.
+    expect(checkout).toMatch(/const money = checkMoneyPath\(\)/);
+    expect(checkout).toMatch(/if \(!money\.ok\) \{[\s\S]{0,900}status: 503/);
+    // Before the payment row is read, so a refused sale is refused without a
+    // query, and before the quote transaction, so no reservation is made for
+    // money that cannot be settled.
+    expect(checkout.indexOf("checkMoneyPath()")).toBeLessThan(
+      checkout.indexOf("prisma.payment.findUnique({ where: { idempotencyKey } })")
+    );
+    expect(checkout.indexOf("checkMoneyPath()")).toBeLessThan(checkout.indexOf("withTxnRetry(() =>"));
+    // Ahead of the paused guard, which is what makes 503 reachable: a shop with
+    // PAYMENTS_LIVE=true and a complete Stripe pair is `paymentsLiveServer()`, so
+    // without this ordering an unserviceable shop answered the paused 403 and
+    // promised a waitlist it does not want.
+    expect(checkout.indexOf("checkMoneyPath()")).toBeLessThan(checkout.indexOf("if (!paymentsLiveServer()) {"));
+  });
+
   it("the simulator page 404s on the same two conditions, then on the row's provider", () => {
     expect(payPage).toMatch(/if \(!devSimulatorEnabled\(\)\) notFound\(\)/);
     expect(payPage.indexOf("devSimulatorEnabled()")).toBeLessThan(payPage.indexOf("prisma.payment.findUnique"));

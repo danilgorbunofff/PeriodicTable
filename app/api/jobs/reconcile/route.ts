@@ -91,11 +91,10 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  * would be muted before the money case ever fired.
  */
 async function getReconcileStatus(req: NextRequest) {
-  const denied = await jobGate(
-    req,
-    "jobs/reconcile",
-    req.nextUrl.searchParams.get("secret"),
-  );
+  // No query secret (R14-8): the bearer header, and the body secret on POST, are
+  // the only credentials jobAuth reads. `?secret=` used to name the caller's
+  // budget as well, which let a caller invent a fresh budget per request.
+  const denied = await jobGate(req, "jobs/reconcile");
   if (denied) return denied;
 
   const paidRows = await prisma.payment.findMany({

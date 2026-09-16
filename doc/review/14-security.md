@@ -576,6 +576,211 @@ a numeric domain becomes `null`, which is exactly why the probe answered `{"ok":
 negative results are evidence too, and because it narrows the 500-class to one route: doc 11's R11-1
 (`/api/emails/preview` with an `outbid` template and a non-alphabetic symbol), cited here, not re-reported.
 
+### 5.16 Fix verification
+
+**2026-09-16, this worktree, after the §11 fix pass.** Like the `08`–`13` passes this one ran against a real
+Postgres — the same `postgres:16-alpine` container (`ptl-fix08-pg`, `127.0.0.1:55433`) with all **eleven**
+migrations `0000`–`0010` applied — so every DB-gated suite this doc's evidence came from executed rather than
+skipping. What the pass could not reach is unchanged from §5: no Vercel token, no production `CRON_SECRET`,
+no Neon credential, and **no request to the domain from the fixed build** — the pack is not deployed, so every
+live figure in §5.1–§5.15 is still the *pre-fix* one, and nothing below is a statement about
+`www.periodictable.lol`. U14-1…U14-8 all stand.
+
+```
+TEST_DATABASE_URL=… npm run test:ci              → 53 files passed (53); 791 passed, 0 skipped (791)
+npx vitest run            (no database at all)   → 46 passed | 7 skipped (53); 662 passed | 129 skipped (791)
+npx tsc --noEmit                                 → clean
+npx eslint lib app emails scripts                → clean (exit 0, no warnings)
+npx prisma format --check                        → All files are formatted correctly!
+npx prisma validate                              → the schema at prisma/schema.prisma is valid
+npm run audit:prod                               → clean (no unaccepted high/critical runtime advisories)
+VERCEL_ENV=production NODE_ENV=production node scripts/check-prod-env.mjs
+    without secrets                              → "Missing production configuration:" + the same 10 required lines, exit 1
+    with the full set                            → "check-prod-env: production config OK.", exit 0
+```
+
+Both test runs report the same 791, which is what makes the DB-less figure usable: the difference is entirely
+the **7** files that skip without a database (129 of 791 tests), not a quietly smaller suite. The pass moved
+the count from `13`'s **768 → 791 (+23)**, and the movement is nameable: `lib/moneyPath.test.ts` (**new**, 7
+— the deployment truth table), `lib/ops.test.ts` 21 → 26 (the rewritten trust order, the two store policies,
+the refusal meter and its escalation line), `lib/manage.test.ts` 7 → 10 (the rule itself plus two arms pinned
+at the HTTP boundary), `lib/ownership.test.ts` 12 → 14 (the normalised `logoUrl` and the cap),
+`lib/phase7.test.ts` +2 (the two static R14-1 gates), `lib/outbox.test.ts` 14 → 15 (the `OUTBOX_RETRY` row),
+`lib/unsubscribe.test.ts` 8 → 9, `lib/intakeMail.test.ts` 11 → 12, `lib/listingMail.test.ts` 3 → 4; and one
+file whose *assertions* moved without adding a test — `lib/routes.test.ts` (16), for the reason at the end of
+this section. `lib/manage.test.ts` is also the file that moved the DB-less run from 8 skipped files to 7: the
+R14-7 rule is a pure function, so its unit case runs without a database and only the two boundary arms skip.
+
+**R14-1 — the guard moved from provider *mode* to app *environment*, and a live shop must now be serviceable
+before it sells.** (a) `app/api/dev/pay/route.ts:45-47` answers `404 {"error":"Not found."}` when
+`getAppEnv() === "production"`, ahead of every other gate, so the route is dead on any production process
+regardless of flags or credentials — the same shape `emails/preview` has used since R07, which is exactly the
+difference between an environment gate and a mode gate that this finding was about. (b) `lib/moneyPath.ts`
+holds `checkMoneyPath()`: `isProduction() && paymentsLiveServer()` means the deployment *intends to charge*,
+and then the `required` findings of `getProdConfigReport()` decide — `RESEND_API_KEY` missing (the buyer pays
+and no receipt exists), `CRON_SECRET` missing (the outbox never drains), `ADMIN_TOKEN` missing (nobody can
+retry it). Checkout refuses ahead of the paused guard with **503** and a once-per-process `console.error`
+naming the count and the operator's next call (`app/api/checkout/route.ts:183-197`), because a deployment that
+wants money but cannot service it is neither live nor paused. (c) was already true and is left alone:
+`paymentsLiveServer()` requires `providerConfigured()` in production even with `PAYMENTS_LIVE === "true"`
+(`lib/flags.ts:53-57`), so "live but unconfigured" has resolved to *paused* since R07 — the gap was the dev
+route's own gate, which (a) closes. The gate is keyed on intent precisely so the waitlist survives: a
+pre-launch production shop (no Stripe, no flag) is not asked about its config, and its 403 + `waitlist: true`
+answer is unchanged — pinned as a row of the `lib/moneyPath.test.ts` truth table, along with the arms for a
+`required` gap, the advisory-only deployments that keep selling, and the kill switch counting as "no intent".
+`requireProdEnv()` is still defined and **still never called**: the refusal is request-time, not boot-time, and
+that residual is recorded rather than quietly closed by a startup check nobody has tested.
+
+**R14-2 — the limiter key is now an identity the caller cannot choose.** `lib/ip.ts:33-52` reads `cf-ray` as
+the *proof* that the request passed through Cloudflare and only then trusts `cf-connecting-ip`; otherwise it
+takes the **rightmost** usable `x-forwarded-for` hop (the one an edge appended, not the text the caller
+prepended), then `x-real-ip`, then `0.0.0.0` — one shared bucket, so a header-less request throttles instead
+of erroring. `usableHop()` refuses anything that is not address-shaped, so `unknown`, an empty field or a
+comma fragment cannot become a fresh bucket. `lib/rateStore.ts` gained a `StoreErrorPolicy` and a failure
+counter: the store-error path still fails **open** by default — an Upstash outage must not 500 the site, and
+that degradation is accepted for the public surface — but the four callers whose limiter *is* the abuse
+control pass `onStoreError: "closed"`: `app/api/waitlist/route.ts:44,116`, `app/api/checkout/route.ts:275`,
+`app/api/report/route.ts:28` and the job/admin gates (`lib/jobs.ts:247`). Each of those sends something —
+mail, a provider session, a webhook-driven suppression — on the strength of the limiter, so an outage that
+silently lifts their cap turns a capacity control into an open relay; their answer during an outage is a
+retryable `429`, and the failure is logged once per hour-window **with its running count** and only the key's
+prefix, so an outage cannot look like calm and no credential hash or address reaches a log line. The eight
+privileged routes that had no ceiling at all now have one (`JOB_LIMIT 30/min`, `ADMIN_LIMIT 60/min`,
+`lib/jobs.ts:101-103`), keyed on the credential digest via `callerKey()` rather than on IP, because a bearer
+token identifies its holder better than an address does. Residuals, stated: which header this deployment's
+edge actually writes is still U14-5 (the order is *safe* either way — the worst case is a coarser bucket, never
+a caller-chosen one); with no Upstash configured the store is instance-local, so the true ceiling is
+`limit × live instances` (U14-3); and the escalation is a log line, not a page — see R14-10.
+
+**R14-3 — the relay is closed for repeat addresses and capped for new ones.** `app/api/waitlist/route.ts`
+looks the address up before it mints anything (`:74`) and mails **only** when it was not already on the list
+(`:84`), so a re-submission, a bounce-loop and a replay all answer `200` and send nothing — the old code
+counted on a per-address hour bucket to throttle mail it should not have been sending at all. New addresses
+are capped at `WAITLIST_NEW_RECIPIENTS = 5` per source per `24 h` (`:24-25`, `:113-116`, fail-closed), which is
+the metric the design did not have, and the per-address bucket became a hashed, day-long one
+(`waitlist-mail:${addressRef(entry.email)}:${dayBucket}`, sha256 truncated — the register stores a digest, not
+the address, `lib/intakeMail.test.ts` pins both the call shape and the digest). Deliberately **not** taken:
+double opt-in, which changes what the waitlist *is* into a product decision, and a required Turnstile token,
+which may be unset in production (U14-3) and would make the form's behaviour depend on an unverified variable.
+The residual is explicit: a first mail to any address is still possible, up to five a day per source.
+
+**R14-4 — the rule is written down where the next author will read it, and the subject line is now asserted
+rather than assumed.** `emails/escape.ts` states that a subject is a plain-text header value and is **never**
+escaped, that the `<h1>` in `receiptHtml` renders `receiptSubject(...)` through `esc()` on the way into HTML,
+and that escaping at the subject level would double-escape the body — the existing
+`You&#39;re #1 in Er (Erbium) 🎉` assertion in `lib/listingMail.test.ts` is the witness, and a new case pins the
+subject line separately so a later "fix" that escapes it fails a test instead of shipping `&amp;#39;`. What
+keeps the templates safe is unchanged and is stated as the guard: every interpolated field is
+charset-constrained upstream (`/^[a-zA-Z0-9._]{2,30}$/` for domains, code constants for element names), so
+importing `esc()` into the two templates would add a second encoding to values that already cannot carry a
+metacharacter. The finding asked for the guard to be *named*; it is now named in the module whose job that is.
+
+**R14-5 — the validator's answer is what gets stored.** `validateProfileInput()` returns
+`logoUrl: string | null` in its ok arm (`lib/validate.ts:146`) instead of a truthiness bit, and
+`normalizeLogoUrl()` (`:153-170`) caps the field at `LOGO_URL_MAX = 2048`, **rejects** control characters
+rather than stripping them (the owner is told instead of silently getting a different logo) and returns the
+normalised URL — scheme enforced, host lowercased, credentials rejected. `app/api/startups/[domain]/route.ts`
+persists `input.logoUrl` now, so what reaches `/api/board`, `/api/elements/[sym]`, `/api/search`,
+`/api/table-order` and `<Avatar src>` is the value that passed the check. Two cases in `lib/ownership.test.ts`
+pin the mixed-case/whitespace normalisation and the oversize rejection; the field stays writable only behind a
+manage session, which production never issues (§5.5).
+
+**R14-6 — the one HTML document the API serves now declares its own policy, and the crafted-token test asserts
+the stronger property.** `app/api/unsubscribe/route.ts:74-83` sets `UNSUB_CSP`
+(`default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'`) on every document the
+route can return, and the reflected token passes `esc()` after the character whitelist. A policy declared on
+the response is enforced *in addition* to the site-wide one — a browser requires every delivered policy to
+pass — so this page refuses scripts, frames, images, connections, fonts and objects even though
+`next.config.mjs` still allows inline script everywhere else; `style-src` keeps the one allowance the page is
+laid out with, and `form-action 'self'` keeps the confirm POST. The whitelist is a second lock behind the
+lookup, not the only one: a token with a payload appended **does not resolve** (a token is a cuid we minted),
+so the crafted request gets the same dead-link page an unknown token gets, with nothing of the payload in it —
+which is what the test now asserts, instead of a stripped quote that the resolution path never reaches. The
+byte-identical reflection of a *live* token is pinned by the pre-existing case, so the two locks are covered
+from both sides.
+
+**R14-7 — the capability now needs two independent switches, and neither of them exists on a deployment.**
+`devManageTokenEnabled()` (`lib/manage.ts:61-63`) is `getAppEnv() === "development" && DEV_MANAGE_TOKENS
+=== "1"`, and the mint branch returns the raw token only under both (`:99`). That is stricter than the doc's
+proposed fix, and by construction rather than by policy: `getAppEnv()` returns `"preview"` for a Vercel
+preview (`lib/env.ts:26-32`), so no deployed environment can satisfy the first condition *even if* the project
+sets the variable — the only processes that can hand out a token are a local `next dev`, or a local `next
+start` with neither `VERCEL_ENV` nor `NODE_ENV=production`, and only when the operator opts in. The field is
+named `__devToken` so a response dump cannot read like a shipped feature, plumbed through the route and the
+`ManageResponse` type in `lib/api.ts:209-211`, and the variable is documented in `.env.example` and in
+`doc/ARCHITECTURE.md` §12. `10` §7 R10-2's listing-takeover chain is unchanged and remains `10`'s.
+
+**R14-8 — the ops secret no longer travels in a URL.** Both `searchParams.get("secret")` reads are gone
+(`app/api/jobs/reconcile/route.ts`, `app/api/jobs/config/route.ts`), and both routes authenticate through
+`jobGate(req, "jobs/<name>")` like the two workers, so the only accepted forms are the `Authorization: Bearer`
+header the Vercel cron sends and the body secret a header-less pinger posts. The three runbooks that taught
+the query form were corrected in the same pass — `HANDOFF.md:137,824`, `doc/PROD-READINESS-CHECKLIST.md`
+(the probe row kept as the pre-fix record, the three curls switched to the header) and
+`doc/review/17-operator-tooling-and-runbooks.md:70,138,294` — and doc 13's per-job tables are annotated where
+they printed the old call, because a runbook that keeps the old form re-leaks the secret. **Rotating
+`CRON_SECRET` once** (the finding's second half, since the value has been used in URLs and in access logs)
+is an operator action this pack cannot take, and it stays open here.
+
+**R14-9 — the one `/api/admin/*` route without an audit row has one.** `AuditAction` gained `OUTBOX_RETRY`
+(`lib/audit.ts:55`) and `app/api/admin/outbox/retry/route.ts:109` writes exactly one row after the reset, in
+the same shape the neighbouring operator actions use: `actorType: "operator"`, an optional `operator` body
+field sliced to 120 as `actorRef`, and a `detail` of the dedupe key, the row's type and
+`(completed row revived)` when that is what happened, sliced to 300. Best-effort by construction —
+`audit()` outside a transaction catches and logs rather than throwing — so a bookkeeping failure cannot fail
+the retry it records. Pinned in `lib/outbox.test.ts`, which now asserts the row's exact `detail` string.
+
+**R14-10 — every refusal is a log line, a meter and — at the twentieth — an error.** `lib/jobs.ts:170-262`
+routes every `adminGate`/`jobGate` rejection through `refuse()`, which (1) logs at `warn` with the route and
+the **shape** of the credential presented (`bearer token` / `body secret` / `no credential`, never the value),
+(2) meters refusals per route per source at `AUTH_REJECTION_LIMIT = 60` an hour and answers `429` once the
+meter is exhausted, fail-closed, so guessing costs the attacker time and is not merely recorded, and (3)
+escalates to `console.error` every `AUTH_REJECTION_ALERT = 20`th refusal on a key, so a brute-force pattern is
+*one* line rather than N. The counter map is capped at 5 000 keys and cleared rather than grown, so the meter
+cannot become the memory leak. `lib/ops.test.ts` pins the three properties that matter: the canary credential
+is not legible anywhere in the log line, the twentieth refusal escalates, and the meter is per route — a
+saturated key on one surface does not refuse another. What is **not** closed is the finding's last sentence:
+there is still no alerting channel in the tree (no Sentry, no Datadog, no log drain), so a sustained
+brute-force produces error lines that nobody is paged by. That is U14-6's subject and is recorded there.
+
+**R14-11 — verified, re-checked, and deliberately not touched.** `npm run audit:prod` exits 0 with the single
+accepted `next@14.2.35` entry (`ops/accepted-advisories.json`), whose TRIPWIRE preconditions were re-checked
+by hand rather than trusted: `next.config.mjs` declares **no `images` key**, `next/image` is imported
+**nowhere** in the tree, and hosting is Linux/Vercel, so both criticals (Windows-hosted RCE, and AVIF
+optimizer RCE) stay unreachable. The expiry was **not** edited and no acceptance was widened: the finding's
+own proposal was to schedule the upgrade rather than to extend the date, and the entry still reads
+`expires 2026-12-31` with `scheduled` pointing at the Next 16 + React 19 migration, which is a launch-window
+decision and not this pass's. `HANDOFF.md`'s gate list and `doc/ARCHITECTURE.md` now name the file and the CI
+step that enforces it (`.github/workflows/ci.yml:52`).
+
+**One test fixture had to move with the rule, and the failure it caused is the tell for the new order.**
+`lib/routes.test.ts`'s hold probes sent `cf-connecting-ip` and nothing else, which the old code trusted
+outright; under the new order that header is read *only* when `cf-ray` proves the hop, so all three probes
+shared the header-less `0.0.0.0` bucket and the first full run of the suite answered **429** where it expected
+`409` — a rate-limit collision between tests, not a product regression, and the shape an integration with a
+proxy that rewrites headers would produce in production. The fixture now sends `cf-ray` alongside the address,
+with a comment saying why, and the two R09-1 cases pass unchanged. Recorded because the reading matters on the
+day someone points a pinger or a monitor at these routes: a caller that sets only `cf-connecting-ip` is one
+shared bucket, and that is the intended behaviour.
+
+**What the pass leaves open, in its own words.** U14-5 — which header this deployment's edge actually writes —
+is unmeasured: the new order is safe either way, but "rightmost XFF hop" and "x-real-ip" are not
+distinguishable from here, and the difference is a bucket granularity, not a bypass. U14-3 — whether Upstash
+is configured in production — now decides whether the two store policies mean anything at all, and whether the
+per-instance memory store is the real ceiling. The alerting channel R14-10 needs does not exist (§U14-6), so
+the escalation is a line someone must read. `requireProdEnv()` is still uncalled: R14-1(b) refuses *requests*,
+and nothing refuses to **boot** an unserviceable production deployment. R14-3's double opt-in is a product
+decision that was not taken, and the `CRON_SECRET` rotation R14-8 asks for is an operator action. R14-11's
+upgrade is scheduled, not done.
+
+**Every line number and body in §5.1–§5.15 is the at-authoring one.** `lib/ip.ts:14-20` (the trusted header)
+is `:40-52` now; `lib/rateStore.ts`'s fail-open line is a counted one with a policy; the two
+`searchParams.get("secret")` reads the document cites by line no longer exist; `app/api/unsubscribe/route.ts:22`
+is the CSP'd document; `lib/manage.ts:44,65` moved to `:61-63,99` and the field is `__devToken`;
+`app/api/dev/pay/route.ts:15-16` is now gate **1** of four with an environment gate ahead of it; and
+`lib/jobs.ts:26,38` (the two rejection bodies) is `:170-262` with metering, logging and a limiter. The live
+§5.6 measurement itself — 11 rotating headers to 11 accepts, 10 then `429` on a fixed one — is unchanged, and
+is now the *input* to the fix rather than only a finding.
+
 ## 6. Failure and edge matrix
 
 Attacker attempt → control → observed → residual, all against the 2026-09-15 build.
@@ -602,6 +807,25 @@ Attacker attempt → control → observed → residual, all against the 2026-09-
 | 18 | learn whether `ADMIN_TOKEN`/`CRON_SECRET` exist | fail-closed 403/401 | byte-identical bodies for absent vs wrong | — |
 | 19 | send a non-string JSON field to a write route | per-route type checks | `400` naming the field on three of four routes; `/api/report` answers `ok:true` and sanitises the value to `null` | none observed (§5.15) |
 | 20 | ask a non-production deployment for a manage token | `isProduction()` branch in `lib/manage.ts:65` | token returned in the response body (`manage/request/route.ts:37`) | R14-7; previews SSO-gated |
+
+**After the fix pass** (§5.16), the rows whose behaviour changed — the rest are unchanged, and the pre-fix
+column above is kept as the record of the 2026-09-15 build:
+
+| # | Attempt | Before (2026-09-15) | After the fix pass (§5.16) | Finding |
+|---|---|---|---|---|
+| 1 | rotate `cf-connecting-ip` to nullify every limiter | 11/11 rotating headers → `200`; a fixed one → 10×`200`, 11th `429` | `cf-connecting-ip` is read **only** when `cf-ray` proves the hop; the identity is otherwise the rightmost usable XFF hop or `x-real-ip`, else one shared `0.0.0.0` bucket. Rotating the header no longer mints buckets — it either does nothing or makes the bucket coarser | R14-2 |
+| 2 | blow up the limiter store to fail open | fails **open** and silently, for every caller | still open by default for read-only routes (the doc 20 R20-8 acceptance), but the four senders — waitlist (both limiters), checkout, report — and the job/admin gates answer a retryable `429`, and the failure is logged once per hour-window with a running count | R14-2 |
+| 3 | `POST /api/dev/pay` for a `DEV` payment | PROD process with 0 or 1 Stripe keys → `200` + a real `Stake`; only a *fully* configured Stripe made it `403` | `404` on any production process, before the flag or the credentials are read; the route exists in `development`/`test` only. A deployment that intends to charge but cannot service the charge is refused with `503` at checkout | R14-1 |
+| 8 | send mail to an arbitrary address via waitlist | accepted; a repeat submission re-sent the same mail, and new recipients were uncapped | a known address gets `200` and **no** mail; new recipients are capped at 5 per source per 24 h, the per-address bucket is a hashed day key, and both limiters fail closed | R14-3 |
+| 11 | inject markup via domain/social handle | blocked by the charset check, not by escaping — one regex regression from live injection | unchanged controls, and now the rule is stated where the templates live (subjects are header values and are never escaped; `esc()` runs once, into HTML) and the subject line is asserted by a test | R14-4 |
+| 12 | inject markup via `logoUrl` | raw string persisted (`body.logoUrl.trim()`); only truthiness was checked | the normalised value is what is stored — scheme and host normalised, credentials and control characters rejected, length capped at 2048 | R14-5 |
+| 13 | reflect a token into HTML on `/api/unsubscribe` | `text/html` with the token inside an attribute, guarded by quote stripping | `UNSUB_CSP` on the response (`default-src 'none'`) plus `esc()`; an unresolvable token never reaches the document at all, so the crafted request gets the dead-link page | R14-6 |
+| 17 | abuse a leaked `CRON_SECRET` | no velocity limit on `/api/jobs/*`, and the secret was also accepted from the query string | 30 requests/min per job and 60/min for admin, keyed on the credential digest, refusals metered at 60/h per route per source and escalated at the 20th; the query-string form is gone (header or body secret only) | R14-8, R14-10 |
+| 20 | ask a non-production deployment for a manage token | token in the response body for **any** non-production process, previews included | `__devToken` only when the app env is literally `development` **and** `DEV_MANAGE_TOKENS=1`; a Vercel preview is `"preview"`, so no deployed environment can return it at all | R14-7 |
+
+R14-9 and R14-11 sit outside this matrix by construction: R14-9 adds a record to a route that already
+refused the caller, and R14-11 is a dependency acceptance, not an attempt. Both were verified in the same pass
+(§5.16) and changed nothing an attacker can reach.
 
 ## 7. Findings
 
@@ -653,6 +877,23 @@ at boot (or check `getProdConfigReport().ok` at the top of `/api/checkout` and `
 so "live but unconfigured" resolves to "off", not "simulator". Then the two rows of §5.3's matrix that read
 `200` become `404`.
 **Status** — open
+- **Fix.** (a) **taken**: `app/api/dev/pay/route.ts:45-47` answers `404 {"error":"Not found."}` whenever
+  `getAppEnv() === "production"`, ahead of every other gate, so the route is dead on any production process
+  whatever its flags or credentials — the shape `emails/preview` has used since R07, and exactly the
+  difference between an environment gate and the provider-mode gate this finding was about. (b) **taken, as a
+  refusal rather than a boot check**: `lib/moneyPath.ts` holds `checkMoneyPath()`, which consults the config
+  report only when the deployment *intends to charge* (`isProduction() && paymentsLiveServer()`), and
+  `/api/checkout` refuses ahead of the paused guard with `503` plus one `console.error` per process naming the
+  count and `GET /api/jobs/config` (`app/api/checkout/route.ts:183-197`) — `RESEND_API_KEY` missing means the
+  buyer pays and no receipt exists, which is the reviewer's actual scenario. Keying on intent is what keeps
+  the pre-launch shop's `403` + `waitlist: true` answer intact; `lib/moneyPath.test.ts` pins that row. (c)
+  **already true**: `paymentsLiveServer()` has required `providerConfigured()` in production since R07
+  (`lib/flags.ts:53-57`), so "live but unconfigured" already resolved to paused. `requireProdEnv()` remains
+  defined and uncalled: nothing refuses to *boot* an unserviceable deployment.
+- **Status.** fixed (§5.16) — three ways in became one environment gate that no flag or credential can
+  re-open, plus a request-time refusal that tells an operator which variable is missing instead of taking
+  money it cannot service. R14-1(c) needed no code because R07 had already made "live but unconfigured"
+  resolve to paused; `requireProdEnv()` is still never called, which is the residue this record keeps.
 
 ### R14-2 — Every per-IP abuse control is keyed on a header the caller writes
 
@@ -685,6 +926,23 @@ fail-open path ("store failed open" at error level, alert if it happens more tha
 the mail and money routes fail **closed** on store error instead of open. Add a limiter to the eight
 operator/scheduler routes so a leaked secret is not unlimited.
 **Status** — open
+- **Fix.** **taken**, in the order the evidence implied rather than the one the finding listed. `lib/ip.ts:33-52`:
+  `cf-connecting-ip` is read **only** when `cf-ray` proves the request came through Cloudflare; otherwise the
+  identity is the rightmost usable `x-forwarded-for` hop (the one an edge appended, not the text a caller
+  prefixed), then `x-real-ip`, then `0.0.0.0` — one shared bucket, so a header-less caller throttles instead of
+  erroring, and `usableHop()` refuses non-address-shaped fields so `unknown` cannot mint a bucket either. The
+  fail-open path became a policy: `StoreErrorPolicy` + `onStoreError` (`lib/rateStore.ts:93-140`), default
+  `"open"` (doc 20 R20-8's acceptance for the public surface) and `"closed"` for the callers that *send* on
+  the strength of the limiter — waitlist's two limiters, checkout, report, and the job/admin gates — with the
+  failure logged once per hour-window, at `error`, carrying a running count and only the key's prefix. The
+  eight operator/scheduler routes gained `JOB_LIMIT = 30/min` and `ADMIN_LIMIT = 60/min`, keyed on the
+  credential digest (`callerKey`, `lib/jobs.ts:101-103,122`) rather than on IP. Not measurable from here:
+  which hop the edge actually writes (U14-5) and whether the store is shared at all, i.e. whether the true
+  ceiling is `limit × live instances` (U14-3).
+- **Status.** fixed (§5.16) — the limiter key is an identity the caller cannot choose, the store's failure
+  behaviour is per-caller and stated instead of implicit, and the eight privileged routes have a ceiling they
+  never had. Both remainders are bounds on the guarantee rather than holes in it: a coarser bucket is the
+  worst case of the new order, and an unshared store is the worst case of the policy.
 
 ### R14-3 — Anonymous third-party mail relay through `/api/waitlist`
 
@@ -713,6 +971,19 @@ it only when the address was not already on the list *and* require a Turnstile t
 unset — U14-3), and raise the per-address bucket from one hour to 24. Either way, cap the number of
 *distinct recipients* per IP per day, which is the metric the current design does not have.
 **Status** — open
+- **Fix.** **taken**, in the instant-confirmation shape and with the metric the finding said was missing.
+  `app/api/waitlist/route.ts:74` looks the address up before minting anything and `:84` mails only when it was
+  not already on the list, so a repeat submission, a bounce loop and a replay all answer `200` and send
+  nothing — the old code leaned on a per-address hour bucket to throttle mail it should not have been sending
+  at all. `:24-25,113-116` cap **distinct new recipients** at 5 per source per 24 h, fail-closed, which is the
+  per-day metric the design lacked, and the per-address bucket became a hashed day-long one
+  (`waitlist-mail:${addressRef(email)}:${dayBucket}`, sha256 truncated, so the counter holds a digest rather
+  than an address). **Not taken**: double opt-in, which changes what the waitlist *is* into a product
+  decision, and a required Turnstile token, which may be unset in production (U14-3) and would make the form's
+  behaviour depend on an unverified variable. `lib/intakeMail.test.ts` pins the call shape and the digest.
+- **Status.** fixed in part (§5.16) — the repeat-address relay and the missing per-recipient metric are both
+  gone, and every mail-touching limiter fails closed. Double opt-in, the strongest answer, was deliberately
+  not taken: a first mail to an arbitrary address is still possible, capped at five per source per day.
 
 ### R14-4 — Two mail templates interpolate without escaping; a charset check three modules away is the only guard
 
@@ -737,6 +1008,18 @@ templates interpolate is charset-constrained upstream or a code constant, so a s
 sanitise at the write boundary instead and say so in the schema comment. This is a two-file change with a
 one-line test per template.
 **Status** — open
+- **Fix.** **the rule, not the escaping** — written where the next author will read it. `emails/escape.ts`
+  states that a subject is a plain-text header value and is **never** escaped, that `receiptHtml`'s `<h1>`
+  renders `receiptSubject(...)` through `esc()` on the way into HTML, and that escaping at the subject level
+  would double-encode the body — the `You&#39;re #1 in Er (Erbium) 🎉` assertion in `lib/listingMail.test.ts`
+  is the witness. A new case pins the **subject line itself**, so a later "fix" that escapes it fails a test
+  rather than shipping `&amp;#39;` to an inbox. The guard the finding asked to be *named* is named: every
+  interpolated field is charset-constrained upstream (`/^[a-zA-Z0-9._]{2,30}$/` for the two domains, code
+  constants for symbols and names), so importing `esc()` into the templates would add a second encoding to
+  values that cannot carry a metacharacter.
+- **Status.** fixed (§5.16) — the reasoning is documented at the template boundary, the subject is asserted
+  by a test rather than assumed, and the charset check is recorded as the reason escaping is unnecessary. No
+  escaping was added, deliberately: `esc()` in these templates would encode the body twice.
 
 ### R14-5 — The validated URL is thrown away and the raw one is stored
 
@@ -762,6 +1045,18 @@ unnormalised value verbatim (no `https://` normalisation, no host lowercasing, n
 **Proposed fix** — `logoUrl: normalizeUrl(input.logoUrl) ?? null` in `validateProfileInput`'s return, plus a
 length cap (2048) and a rejection of control characters. The route then stores what was validated.
 **Status** — open
+- **Fix.** **taken**, as the normalisation return rather than the null-coalesce. `validateProfileInput`'s ok arm
+  carries `logoUrl: string | null` (`lib/validate.ts:146`), and `normalizeLogoUrl()` (`:153-170`) applies the
+  2048-character cap, **rejects** control characters instead of stripping them (the owner is told, rather than
+  silently getting a different logo URL than the one they typed) and returns the normalised value — scheme
+  enforced, host lowercased, credentials refused. `app/api/startups/[domain]/route.ts` persists
+  `input.logoUrl`, so the value in the database and in `/api/board`, `/api/elements/[sym]`, `/api/search`,
+  `/api/table-order` and `<Avatar src>` is the one that passed the check. `lib/ownership.test.ts` pins the
+  mixed-case/whitespace normalisation and the oversize rejection. The writer is still reachable only behind a
+  manage session, which production never issues (§5.5) — a live-class fix behind a closed door.
+- **Status.** fixed (§5.16) — the value that is validated is the value that is stored, with the cap and the
+  control-character rejection the proposed fix asked for. Recorded as latent rather than live: no production
+  caller can reach the writer today.
 
 ### R14-6 — A caller-supplied token is reflected into an HTML response on `/api/unsubscribe`
 
@@ -779,6 +1074,21 @@ stripped quote.
 with `esc()` and set an explicit `Content-Security-Policy: default-src 'none'` on that response. A
 one-line response-header addition removes the class permanently.
 **Status** — open
+- **Fix.** **taken**, as the second option and then some. `app/api/unsubscribe/route.ts:74-83` sets `UNSUB_CSP`
+  (`default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'`) on every document the
+  route can return, and the token passes `esc()` after the existing character whitelist. A policy declared on
+  the response is enforced **in addition** to the site-wide one — a browser requires every delivered policy to
+  pass — so this page refuses scripts, frames, images, connections, fonts and objects even though
+  `next.config.mjs` still allows inline script everywhere else; `style-src` keeps the one allowance the page
+  is laid out with, and `form-action 'self'` keeps the confirm POST. The whitelist is a second lock behind the
+  lookup rather than the only one: a token with a payload appended does not resolve (a token is a cuid we
+  minted), so the crafted request gets the same dead-link page an unknown token gets, with nothing of the
+  payload in it — which is what the test now asserts, instead of a stripped quote the resolution path never
+  reaches.
+- **Status.** fixed (§5.16) — the response declares `default-src 'none'` and the token is escaped behind a
+  whitelist, so there are two locks rather than one, and a token that does not resolve never reaches a
+  document at all. The class is closed for this route without touching the site-wide CSP, and the
+  byte-identical reflection of a **live** token stays pinned by the neighbouring case.
 
 ### R14-7 — A non-production deployment hands a management token to any caller
 
@@ -802,6 +1112,19 @@ a local production build started with `VERCEL_ENV` unset (or `NODE_ENV=developme
 ship by accident (`__devToken` behind a `if (process.env.NODE_ENV === "development")` spread, as
 `emails/preview` does with its whole-route `404`). `10` §7 R10-2 owns the listing-takeover chain this token enables.
 **Status** — open
+- **Fix.** **taken**, in a form stricter than proposed and by construction rather than by policy:
+  `devManageTokenEnabled()` (`lib/manage.ts:61-63`) is `getAppEnv() === "development" && DEV_MANAGE_TOKENS ===
+  "1"`, and the mint branch returns the raw token only under both (`:99`). `getAppEnv()` answers `"preview"`
+  on a Vercel preview (`lib/env.ts:26-32`), so **no deployed environment can satisfy the first condition**,
+  even if the project sets the variable — the only processes that can hand a token out are a local `next dev`,
+  or a local `next start` with neither `VERCEL_ENV` nor `NODE_ENV=production`, and only on an explicit
+  opt-in. The field is named `__devToken` (`lib/manage.ts:68`, `app/api/manage/request/route.ts:40`,
+  `lib/api.ts:209-211`), the variable is documented in `.env.example` and `doc/ARCHITECTURE.md` §12, and
+  `lib/manage.test.ts` covers the rule and both boundary arms.
+- **Status.** fixed (§5.16) — the capability now needs a `development` app environment *and* an explicit
+  opt-in, and no deployed environment can be the former, so a preview or a production build cannot return a
+  token even if the variable is misconfigured onto it. The takeover chain the token enables stays `10`
+  §7 R10-2's.
 
 ### R14-8 — The ops secret is accepted from the query string
 
@@ -824,6 +1147,19 @@ and in doc 13's per-job tables.
 these routes by design, which is fine for a 256-bit secret — the query string is what makes that argument
 weak.
 **Status** — open
+- **Fix.** **taken**, half of it. Both `searchParams.get("secret")` reads are deleted
+  (`app/api/jobs/reconcile/route.ts`, `app/api/jobs/config/route.ts`) and both routes now authenticate through
+  `jobGate(req, "jobs/<name>")` like the two workers, so the accepted forms are `Authorization: Bearer` (what
+  Vercel cron sends), the platform cron header, and the body secret — a URL no longer carries a credential,
+  and therefore neither do redirects, request logs, shell history or `Referer`. The documents that taught the
+  query form were corrected in the same pass, because a stale runbook re-leaks what the code stopped reading:
+  `HANDOFF.md:137,824`, `doc/PROD-READINESS-CHECKLIST.md` (the probe row kept as the pre-fix record, the three
+  curls switched to the header), `doc/review/17-operator-tooling-and-runbooks.md:70,138,294`, plus in-cell
+  annotations in doc 13's per-job tables.
+- **Status.** fixed in part (§5.16) — the query-string branch is gone from both routes and from the four
+  documents that printed it, so no new copy of the secret can enter a URL. The rotation the same finding asks
+  for has **not** happened: the deployed value has been in URLs and in access logs since 2026-09-15, and only
+  an operator can replace it. That residue is named in §5.16 rather than smoothed over here.
 
 ### R14-9 — One `/api/admin/*` route is authenticated but not audited
 
@@ -840,6 +1176,16 @@ doc 14 owns it because "every `/api/admin/*` authenticated **and audited**" is a
 **Proposed fix** — add an `OUTBOX_RETRY` action to `lib/audit.ts` and write it with the row count the retry
 reset, the same way `REPORT_TRIAGED` records its subject.
 **Status** — open
+- **Fix.** **taken.** `AuditAction` gained `OUTBOX_RETRY` (`lib/audit.ts:55`), and
+  `app/api/admin/outbox/retry/route.ts:109` writes one row after the reset in the shape the neighbouring
+  operator actions use: `actorType: "operator"`, an optional `operator` body field sliced to 120 as
+  `actorRef`, and a `detail` naming the dedupe key, the row's type and `(completed row revived)` when that is
+  what happened, sliced to 300. It records what the route *did* — one row per dedupe key it reset — rather
+  than the request's intent. Best-effort by construction: `audit()` outside a transaction logs instead of
+  throwing, so a bookkeeping failure cannot fail the retry it records. `lib/outbox.test.ts` asserts the exact
+  `detail` string.
+- **Status.** fixed (§5.16) — every `/api/admin/*` route now writes an audit row, and this one names the key
+  and the type it revived. Doc 13 §9's and doc 11 §5.9's copies of the gap close with it.
 
 ### R14-10 — Rejected operator credentials and exhausted limits are invisible
 
@@ -860,6 +1206,20 @@ missing — never the value) at `warn`, and add one alert: more than N rejection
 routes in an hour. Add a modest limiter (e.g. 60/h per IP) to those routes so a wrong secret costs the
 attacker time. If a hosted error tracker is added later, this is the first thing to route into it.
 **Status** — open
+- **Fix.** **taken**, all three parts plus one. Every `adminGate`/`jobGate` rejection now routes through
+  `refuse()` (`lib/jobs.ts:170-262`), which logs at `warn` with the route and the presenting credential's
+  **shape** (bearer token / body secret / no credential — never its value), meters refusals per route per
+  source at `AUTH_REJECTION_LIMIT = 60` an hour and answers `429` once the meter is exhausted, fail-closed, so
+  guessing now costs the attacker time, and escalates to `console.error` every
+  `AUTH_REJECTION_ALERT = 20`th refusal on a key, so a brute-force pattern is one line rather than N. The
+  counter map is capped at 5 000 keys and cleared rather than grown, so the meter cannot become the memory
+  leak. The limiter the finding asked for arrived with R14-2. `lib/ops.test.ts` pins the three properties that
+  matter: the canary credential is not legible in the log line, the twentieth refusal escalates, and the meter
+  is per route — a saturated key on one surface does not refuse another.
+- **Status.** fixed in part (§5.16) — refusals are logged in a shape that is useful without being a leak,
+  metered so guessing costs time, and escalated so a pattern is one line. The alert itself does not exist:
+  with no tracker or drain anywhere in the tree, the last mile is still a human reading `console.error`. That
+  is U14-6 and is not claimed as closed.
 
 ### R14-11 — `next@14.2.35` ships nine advisories, two of them RCE, on an enforced acceptance with an expiry
 
@@ -880,6 +1240,19 @@ and someone must upgrade, which is the correct design.
 **Proposed fix** — schedule the upgrade (14.2.x latest or the 15 line) rather than waiting for the tripwire;
 when it happens, re-run `npm run audit:prod` and delete the acceptance entry rather than editing its expiry.
 **Status** — open
+- **Fix.** **verified, re-checked, and deliberately not touched.** `npm run audit:prod` exits 0 with the single
+  accepted `next@14.2.35` entry, and the TRIPWIRE's preconditions were re-tested against the tree instead of
+  trusted: `next.config.mjs` declares **no `images` key**, `next/image` is imported **nowhere**, and hosting is
+  Linux/Vercel — so the Windows-hosted RCE and the AVIF-optimizer critical stay unreachable, for reasons the
+  acceptance file states per advisory. The expiry was **not** edited and no acceptance was widened: the
+  finding's own preference was to schedule the upgrade rather than move the date, and the entry still reads
+  `expires 2026-12-31` with `scheduled` naming the framework migration (Next 16 + React 19), which is a
+  launch-window decision and not this pass's. `HANDOFF.md`'s full-gate line and `doc/ARCHITECTURE.md` now name
+  `ops/accepted-advisories.json` and the CI step that enforces it (`.github/workflows/ci.yml:52`).
+- **Status.** fixed (§5.16) — the acceptance is intact, its tripwire conditions were re-verified rather than
+  assumed, and the gate that enforces it runs on every push. The upgrade itself remains **scheduled rather
+  than done**, which is the finding's own preference; nothing about the expiry was edited, and the next change
+  to that file should delete the entry rather than extend it.
 
 ## 8. Acceptance criteria
 
@@ -889,10 +1262,20 @@ when it happens, re-run `npm run audit:prod` and delete the acceptance entry rat
 - [x] Every `/api/admin/*` and `/api/jobs/*` route rejects absent **and** wrong credentials with a
   byte-identical body — live `403 {"error":"forbidden"}` (21 B, four routes) and
   `401 {"error":"unauthorized"}` (24 B, four routes) (§5.3).
-- [ ] `/api/dev/pay` refuses every production environment regardless of provider mode — R14-1.
-- [ ] Every per-IP ceiling is keyed on a value the client cannot choose, and the store fails closed for
-  mail and money — R14-2.
-- [ ] Every outbound mail goes to an address whose owner asked for it — R14-3.
+- [x] `/api/dev/pay` refuses every production environment regardless of provider mode — the environment gate
+  runs first, so all four rows of §5.3's behavioural matrix move: the three production rows answer `404`
+  before the flag or any credential is read, and the preview row answers `403` because `devSimulatorEnabled()`
+  requires a `development`/`test` app env (R07-2) — Vercel SSO is no longer the only barrier for it. The row's
+  second half, an intent-to-charge deployment whose config is incomplete, is refused at checkout with `503`
+  and the missing variable names (R14-1, §5.16).
+- [x] Every per-IP ceiling is keyed on a value the client cannot choose, and the store fails closed for
+  mail and money — `clientIp()` reads `cf-connecting-ip` only behind a `cf-ray` proof and otherwise takes the
+  rightmost usable `x-forwarded-for` hop, then `x-real-ip`, then one shared bucket; the four senders (waitlist's
+  two limiters, checkout, report) and the job/admin gates pass `onStoreError: "closed"` (R14-2, §5.16).
+- [ ] Every outbound mail goes to an address whose owner asked for it — R14-3. **Not met as written**: the
+  relay is closed for addresses already on the list and capped at five *new* recipients per source per day,
+  but a first mail to an arbitrary address is still possible; double opt-in is a product decision that was not
+  taken (§5.16).
 - [x] No server secret name or value appears in the client bundle — `Select-String -SimpleMatch` over
   `.next\static` for nine names → 0 matches each; one non-API route imports a server lib (§5.2).
 - [x] No route exposes another owner's data on a guessed identifier — no `/api/payments/*`; manage tokens
@@ -903,13 +1286,26 @@ when it happens, re-run `npm run audit:prod` and delete the acceptance entry rat
   expiry — `ci.yml:52` → `scripts/audit-prod.mjs` (§5.13).
 - [x] Malformed bodies produce a typed `400`, not a `500` — three of four write routes type-check; `/api/report`
   sanitises coercively; the class is doc 11's R11-1 alone (§5.15).
-- [ ] Every mail template escapes caller-reachable values — R14-4.
-- [ ] The value that is validated is the value that is persisted — R14-5.
-- [ ] A deployed non-production environment cannot hand out management capability — R14-7.
-- [ ] Every `/api/admin/*` write leaves an audit row — R14-9.
-- [ ] A rejected operator credential is recorded where a human will see it — R14-10.
+- [ ] Every mail template escapes caller-reachable values — R14-4. **Not met as written, deliberately**: the
+  pass documented the charset guard as the boundary and asserted the subject line instead of adding `esc()` to
+  the templates, where it would encode the body twice (§5.16). The criterion is about escaping; the finding's
+  answer is that escaping is the wrong control for a header value.
+- [x] The value that is validated is the value that is persisted — `validateProfileInput` returns the
+  normalised `logoUrl` (2048 cap, control characters rejected rather than stripped) and the profile route
+  stores that value instead of the raw body field (R14-5, §5.16).
+- [x] A deployed non-production environment cannot hand out management capability — `__devToken` requires the
+  app env to be literally `development` **and** `DEV_MANAGE_TOKENS=1`, and a Vercel preview reports
+  `"preview"`, so no deployed environment can satisfy both (R14-7, §5.16).
+- [x] Every `/api/admin/*` write leaves an audit row — `OUTBOX_RETRY` closes the last route, with the dedupe
+  key and the row's type in `detail` and the operator name in `actorRef` (R14-9, §5.16).
+- [ ] A rejected operator credential is recorded where a human will see it — R14-10. **Recorded, not
+  alerted**: every refusal is a `warn` line naming the route and the credential's *shape* (never a value),
+  metered per route at 60/h with a fail-closed `429`, and escalated at the twentieth — but nothing outside the
+  repository reads those lines (§5.16, U14-6).
 - [ ] CSP `script-src` has no `'unsafe-inline'` and the header advertises no control the code does not
-  enforce (the two dead Turnstile entries) — §5.1.
+  enforce (the two dead Turnstile entries) — §5.1. **Not taken in this pass**: it is a change to
+  `next.config.mjs` with a bundle-wide blast radius, and R14-6 answered the page-local half with a response
+  header instead — a policy delivered per response is enforced *in addition* to the site-wide one.
 
 **Budget** — 6 of 16 met at `9681bdc`. Nine require a code or config change (R14-1, R14-2, R14-3, R14-4,
 R14-5, R14-7, R14-9, R14-10, plus the CSP row); the cheapest two are R14-4 and R14-5 (each a handful of
@@ -917,22 +1313,61 @@ lines, both latent). Three facts are operator-only and are tracked as U14-2/U14-
 code change. My ordering if I had one day: R14-2 (it silently voids the rest of the controls), R14-1 (P0 by
 consequence), R14-3, then the two-line hardening pair.
 
+**After the fix pass (§5.16)** — the boxes ticked in this revision carry `(R14-n, §5.16)` above, and the tally
+moves from 7 of 16 to **12 of 16**. The four that remain are open for stated reasons rather than unvisited:
+R14-3 and R14-10 were taken **in part** (the recipient cap exists and refusals are recorded; double opt-in and
+an alerting channel are not things this pass can add), R14-4 is **rejected as written** by decision, and the
+CSP row is a config change to `next.config.mjs` that this pass did not make. The row this pass added to its own
+working list — "/api/dev/pay refuses every production environment regardless of provider mode" — is the first
+box, and it now holds for the reason the reviewer asked for: an **environment** gate rather than a mode gate,
+with `checkMoneyPath()` refusing the deployment that intends to charge but cannot service the charge. The
+budget sentence above says 6 of 16; the boxes actually ticked at `9681bdc` are seven, because the
+malformed-body row was ticked when §5.15 was added, after that sentence was written.
+
 ## 9. Open questions
 
 - **Q1 — Is Vercel Authentication an owned control?** It is load-bearing for R14-1 and R14-7 (previews are
   safe *because* of it) and it exists nowhere in the repository, so nothing records that turning it off is a
   security change. Whoever owns the Vercel project should confirm it is intentional and add it to
   `doc/PROD-READINESS-CHECKLIST.md` as a required setting. (Not a finding; a durability question.)
+  *Answered by the fix pass, in the direction of not needing the answer:* the two code paths that leaned on
+  it are now closed on their own terms — a preview cannot mint a stake (the simulator requires a
+  `development`/`test` app env, R07-2) and cannot hand out a manage token (R14-7) — so Vercel Authentication
+  is defence in depth rather than the only barrier, and `/api/dev/pay` now refuses *every* production
+  environment instead of only the live-mode one. The durability half is untouched: nothing in the repository
+  records that turning it off is a security change. Still worth a line on the next checklist pass, and U14-4
+  is still the fact that says whether anything sits behind it.
 - **Q2 — Which identity header does this deployment actually set?** The R14-2 fix cannot be written until
   U14-5 is answered: `cf-connecting-ip` is caller-controlled here, and whether Vercel overwrites
   `x-forwarded-for` / sets `x-real-ip` on this project must be verified on the deployment, not assumed from
   documentation.
+  *Answered by the fix pass on the half that was blocking it, deliberately left open on the other:* the R14-2
+  fix was written so that a wrong answer is not a hole — `cf-connecting-ip` is honoured only behind a `cf-ray`
+  proof, the fallback is the rightmost usable `x-forwarded-for` hop and then `x-real-ip`, and a request
+  carrying none of them shares one bucket — so the worst case of a mis-guessed header is a coarser ceiling
+  rather than a caller-chosen key. What remains is exactly U14-5: which header this deployment sets, and
+  whether the edge appends to or replaces `x-forwarded-for`. The behaviour the ladder assumes (append) is the
+  documented one, and it is still an assumption.
 - **Q3 — Does the waitlist mail produce any feedback we would notice?** A Resend webhook (bounce/complaint)
   would be the only signal that R14-3 is being abused. If none is configured, the relay is invisible from
   our side as well as from the recipient's — which raises the priority of the fix, not lowers it.
+  *Answered by the fix pass on the repository's side, and the answer moves the priority as the question
+  predicted:* the waitlist path now mails only addresses that are neither already on the list nor suppressed
+  by an earlier bounce, complaint, unsubscribe or operator entry, and caps a source at five **new** recipients
+  per day (R14-3) — so the relay is bounded rather than invisible. Feedback does exist where it is wired:
+  `app/api/webhooks/resend` acts on `bounced` and `complained` events and writes `EmailAddress.reason`, which
+  is the very list the cap's lookup reads — and it needs `RESEND_WEBHOOK_SECRET` in production, one name longer
+  than U14-3 currently lists. Whether any of it is configured on the deployment is still the open half, and no
+  code in this repository can say.
 - **Q4 — Once `requireProdEnv()` is called at boot, what should a degraded start do?** Refuse to serve
   (turning a config mistake into an outage) or serve with payments off and a visible banner (turning it into
   a business decision)? That is a product call, and doc 15 owns the availability half of it.
+  *Answered by the fix pass by taking the second arm at request time instead of at boot:* `/api/checkout`
+  refuses with `503` and the missing variable names when the deployment intends to charge and cannot service
+  the charge (`checkMoneyPath()`, R14-1b), while every other route keeps serving — the site stays up, money
+  cannot move, and the reason is in the response rather than in a banner. `requireProdEnv()` is still defined
+  and still never called, so a degraded boot remains something this codebase cannot do, deliberately, and
+  whether it should is still doc 15's question. The pass did not pre-empt it.
 
 ## 10. Cross-references
 
@@ -962,6 +1397,35 @@ consequence), R14-3, then the two-line hardening pair.
   acceptance quoted in R14-11.
 - `doc/review/FINDINGS.md` — R14-1…R14-11 are registered there in id order with severity and status.
 
+Added by the fix pass (§5.16):
+
+- `lib/moneyPath.ts` + `lib/moneyPath.test.ts` are this doc's own artefacts: the one place that turns "this
+  deployment intends to charge" and "this deployment can service a charge" into a verdict, so R14-1(b)'s
+  refusal is a decision the tests can read rather than a condition written inline in the checkout handler.
+  §5.16 records all seven rows of its truth table.
+- `lib/ip.ts` and `lib/rateStore.ts`'s `StoreErrorPolicy` are where R14-2 landed. The policy is a *per-call
+  argument* (`onStoreError: "closed"` at the four senders and at the job/admin gate, not a default), so a route
+  that can spend money or send mail is the one that has to say it means it; the header ladder lives in a module
+  with its own tests. `lib/ops.test.ts` is where both halves are pinned — the header ladder at `:75-111`
+  (`cf-ray` proof, rightmost hop, `x-real-ip`, one shared bucket) and the store policy beside it.
+- `doc/review/13-jobs-and-cron.md` carries R14-8's corrections: §5.3's transcript is marked pre-fix and the
+  query-string `?secret=` form is described as deleted. The evidence for a finding that says "the token was in
+  the URL" is a transcript of the URL, so the doc that recorded it is the doc that had to change.
+- `lib/audit.ts`'s `OUTBOX_RETRY` action (R14-9) is the first enum member added for a `14` finding: the retry
+  route was the last `/api/admin/*` write with no row, and doc 13's R13-1 owns that route's contract, so the
+  two docs now describe the same write — the row's `detail` carries the dedupe key and the mail type, and
+  `actorRef` carries the operator name the body supplies.
+- `app/api/unsubscribe/route.ts`'s `UNSUB_CSP` (R14-6) is a page-local `Content-Security-Policy` **response
+  header**, not a change to `next.config.mjs`: it constrains the one page whose body is built from query
+  parameters, and §8's unticked row records that the site-wide `script-src` was deliberately left alone.
+- `ops/accepted-advisories.json` + `scripts/audit-prod.mjs` (R14-11) — **verified, not edited**: the pass
+  confirmed the acceptance is enforced in CI on every push and on the daily schedule
+  (`.github/workflows/ci.yml:52`), that both advisories still fail for the reason recorded, and that the entry
+  expires 2026-12-31; §5.16 records why the next change deletes the entry rather than extends it.
+- `.env.example` (`DEV_MANAGE_TOKENS=`) and `HANDOFF.md`'s reference environment list are R14-7's
+  operator-facing halves: a flag whose default is *off*, and one more name in the inventory an operator reads
+  before a deploy. `HANDOFF.md` also carries the widened `audit:prod` gate line.
+
 ## 11. Change log
 
 | Date | Change |
@@ -970,17 +1434,43 @@ consequence), R14-3, then the two-line hardening pair.
 | 2026-09-15 | §5.6 key table corrected from the call sites (`manage:${ip}`, `manage-verify:${ip}`, `profile:${ip}`, `search:${ip}`) |
 | 2026-09-15 | §5.15 added: the planned non-string-field 500 finding was **not** reproduced and is not registered |
 | 2026-09-15 | R14-10 replaced the dropped field-validation finding with the credential-rejection observability gap, on the strength of `lib/jobs.ts`'s missing logging |
+| 2026-09-16 | fix pass for R14-1…R14-11: each finding's evidence is in §5.16 (a new section), its `Fix.`/`Status.` lines are in §7, the after-fix rows are in §6, and §8's tally moved from 7 of 16 to **12 of 16** |
+
+Written against a real Postgres: the same `postgres:16-alpine` the `08`–`13` passes used on host port 55433,
+all **eleven** migrations `0000`–`0010` applied, `npm run test:ci` green at **53 files / 791 passed /
+0 skipped** (768 → 791, the +23 accounted for file by file in §5.16), the DB-less run green at 46 passed |
+7 skipped files and 662 passed | 129 skipped tests, `tsc` and `eslint` clean, `prisma format --check` and
+`validate` clean, `npm run audit:prod` exit 0, and the production-config gate exercised on **both** arms.
+The pass added one module and one suite (`lib/moneyPath.ts`, `lib/moneyPath.test.ts`, 7 tests), a second
+module for the header ladder (`lib/ip.ts`), a per-call failure policy in `lib/rateStore.ts`, and edits across
+eight routes — the four senders, the two job routes, the profile route and the unsubscribe page. Nothing was
+pushed, no production row was read, and no secret was printed: the write half of the verification ran against
+the local container, and the deployment-only questions are itemised in §12. **One side effect is worth naming
+because it looked like a failure and was not:** `lib/routes.test.ts`'s probe helper had to carry a `cf-ray`
+proof for its per-IP limiter keys to stay distinct under the new header ladder (`:283-300`), so that file's
+sixteen tests are unchanged in what they assert and changed only in the headers they send. Two of this doc's
+own findings were answered *in part* by decision rather than by code — R14-3 (cap yes, double opt-in deferred)
+and R14-10 (recorded yes, alerted no) — and R14-4 was rejected as written; §8 states each of those reasons
+where the box stays unticked.
 
 ## 12. UNKNOWN log
 
 | Id | Unknown | What settles it |
 |---|---|---|
-| U14-1 | Whether any `Payment` row is in flight (`provider = STRIPE`, unsettled) and the `PaymentProvider` distribution — the fact that decides whether R14-1's failure mode *strands* an existing buyer or only creates free ones | Operator, Neon SQL: `SELECT provider, status, count(*) FROM "Payment" GROUP BY 1,2;` — counts only; no rows exported into this repository |
-| U14-2 | Whether `ADMIN_TOKEN` and `PAYMENTS_LIVE` are set in production, and consistent with each other | `vercel env ls production` (names only, never values) plus the payment link rendered on `/`; note the fail-closed `403` proves nothing about presence |
-| U14-3 | Whether `RESEND_API_KEY`, `UPSTASH_REDIS_REST_URL`/`_TOKEN` and `TURNSTILE_SECRET` are set in production — decides whether R14-3 delivers and whether §5.6's limits are shared | Vercel → Logs at process start: the single `rate-limit: no shared store configured … using instance-local memory` line, the Turnstile not-configured warning; a delivered mail's `DKIM`/`Return-Path` headers prove Resend |
-| U14-4 | Whether any alias of a preview deployment is reachable without Vercel Authentication | Enumerate `gh api repos/danilgorbunofff/PeriodicTable/deployments` (and `…/deployments/<id>/statuses`) and `curl -sS -o NUL -D -` each host, expecting `302 → vercel.com/sso-api`; one branch-alias form did not resolve from this host (`curl` exit `000`) |
-| U14-5 | Which request header this deployment sets as the client identity, i.e. whether `x-forwarded-for`/`x-real-ip` can be trusted as the limiter key | One request per header value against a harmless production route and comparison of limiter behaviour, or the Vercel project's edge configuration; **blocks the R14-2 fix** |
-| U14-6 | Whether Vercel adds `Access-Control-Allow-Origin: *` to any `/api/*` response besides `/` | Header sweep: `curl -sS -D - -o NUL` over all 26 production routes (§5.1 captured `/` and `/api/stats`; `/` has it, `/api/stats` does not). Matters only if a cookie-authenticated route is added later |
-| U14-7 | The last-rotation dates of `STRIPE_WEBHOOK_SECRET`, `CRON_SECRET`, `ADMIN_TOKEN`, `CLICK_SALT` (and whether `CLICK_SALT` is set at all — unset means the literal `"ptl-dev-salt"` is hashed into every `Report.ipHash`) | Provider consoles plus a dated line per secret in the runbook; **values are never printed**, only names and dates |
-| U14-8 | Whether a real browser blocks a foreign-host `logoUrl` render, and whether a future build keeps `script-src` free of `'unsafe-inline'` | Browser matrix against a listing whose `logoUrl` points at a foreign host (needs a manage session, i.e. after the v2 manage pages ship); the CSP half is re-checkable on every deploy from the headers §5.1 captured |
+| U14-1 | Whether any `Payment` row is in flight (`provider = STRIPE`, unsettled) and the `PaymentProvider` distribution — the fact that decides whether R14-1's failure mode *strands* an existing buyer or only creates free ones | Operator, Neon SQL: `SELECT provider, status, count(*) FROM "Payment" GROUP BY 1,2;` — counts only; no rows exported into this repository *The fix pass changes what this row decides.* The free-stake half of R14-1 is now unreachable from a preview and from any production process, so the risk this query measures is a **stranded buyer** — a payment taken before the deployment started refusing what it cannot service — which makes it the first thing an operator should look at rather than a curiosity. It also remains the only row here that can be answered in one minute |
+| U14-2 | Whether `ADMIN_TOKEN` and `PAYMENTS_LIVE` are set in production, and consistent with each other | `vercel env ls production` (names only, never values) plus the payment link rendered on `/`; note the fail-closed `403` proves nothing about presence *Unchanged as a fact, one variable narrower as a risk:* `PAYMENTS_LIVE` without a configured provider no longer buys anything, because `/api/dev/pay` answers `404` in production before the flag is read (R14-1a, §5.16), so the pair's live question reduces to whether `ADMIN_TOKEN` is set. `npm run audit:prod` checks presence by name (never values) on every push and schedule, which turns this row's first half into a CI fact for the nine variables it lists |
+| U14-3 | Whether `RESEND_API_KEY`, `UPSTASH_REDIS_REST_URL`/`_TOKEN` and `TURNSTILE_SECRET` are set in production — decides whether R14-3 delivers and whether §5.6's limits are shared | Vercel → Logs at process start: the single `rate-limit: no shared store configured … using instance-local memory` line, the Turnstile not-configured warning; a delivered mail's `DKIM`/`Return-Path` headers prove Resend *Unchanged as a fact, bounded as a consequence:* an unset `RESEND_API_KEY` now costs the waitlist *confirmation* rather than exposing a relay, because the path mails only unknown, unsuppressed addresses and caps a source at five new ones per day (R14-3). One name should be added to this row's read: `RESEND_WEBHOOK_SECRET`, without which `/api/webhooks/resend` cannot record a bounce or complaint — and that record is the suppression list the cap consults |
+| U14-4 | Whether any alias of a preview deployment is reachable without Vercel Authentication | Enumerate `gh api repos/danilgorbunofff/PeriodicTable/deployments` (and `…/deployments/<id>/statuses`) and `curl -sS -o NUL -D -` each host, expecting `302 → vercel.com/sso-api`; one branch-alias form did not resolve from this host (`curl` exit `000`) *Less load-bearing than when written, and still unanswered:* nothing reachable on a preview mints capability now — `devSimulatorEnabled()` requires a `development`/`test` app env and `__devToken` requires the literal `development` (R07-2, R14-7) — so an open alias costs a staging surface, not a stake or a manage token. It matters for a different reason if that alias is wired to the **production** database, and which database a preview points at is not visible from a checkout |
+| U14-5 | Which request header this deployment sets as the client identity, i.e. whether `x-forwarded-for`/`x-real-ip` can be trusted as the limiter key | One request per header value against a harmless production route and comparison of limiter behaviour, or the Vercel project's edge configuration; **blocks the R14-2 fix** *The fix pass took the answer-agnostic path this row was blocking.* `clientIp()` honours `cf-connecting-ip` only behind a `cf-ray` proof, then the rightmost usable `x-forwarded-for` hop, then `x-real-ip`, and puts anything carrying none of them in one shared bucket — so R14-2 is closed without this answer, at the cost of a coarser ceiling in the worst case. Answering it would still sharpen "one bucket" into "one bucket per client", and it decides whether the rightmost-hop fallback is the *right* hop. §5.16 records the ladder and `lib/ip.ts` the code |
+| U14-6 | Whether Vercel adds `Access-Control-Allow-Origin: *` to any `/api/*` response besides `/` | Header sweep: `curl -sS -D - -o NUL` over all 26 production routes (§5.1 captured `/` and `/api/stats`; `/` has it, `/api/stats` does not). Matters only if a cookie-authenticated route is added later *Unchanged, and cheaper to check in the same sweep:* no route this pass touched sets an origin header, and every `/api/admin/*` write this doc audits is token-gated rather than cookie-gated, so a wildcard would still be inert. The question is about Vercel's behaviour on this project, not about anything in the repository |
+| U14-7 | The last-rotation dates of `STRIPE_WEBHOOK_SECRET`, `CRON_SECRET`, `ADMIN_TOKEN`, `CLICK_SALT` (and whether `CLICK_SALT` is set at all — unset means the literal `"ptl-dev-salt"` is hashed into every `Report.ipHash`) | Provider consoles plus a dated line per secret in the runbook; **values are never printed**, only names and dates *Unchanged, and one name longer:* the pass added `DEV_MANAGE_TOKENS` to `.env.example` — an opt-in flag whose default is off and which has no value to rotate — so the inventory below is the same list plus a boolean. Nothing was rotated in this pass: `CRON_SECRET` and `CLICK_SALT` are as old as they were, and `CLICK_SALT` unset still means the literal `"ptl-dev-salt"` is hashed into every `Report.ipHash` |
+| U14-8 | Whether a real browser blocks a foreign-host `logoUrl` render, and whether a future build keeps `script-src` free of `'unsafe-inline'` | Browser matrix against a listing whose `logoUrl` points at a foreign host (needs a manage session, i.e. after the v2 manage pages ship); the CSP half is re-checkable on every deploy from the headers §5.1 captured *Unchanged in both halves, with the CSP half now a stated decision rather than an omission:* the pass added a page-local CSP response header to the unsubscribe page (R14-6) and deliberately did not touch `script-src` in `next.config.mjs`, so the site-wide header still carries `'unsafe-inline'` and the two Turnstile entries nothing calls. The browser half stays unmeasured — it needs a manage session and a listing whose `logoUrl` points at a foreign host — with R14-5 now at least bounding what such a value can be (2048 characters, control characters rejected) |
 
+**Nothing in this table was settled by the fix pass.** Two rows lost their blocking power without being
+answered — U14-5, because the R14-2 fix was written to be correct whichever header the deployment sets, and
+U14-4, because a preview can no longer mint a stake or a manage token — and one was *inverted*: U14-1 goes from
+a curiosity about stranded rows to the first query an operator should run, since the free-stake path is closed
+and the cost of a bad deployment is now a buyer whose money moved while checkout answered `503`. U14-3 grew one
+name that its own evidence list should carry (`RESEND_WEBHOOK_SECRET`, without which a bounce is never
+suppressed). The remaining four — U14-2, U14-6, U14-7, U14-8 — are unchanged facts about the deployment, which
+is the honest yield of a pass that read no production value and printed no secret.

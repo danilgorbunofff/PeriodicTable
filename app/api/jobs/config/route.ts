@@ -62,11 +62,8 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({
  * variables are missing.
  */
 async function getConfig(req: NextRequest) {
-  const denied = await jobGate(
-    req,
-    "jobs/config",
-    req.nextUrl.searchParams.get("secret"),
-  );
+  // No query secret (R14-8): see jobs/reconcile.
+  const denied = await jobGate(req, "jobs/config");
   if (denied) return denied;
 
   const { findings } = getProdConfigReport();

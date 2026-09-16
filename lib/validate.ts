@@ -132,8 +132,43 @@ export function validateCheckoutInput(input: {
 }
 
 export type ProfileInputResult =
-  | { ok: true; url: string; domain: string; title: string; pitch: string; linkType: "product" | "social" }
+  | {
+      ok: true;
+      url: string;
+      domain: string;
+      title: string;
+      pitch: string;
+      linkType: "product" | "social";
+      /**
+       * R14-5: the normalised logo URL (null when none was sent), so the caller
+       * stores the value this function checked instead of the raw body field.
+       */
+      logoUrl: string | null;
+    }
   | { ok: false; error: string; field?: "url" | "title" | "pitch" | "email" | "logoUrl" };
+
+/** R14-5: a logo URL is echoed by every public payload and rendered as <Avatar
+ *  src> on the profile page, so the only value worth storing is one with a
+ *  scheme, no credentials and no control characters — and a bounded one. */
+const LOGO_URL_MAX = 2048;
+
+/** R14-5: this used to be a truthiness test only — `if (!normalizeUrl(x))` then
+ *  `return base` — which meant the normalised value was thrown away and the
+ *  route persisted `body.logoUrl.trim()`: mixed-case host, trailing whitespace
+ *  from inside a URL, embedded credentials, control characters and unbounded
+ *  length all reached the database and from there the public payloads. */
+function normalizeLogoUrl(
+  raw: string | null | undefined
+): { ok: true; value: string | null } | { ok: false } {
+  if (raw == null || raw === "") return { ok: true, value: null };
+  const trimmed = raw.trim();
+  if (trimmed.length > LOGO_URL_MAX) return { ok: false };
+  // Reject rather than strip, so the owner is told instead of silently getting
+  // a different logo URL than the one they typed.
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return { ok: false };
+  const url = normalizeUrl(trimmed);
+  return url ? { ok: true, value: url } : { ok: false };
+}
 
 /**
  * Verified-owner profile update validation (Phase 1 management sessions).
@@ -159,10 +194,9 @@ export function validateProfileInput(input: {
       return { ok: false, error: "That email doesn't look right.", field: "email" };
     }
   }
-  if (input.logoUrl != null && input.logoUrl !== "") {
-    if (!normalizeUrl(input.logoUrl)) {
-      return { ok: false, error: "Logo must be a full https:// URL.", field: "logoUrl" };
-    }
+  const logo = normalizeLogoUrl(input.logoUrl);
+  if (!logo.ok) {
+    return { ok: false, error: "Logo must be a full https:// URL.", field: "logoUrl" };
   }
-  return base;
+  return { ...base, logoUrl: logo.value };
 }

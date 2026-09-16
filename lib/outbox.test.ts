@@ -88,6 +88,9 @@ afterAll(async () => {
     return;
   }
   delete penv.ADMIN_TOKEN;
+  await prisma.auditLog.deleteMany({
+    where: { action: "OUTBOX_RETRY", detail: { contains: TAG } },
+  });
   await prisma.outboxEvent.deleteMany({
     where: { dedupeKey: { contains: TAG } },
   });
@@ -310,7 +313,7 @@ describe.skipIf(!hasDb)("outbox row lifecycle", () => {
     rank: 1,
     domain: "p6-ob.dev",
   });
-  const postRetry = (dedupeKey: string) =>
+  const postRetry = (dedupeKey: string, operator?: string) =>
     outboxRetryPOST(
       req("/api/admin/outbox/retry", {
         method: "POST",
@@ -320,9 +323,48 @@ describe.skipIf(!hasDb)("outbox row lifecycle", () => {
           "Content-Type": "application/json",
           authorization: "Bearer " + ADMIN,
         },
-        body: JSON.stringify({ dedupeKey }),
+        body: JSON.stringify(operator ? { dedupeKey, operator } : { dedupeKey }),
       }),
     );
+
+  /* R14-9: this is the one privileged action whose effect is that mail goes out
+     — a leaked ADMIN_TOKEN could otherwise use it to resend receipts with nothing
+     in the trail to show it happened. The audit row is written after the reset, so
+     a refusal records no retry that did not occur. */
+  it("audits the retry with the operator's name, and nothing on a refusal", async () => {
+    const retries = () => prisma.auditLog.count({ where: { action: "OUTBOX_RETRY" } });
+    const before = await retries();
+    const row = await mk({ attempts: OUTBOX_MAX_ATTEMPTS, lastError: "exhausted" });
+
+    expect((await postRetry(row.dedupeKey, "dana@ops.test")).status).toBe(200);
+    expect(await retries()).toBe(before + 1);
+    const written = await prisma.auditLog.findFirstOrThrow({
+      where: { action: "OUTBOX_RETRY" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(written).toMatchObject({ actorType: "operator", actorRef: "dana@ops.test" });
+    // The key is what an operator greps for, so it leads the detail; the type
+    // follows because a queue row with no type is not actionable.
+    expect(written.detail).toBe(`${row.dedupeKey} ${row.type}`);
+
+    // A caller who sends no name is still recorded as the operator surface.
+    const second = await mk({ attempts: OUTBOX_MAX_ATTEMPTS, lastError: "exhausted" });
+    expect((await postRetry(second.dedupeKey)).status).toBe(200);
+    const unnamed = await prisma.auditLog.findFirstOrThrow({
+      where: { action: "OUTBOX_RETRY" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(unnamed.actorRef).toBe("operator");
+
+    // Both refusals: a key that does not exist, and a row the log calls sent.
+    const delivered = await mk({ type: "RECEIPT_EMAIL", payload: receiptPayload(), completedAt: new Date() });
+    await prisma.emailLog.create({
+      data: { to: MAIL_TO, template: "receipt", status: "sent", dedupeKey: delivered.dedupeKey },
+    });
+    expect((await postRetry(`${TAG}no-such-key`)).status).toBe(404);
+    expect((await postRetry(delivered.dedupeKey)).status).toBe(409);
+    expect(await retries()).toBe(before + 2);
+  });
 
   it("a provider refusal fails its row, and the operator retry puts it back in flight", async () => {
     const row = await mk({

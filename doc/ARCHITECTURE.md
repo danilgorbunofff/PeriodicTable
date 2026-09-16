@@ -128,8 +128,17 @@ allows two, both used).
 ## 8. Abuse controls & moderation
 
 Rate limits (`rateLimitAsync`) share atomic storage via Upstash REST when
-configured, memory otherwise (fails open, warns in prod). Client IP:
-Cloudflare → Vercel → XFF-leftmost (documented trust). Listing URLs reject
+configured, memory otherwise (fail open by default, warns in prod; the routes
+whose limiter *is* the abuse control pass `onStoreError: "closed"` — R14-2).
+Client IP: `cf-ray` proof → rightmost usable `x-forwarded-for` hop → `x-real-ip`,
+else `0.0.0.0` (R14-2: a value the caller can choose is never trusted). Refusals
+from the job/admin gates are metered per source and logged by credential *shape*,
+never by value (R14-10). A live shop must also be serviceable before it sells:
+`checkMoneyPath()` refuses checkout when a `required` production variable is
+missing (R14-1), and `/api/dev/pay` answers `404` on every production process.
+The waitlist mails a first-time address only, capped per source and day (R14-3),
+and the one public form that renders a caller-supplied token carries its own
+`default-src 'none'` CSP (R14-6). Listing URLs reject
 credentials, IPs, localhost/metadata. CSP + hardening headers in
 `next.config.mjs` (script-src keeps `unsafe-inline` for Next hydration —
 no nonce plumbing yet). Reports → triage states + operator notes; HIDE
@@ -194,4 +203,6 @@ Required in production (`check-prod-env` fails closed): `DATABASE_URL`,
 without it limits are instance-local memory and fail open with a prod warning),
 `ADMIN_TOKEN` (operator endpoints; 403 when unset, even in development), `PAYMENTS_LIVE` +
 `NEXT_PUBLIC_PAYMENTS_LIVE` (explicit `"true"` + both Stripe keys, else waitlist),
+`DEV_MANAGE_TOKENS` (development-only: `"1"` returns the manage token in the HTTP
+response as `__devToken`; the token is not minted otherwise — R14-7),
 `RESERVATION_TTL_MS` (rehearsal only), `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`.

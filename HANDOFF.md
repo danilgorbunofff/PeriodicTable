@@ -133,9 +133,11 @@ skipping it is a defensible choice, not a risk.
 
 **Fix (one dashboard action, user-side):** a free 10-minute pinger such as
 cron-job.org. All five job paths accept a plain **GET** with header
-`Authorization` set to a bearer token taken from the `CRON_SECRET` env var
-(older pingers can use `?secret=<CRON_SECRET>` on the URL instead) and need no
-body:
+`Authorization` set to a bearer token taken from the `CRON_SECRET` env var and
+need no body. The older `?secret=<CRON_SECRET>` query form is gone (security
+review `14` R14-8: a query string ends up in access logs and never
+authenticated anything) — a pinger that cannot set headers has to `POST` a JSON
+body `{"secret":"<CRON_SECRET>"}` instead:
 
 - `https://www.periodictable.lol/api/jobs/outbox?limit=25`
 - `https://www.periodictable.lol/api/jobs/screenshot?limit=10`
@@ -821,7 +823,8 @@ newest production deployment, not GitHub's commit status (see the traps below).
    retry latency stays 4 h 38 m and the daily `vercel.json` backstop is the
    accepted floor.
    If you do set it up, all **four** job URLs go on the same list, bearer `CRON_SECRET`
-   (or `?secret=<CRON_SECRET>` if the pinger cannot set headers): the two worker
+   (no query form since `14` R14-8 — a header-less pinger `POST`s `{"secret":…}`):
+   the two worker
    paths plus `/api/jobs/config` and `/api/jobs/reconcile`. Alert on **any
    non-2xx** — `200` now means authenticated *and* healthy. `config` names any
    missing required production env; `reconcile` names a paid payment whose
@@ -867,13 +870,18 @@ newest production deployment, not GitHub's commit status (see the traps below).
   `RESEND_API_KEY`, `EMAIL_FROM`, `CLICK_SALT`, `TURNSTILE_SECRET`,
   `NEXT_PUBLIC_TURNSTILE_SITEKEY`, `CRON_SECRET`, `PAYMENTS_LIVE`,
   `NEXT_PUBLIC_PAYMENTS_LIVE`, `ADMIN_TOKEN`, `UPSTASH_REDIS_REST_URL`,
-  `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional)
+  `UPSTASH_REDIS_REST_TOKEN`, `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (optional),
+  `DEV_MANAGE_TOKENS` (optional, `"1"` in development only — returns the
+  manage token from `POST /api/manage/request` as `__devToken`; R14-7)
 - Money smoke tests:
   - `BASE_URL=https://www.periodictable.lol bash scripts/rehearse-release.sh paused`
   - `BASE_URL=http://localhost:3100 ADMIN_TOKEN=… STRIPE_WEBHOOK_SECRET=… bash scripts/rehearse-release.sh live`
 - Full local gate: `npm ci` → `prisma migrate deploy` (local DB) → `npm run lint` →
   `npm run typecheck` → `TEST_DATABASE_URL=… npm run test:ci` (must be 0 skipped) →
-  `npm run audit:prod` → prod-env gate fail-without / pass-with secrets
+  `npm run audit:prod` (enforces `ops/accepted-advisories.json`: one accepted
+  `next@14.2.35` advisory set, assessed by reachability with a tripwire and an
+  expiry — `14` R14-11; the pinned version, the tripwire and the expiry must all
+  stay in sync) → prod-env gate fail-without / pass-with secrets
 - Prod data check: `curl -s https://www.periodictable.lol/api/stats`
 - Registrar: GoDaddy. `A @ → 216.198.79.1` (Vercel-assigned),
   `CNAME www → periodictable.lol.`. **Mail rows (`MX`, `email`,
