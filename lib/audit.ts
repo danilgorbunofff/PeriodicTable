@@ -41,7 +41,12 @@ export type AuditAction =
   /** R10-7: the provider reported an address it could not deliver to; the
    *  address is now refused for list mail. `detail` carries the provider's
    *  event and reason — a bounce is only actionable with both. */
-  | "EMAIL_UNDELIVERABLE";
+  | "EMAIL_UNDELIVERABLE"
+  /** R12-4: an operator erased a data subject on request. The action itself is
+   *  the record; `detail` carries per-scope counts only, never the address or
+   *  the hashed IP that was erased, or the erasure would recreate the data it
+   *  removes. */
+  | "SUBJECT_ERASED";
 
 export async function audit(
   entry: {

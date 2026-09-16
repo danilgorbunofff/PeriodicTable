@@ -15,6 +15,9 @@ async function listReports(req: NextRequest) {
   // cast straight into Prisma, so `?status=open` (or a typo) rendered an empty
   // queue — indistinguishable from "no reports", which is how a real report
   // gets missed. 400 says the filter was wrong; 200 [] keeps meaning none.
+  // The values are the Prisma member spelling ("OPEN"), not the column's mapped
+  // one ("open"): ReportStatus is @map-ed, and every filter has to speak the
+  // member name. See the wire-conventions note in doc/ARCHITECTURE.md (R12-7).
   const status = req.nextUrl.searchParams.get("status");
   if (status !== null && !isReportStatus(status)) {
     return apiError("Unknown report status.", { status: 400, code: "BAD_STATUS" });

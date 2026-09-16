@@ -5,14 +5,18 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ApiError,
   fetchJson,
+  isReportStatus,
   isStatsResponse,
   isTableOrderRows,
   isBoardRows,
   isActivityRows,
   isSearchHits,
   isElementDetail,
+  REPORT_STATUSES,
 } from "./api";
 import { apiJson, apiRoute, codeForStatus, withContract } from "./route";
+import { ChemicalFamily, PrestigeTier, ReportStatus } from "@prisma/client";
+import { FAMILY_FILL } from "./familyFill";
 import { aggregateEarlyAdopters, aggregateTableOrder, rankByElement, rankCrowns, rankEarlyAdopters } from "./boards";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -178,6 +182,50 @@ describe("route wiring (R11-3, R11-4)", () => {
       if (path.startsWith("admin/")) expect(src, `${path} must use adminGate`).toContain("adminGate(");
       if (path.startsWith("jobs/")) expect(src, `${path} must use jobGate`).toContain("jobGate(");
     }
+  });
+});
+
+describe("wire case for enum-valued fields (R12-7)", () => {
+  const elementRoute = routeSources().find(([path]) => path === "elements/route.ts")?.[1] ?? "";
+
+  it("sends uppercase members for the three DB enums, tier included", () => {
+    // A Prisma enum field is always presented as its member name, whether or not
+    // the column carries an @map — so the member spelling is what reaches the
+    // wire. ChemicalFamily and PrestigeTier are unmapped and uppercase; tier is
+    // compared as "EXOTIC" in lib/gridGeometry.ts and the family string is a
+    // FAMILY_FILL key, so both consumers assume this case and would render blank
+    // tiles if it changed.
+    expect(Object.values(ChemicalFamily)).toEqual(Object.keys(ChemicalFamily));
+    expect(Object.values(PrestigeTier)).toEqual(Object.keys(PrestigeTier));
+    expect(PrestigeTier.EXOTIC).toBe("EXOTIC");
+    expect(Object.keys(FAMILY_FILL)).toEqual(Object.keys(ChemicalFamily));
+  });
+
+  it("passes the element enum fields through untouched", () => {
+    expect(elementRoute).toMatch(/\bfamily: e\.family,/);
+    expect(elementRoute).toMatch(/\btier: e\.tier,/);
+  });
+
+  it("takes the operator report filter in the member spelling, not the column's", () => {
+    // ReportStatus is the one enum with an @map: the row on disk says "open"
+    // while Prisma and its filters speak "OPEN". The URL parameter follows the
+    // member spelling, and ?status=open is a 400 rather than an empty queue —
+    // both pinned behaviourally in lib/moderation.test.ts.
+    expect(ReportStatus.OPEN).toBe("OPEN");
+    expect([...REPORT_STATUSES].sort()).toEqual(Object.keys(ReportStatus).sort());
+    for (const value of REPORT_STATUSES) expect(value).toBe(value.toUpperCase());
+    expect(isReportStatus("open")).toBe(false);
+    expect(isReportStatus("OPEN")).toBe(true);
+  });
+
+  it("keeps the plain-String activity kind lowercase, unlike the enums", () => {
+    // ActivityLog.kind is a String column with no enum behind it, so nothing in
+    // the database says anything about its case: only the writers and the
+    // client agreeing do. lib/recompute.ts is the write path that lands both the
+    // literal "refund" and each caller's StakeKind ("stake" | "reclaim").
+    const recompute = readFileSync(join(process.cwd(), "lib/recompute.ts"), "utf8");
+    const refund = /kind: "([a-z_]+)",/.exec(recompute)?.[1];
+    expect(refund).toBe("refund");
   });
 });
 

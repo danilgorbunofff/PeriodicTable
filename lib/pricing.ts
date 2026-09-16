@@ -175,18 +175,23 @@ export function rankStakes<T extends { amountUsd: number; createdAt?: Date | str
 }
 
 /**
- * Ledger invariants asserted before commit (Phase 3 item 9). Throws on any
- * violation — the transaction aborts instead of persisting corrupt state.
+ * The invariant checks, as data rather than as a throw (R12-2). Kept separate
+ * so the pre-commit writer (assertLedgerInvariants, on the write path) and the
+ * read-only detector (aggregateDrift, in lib/recompute.ts) ask the SAME
+ * questions — a detector with its own copy of the rules answers a different
+ * question than the writer enforces, which is how a drift report ends up green
+ * while settlement rejects.
+ *
+ * Order matters: assertLedgerInvariants throws the first entry, so the message
+ * a failing write produces is unchanged.
  */
-export function assertLedgerInvariants(
+export function ledgerInvariantFailures(
   ranked: { id: string; startupId: string; amountUsd: number; rank: number; isLeader: boolean }[],
   aggregate: { totalPoolUsd: number; stakeCount: number; currentLeaderId: string | null }
-): void {
-  const fail = (msg: string): never => {
-    throw new Error(`ledger-invariant: ${msg}`);
-  };
+): string[] {
+  const failures: string[] = [];
   for (let i = 0; i < ranked.length; i++) {
-    if (ranked[i].rank !== i + 1) fail(`rank gap at index ${i}`);
+    if (ranked[i].rank !== i + 1) failures.push(`rank gap at index ${i}`);
   }
   const leaders = ranked.filter((r) => r.isLeader);
   const liveBids = ranked.filter((r) => r.amountUsd > 0);
@@ -194,14 +199,27 @@ export function assertLedgerInvariants(
     // No live bid: every stake on the element was reversed away. The rows
     // remain (click history / first-claims reference them), so there is simply
     // no leader to point at.
-    if (leaders.length !== 0) fail(`leader without a live bid (${leaders.length})`);
-    if (aggregate.currentLeaderId !== null) fail("leader on unbid element");
+    if (leaders.length !== 0) failures.push(`leader without a live bid (${leaders.length})`);
+    if (aggregate.currentLeaderId !== null) failures.push("leader on unbid element");
   } else {
-    if (leaders.length !== 1) fail(`expected 1 leader, saw ${leaders.length}`);
-    if (!ranked[0].isLeader) fail("rank 1 is not the leader");
-    if (aggregate.currentLeaderId !== leaders[0].startupId) fail("currentLeaderId mismatch");
+    if (leaders.length !== 1) failures.push(`expected 1 leader, saw ${leaders.length}`);
+    if (!ranked[0].isLeader) failures.push("rank 1 is not the leader");
+    if (aggregate.currentLeaderId !== leaders[0].startupId) failures.push("currentLeaderId mismatch");
   }
   const pool = ranked.reduce((sum, s) => sum + s.amountUsd, 0);
-  if (aggregate.totalPoolUsd !== pool) fail(`pool ${aggregate.totalPoolUsd} != sum ${pool}`);
-  if (aggregate.stakeCount !== ranked.length) fail(`count ${aggregate.stakeCount} != rows ${ranked.length}`);
+  if (aggregate.totalPoolUsd !== pool) failures.push(`pool ${aggregate.totalPoolUsd} != sum ${pool}`);
+  if (aggregate.stakeCount !== ranked.length) failures.push(`count ${aggregate.stakeCount} != rows ${ranked.length}`);
+  return failures;
+}
+
+/**
+ * Ledger invariants asserted before commit (Phase 3 item 9). Throws on any
+ * violation — the transaction aborts instead of persisting corrupt state.
+ */
+export function assertLedgerInvariants(
+  ranked: { id: string; startupId: string; amountUsd: number; rank: number; isLeader: boolean }[],
+  aggregate: { totalPoolUsd: number; stakeCount: number; currentLeaderId: string | null }
+): void {
+  const failures = ledgerInvariantFailures(ranked, aggregate);
+  if (failures.length > 0) throw new Error(`ledger-invariant: ${failures[0]}`);
 }

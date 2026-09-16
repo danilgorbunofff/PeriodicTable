@@ -7,6 +7,7 @@ import { hasTestDb, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "../app/api/jobs/reconcile/route";
+import { aggregateDrift } from "./recompute";
 import { recordProviderEvent } from "./settle";
 
 const prisma = testPrisma();
@@ -26,6 +27,7 @@ type Report = {
   paidTotal: number;
   divergent: { count: number; samples: { id: string; amountUsd: number; providerAmount: number | null }[] };
   unapplied: { count: number; scanned: number; samples: { event: string; detail: string | null }[] };
+  aggregate: { count: number; samples: { id: number; symbol: string; reasons: string[] }[]; note: string };
   stale: { count: number; samples: { id: string; createdAt: string }[]; note: string };
   unverified: {
     count: number;
@@ -265,5 +267,28 @@ describe.skipIf(!hasDb)("money reconciliation report", () => {
     expect(report.ok).toBe(true);
 
     await prisma.payment.delete({ where: { id: staleRow.id } });
+  });
+
+  // R12-2: the denormalised trio (totalPoolUsd / stakeCount / currentLeaderId)
+  // is asserted by its writer *inside* the writing transaction, so no app path
+  // can leave it drifted — which is exactly why this route has to be able to see
+  // a drift that arrived from outside the app (a hand-run UPDATE, a half-applied
+  // deploy). Nothing else in the product notices, and the element renders wrong
+  // (leader tile, pool total, bid count) until someone repairs it by hand.
+  it("fails ok when an element's aggregates disagree with its stake rows", async () => {
+    const baseline = (await call()).aggregate.count;
+
+    await prisma.element.update({ where: { id: TE }, data: { totalPoolUsd: 1 } });
+    const report = await call();
+    expect(report.ok).toBe(false);
+    // Counted, not sampled: the count must be the scan's own number, and the
+    // report must not cap it at the five samples it shows.
+    expect(report.aggregate.count).toBe((await aggregateDrift()).length);
+    expect(report.aggregate.count).toBe(baseline + 1);
+    expect(report.aggregate.samples.length).toBeLessThanOrEqual(5);
+    expect(report.aggregate.note).toContain("disagree with a recomputation");
+
+    await prisma.element.update({ where: { id: TE }, data: { totalPoolUsd: 0 } });
+    expect((await call()).aggregate.count).toBe(baseline);
   });
 });

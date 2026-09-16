@@ -29,6 +29,7 @@ import {
   suppressionStatus,
   unsuppressEmail,
   verifyResendWebhook,
+  type EmailLogStatus,
 } from "./email";
 
 const prisma = testPrisma();
@@ -237,6 +238,14 @@ describe.skipIf(!hasDb)("refusals live on the address", () => {
       providerRef: null,
     });
     expect(refund.status).toBe("logged"); // no RESEND_API_KEY in tests
+    // R12-3: `logged` is a member of the stored vocabulary (EmailLogStatus) —
+    // the value the schema comment denied — and the writer really persists it.
+    // The callers' `status` is `SendOutcome["status"]`, which also carries the
+    // bare `suppressed` that never reaches the column, so the vocabulary is
+    // pinned from the stored word rather than from the outcome.
+    const persisted: EmailLogStatus = "logged";
+    const refundRow = await prisma.emailLog.findUniqueOrThrow({ where: { id: refund.emailLogId } });
+    expect(persisted).toBe(refundRow.status);
 
     // An undeliverable address is the other family: even money mail stops.
     await suppressEmail({ email: MONEY_ADDR, reason: "bounce", source: "resend", detail: "permanent" });

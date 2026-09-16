@@ -64,18 +64,18 @@ Written as statements a reader can falsify, each with the constraint that enforc
 | P16 | `Report.note` fits the triage form; `Report.reason` fits the report form | `@db.VarChar(500)` / `(280)` | `schema.prisma:389,385`; `0004_phase6_ops/migration.sql:2` |
 | P17 | Free-text `Report`/`Startup` text cannot be nulled into a broken page | `Report.reason` and `Startup.{domain,title,pitch,url,logoUrl}` are `NOT NULL` | `schema.prisma:124-129,385` |
 | P18 | Money is a whole number of dollars, never a float | column type `integer` on all six money columns | §5.9 (catalog read) |
-| P19 | `Element.totalPoolUsd`, `.stakeCount`, `.currentLeaderId` equal what `Stake` says | **nothing, at the database level** — maintained by `rerankElementTx` in the same transaction as the stake write (`lib/recompute.ts:85-108`), checked by `assertLedgerInvariants` before that write (`lib/recompute.ts:97`) | §5.8, R12-1, R12-2 |
-| P20 | `Stake.rank`/`isLeader` agree with `amountUsd` order | **nothing, at the database level** — same writer, same assertion | §5.8, R12-1 |
-| P21 | A stake total is never negative | **nothing** — `Stake.amountUsd` is an unconstrained `integer`; the guard is a thrown JS error one layer up (`lib/recompute.ts:146-148`) | §5.9, R12-1 |
-| P22 | `EmailLog.status` is one of `sent`, `suppressed`, `error` | **nothing** — plain `String` with default `"sent"`, and the code writes a fourth value | `schema.prisma:371`; §5.11, R12-3 |
+| P19 | `Element.totalPoolUsd`, `.stakeCount`, `.currentLeaderId` equal what `Stake` says | **nothing, at the database level** — a CHECK cannot aggregate another table. Written by `rerankElementTx` in the same transaction as the stake write (`lib/recompute.ts:85-108`), checked by `assertLedgerInvariants` before that write (`lib/recompute.ts:97`), and since the fix pass also **detected afterwards** by `aggregateDrift` on every reconcile tick (§5.15) | §5.8, §5.15, R12-1, R12-2 |
+| P20 | `Stake.rank`/`isLeader` agree with `amountUsd` order | **nothing, at the database level** — same writer, same assertion. The detector re-orders the stakes with the writer's own `rankStakes` and judges the *trio* against it; it does not re-read the persisted `rank`/`isLeader` columns, so this promise is still only as good as the writer | §5.8, R12-1, R12-2 |
+| P21 | A stake total is never negative | the database **refuses it**: `Stake_amountUsd_nonnegative`, plus the matching CHECKs on `Payment.amountUsd`, `Payment.providerAmount` and both `Element` counters | `0009_data_invariants:28,30,34,45,47`; §5.9, §5.15, R12-1 |
+| P22 | `EmailLog.status` is one of `sent`, `suppressed`, `error` | **nothing refuses a fifth value** (plain `String`, default `"sent"`) — but the vocabulary is now named in code and corrected in the schema: `sent \| suppressed \| error \| logged` | `schema.prisma:371`; `lib/email.ts:98` (`EmailLogStatus`); §5.11, §5.15, R12-3 |
 | P23 | A payment cannot be deleted out from under its quote, its audit trail, or its provider events | `ON DELETE RESTRICT` on those three FKs | `0001_phase1_ownership:301,325`, `0002_phase2_webhook:24` |
 | P24 | An element or a listing cannot be deleted out from under money | `ON DELETE RESTRICT` from `Stake`, `Payment`, `ClaimReservation`, `FirstClaim` to `Element`/`Startup` | `0000_baseline:167,170`; `0001_phase1_ownership:289,292,295,298,310,313` |
 | P25 | Deleting a listing does not delete the ledger | `ON DELETE SET NULL` on `Element.currentLeaderId`, `Payment.stakeId`, `FirstClaim.stakeId`, `AuditLog.*`, `Report.{stakeId,startupId}`, `ProviderEvent.paymentId`, `ActivityLog.paymentId` | §5.7 |
 | P26 | Every read pattern the API uses has an index it could use | 15 indexes, listed in §5.6 against the 9 measured plans | §5.6 |
-| P27 | A customer's personal data can be found, exported, and deleted | **only found.** No export and no deletion path exists for any real row | §5.12, R12-4 |
+| P27 | A customer's personal data can be found, exported, and deleted | **found and erasable in place** since the fix pass: 12 scopes scrubbed by `lib/erasure.ts` behind `npm run db:erase-subject`, rows and ids kept for the RESTRICT constraints. Still no *export*, and the retention window is still an operator argument rather than a policy | `lib/erasure.ts`, `scripts/erase-subject.ts`; §5.12, §5.15, R12-4 |
 | P28 | A backup can be restored | Neon PITR is available on the plan and nothing about it has ever been exercised | §5.14, U12-1 |
 
-Three of those (P19–P21) are the ones that matter commercially, and they are the three that live only in application code. That asymmetry is the shape of this doc: the invariants the product sells are the invariants the database does not know about.
+Three of those (P19–P21) are the ones that matter commercially, and two of the three still live only in application code. That asymmetry is the shape of this doc: the invariants the product sells are the invariants the database does not know about. The fix pass narrowed it without closing it — the **sign** half of P21 became a constraint, the **aggregate** half of P19 became a detector, and P20's persisted `rank`/`isLeader` columns remain, as the section says, only as good as their single writer.
 
 ## 4. The path walked
 
@@ -196,6 +196,7 @@ WHERE e."totalPoolUsd" <> s.tot OR e."stakeCount" <> s.cnt
 **Stakes per element:** 24 elements carry one stake, 1 carries two, 1 carries eight (the concurrency probe's element). That distribution is the reason every plan in §5.6 is a `Seq Scan` — see the caveat there.
 
 ### 5.4 Migrations 0000–0006, replayed
+*At authoring there were seven directories; the tree holds ten today (`0007`–`0009` arrived with the `08`, `10` and `12` fix packs and are re-replayed in §5.15).*
 
 ```
  == migrations applied ==
@@ -301,7 +302,7 @@ The split is coherent and it is the right one: **money and identity RESTRICT; hi
 - **One writer.** `rerankElementTx` (`lib/recompute.ts:65-113`) re-ranks every stake on the element, writes `rank`/`isLeader` per row (`:85-89`), computes `totalPoolUsd` (`:93`), asserts the invariants against `assertLedgerInvariants` (`:97-101`), and then updates the element with all three (`:104-108`). It runs inside the caller's transaction, so the trio and the stakes commit together or not at all.
 - **One cost.** It rewrites every stake row of the element on every mutation — O(stakes on that element) write amplification per bid, which is fine at 8 and is `09`/`15`'s question at 800.
 - **Zero drift today.** §5.3, both directions (`totalPoolUsd`/`stakeCount` from `SUM`/`COUNT`, `currentLeaderId` from the top-`amountUsd` row, plus the `isLeader` flags).
-- **No detector.** The assertion runs *in the writer*. Nothing in the product ever recomputes the trio from `Stake` and compares, so a drift introduced by a manual `psql` UPDATE, a partially-failed deploy, or a future second writer would be invisible until it rendered wrong. `lib/reconcile.ts` looks at payments and stakes' existence, not at the trio (R12-2; `08` owns the reconcile contract).
+- **No detector.** The assertion runs *in the writer*. Nothing in the product ever recomputes the trio from `Stake` and compares, so a drift introduced by a manual `psql` UPDATE, a partially-failed deploy, or a future second writer would be invisible until it rendered wrong. `lib/reconcile.ts` looks at payments and stakes' existence, not at the trio (R12-2; `08` owns the reconcile contract). **Since the fix pass there is one** — `aggregateDrift` on every reconcile tick, §5.15.
 - **The tie-break is deterministic**, which is why the drift check is meaningful at all: `rankStakes` orders by `amountUsd` then `createdAt` then `id` (`lib/recompute.ts:79-84`), so "the leader" is a function of the rows, not of read order.
 
 ### 5.9 Money representation
@@ -323,7 +324,7 @@ Every money column is `integer`, and there is not a `numeric`, `decimal`, `float
 
 Whole dollars in an `integer` is the right call for a ladder whose prices are `$5`, `$6`, … and it removes the entire class of float-rounding bugs a payments ledger usually dies of. The comment on `Stake.amountUsd` (`schema.prisma:156`) and on the activity pair (`:342-344`) carry the two subtleties: `Stake.amountUsd` is **cumulative**, so `SUM` over stakes is the pool while `SUM` over payments is not; and the activity pair is nullable so pre-Phase-3 history is an honest NULL rather than a fabricated delta.
 
-Where the design has no backstop is the *sign and range* (P21): nothing stops `amountUsd = -1`, or a `Stake.amountUsd` that disagrees with the `Payment.amountUsd` that funded it. The guard is `lib/recompute.ts:146-148`, which throws `ledger-invariant:reverse-below-zero` — a JS exception inside the transaction, in one code path. Zero CHECK constraints exist in this schema (§5.13), so every money promise is a promise about the code.
+Where the design has no backstop is the *sign and range* (P21): nothing stops `amountUsd = -1`, or a `Stake.amountUsd` that disagrees with the `Payment.amountUsd` that funded it. The guard is `lib/recompute.ts:146-148`, which throws `ledger-invariant:reverse-below-zero` — a JS exception inside the transaction, in one code path. Zero CHECK constraints exist in this schema (§5.13), so every money promise is a promise about the code. **After the fix pass the sign promises are also the database's** — six CHECKs, §5.15.
 
 `Payment.providerAmount` (cents, provider-reported) next to `Payment.amountUsd` (dollars, ours) is the currency-discipline pair: the settle path compares them rather than trusting either, which is `08`'s subject. Worth noting here only that the schema keeps both, in different units, and the column names do not say so — a reader who assumes `providerAmount` is dollars is wrong by 100×.
 
@@ -350,7 +351,7 @@ The columns that hold personal data, and how many rows held them in the scratch 
 | `Payment.email` | 7 | payer email captured at checkout |
 | `Startup.email` | 6 | notification target for outbid/receipt |
 | `Report.ipHash` | 14 | abuse triage, hashed |
-| `ClickEvent.ipHash` | 0 | not written by shipped code (§6) |
+| `ClickEvent.ipHash` | 0 | not written **by the probes** — the shipped writer is `app/go/[stakeId]/route.ts:33-36`; see §5.15 (this row was wrong as first written, §6) |
 | `Startup.unsubToken` | 15 | a bearer secret per listing, default `cuid()` |
 
 Hashed rather than raw where the purpose allows (`Report.ipHash`, `ClickEvent.ipHash`), which is the right call, and the salt is `CLICK_SALT` — a named secret, never printed here.
@@ -389,7 +390,7 @@ Search across the repository for anything that removes a real customer row: `del
 
 Is a retention window stated anywhere? `doc/` promises nothing. The waitlist page promises mail "within 72 hours" (`05` §5), which is a *delivery* promise, not a retention one. `EmailLog`, `AuditLog`, `ActivityLog`, `ProviderEvent` and `Payment` all grow forever and none is pruned: there is no window, no aggregator, no archival step.
 
-The honest statement of the current state is therefore: **PII in this product is collected, hashed where possible, found easily — and never removed.** R12-4. The *policy* (the window, what the privacy page must say, what a deletion request must cover) belongs to `16` and the *runbook* to `17`; what this doc contributes is the schema-level fact that deleting a payment is blocked by RESTRICT (§5.7), so any deletion feature must be a scrub-in-place — null the PII columns, keep the row — rather than a delete.
+The honest statement of the current state is therefore: **PII in this product is collected, hashed where possible, found easily — and never removed.** R12-4. **That sentence was true when written and is no longer**: `lib/erasure.ts` and `npm run db:erase-subject` scrub in place, keeping every row and id, §5.15. The *policy* (the window, what the privacy page must say, what a deletion request must cover) belongs to `16` and the *runbook* to `17`; what this doc contributes is the schema-level fact that deleting a payment is blocked by RESTRICT (§5.7), so any deletion feature must be a scrub-in-place — null the PII columns, keep the row — rather than a delete.
 
 ### 5.13 Constraints the database does not have
 
@@ -400,7 +401,7 @@ The honest statement of the current state is therefore: **PII in this product is
 (0 rows)
 ```
 
-Zero. Not one CHECK constraint in the entire schema. Every promise in §3 that is not a key (P19–P22, and the sign/range half of P18) is therefore enforced by application code only, and the application code is one bootstrapping path away from not running: `npx prisma db seed`, a `psql` session, `scripts/backfill-previews.ts`, or a future admin tool all write this database without passing through `lib/recompute.ts`.
+Zero. Not one CHECK constraint in the entire schema. Every promise in §3 that is not a key (P19–P22, and the sign/range half of P18) is therefore enforced by application code only, and the application code is one bootstrapping path away from not running: `npx prisma db seed`, a `psql` session, `scripts/backfill-previews.ts`, or a future admin tool all write this database without passing through `lib/recompute.ts`. **Six of them exist as of the fix pass** (`0009_data_invariants`, §5.15); the reading below is why they are exactly those six.
 
 The counter-argument is real and should be stated: a CHECK cannot express P19 anyway (the trio is an aggregate over another table, so it needs a trigger, a materialized view, or a detector), and a `CHECK (amountUsd >= 0)` would only catch a class of bug the code's own throw already catches. The recommendation in R12-1 is therefore narrow — the constraints that *are* expressible — alongside the honest admission that the trio needs a detector instead (R12-2).
 
@@ -428,6 +429,110 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 
 **Timeouts that do exist** live in the money transaction, not in the pool: `MONEY_TX = { isolationLevel: "Serializable", maxWait: 15_000, timeout: 25_000 }` (`lib/txn.ts`) with up to 10 attempts on `P2034`/`40001`/`40P01` and jittered backoff — `15` measures the real worst case; this doc only notes that the storage layer contributes no timeout of its own.
 
+### 5.15 Fix verification
+
+2026-09-16, this worktree, after the §11 fix pass. Like the `08`, `09`, `10` and `11` passes and unlike
+`06`'s and `07`'s, this one ran against a real Postgres: the same `postgres:16-alpine` the earlier
+passes used (`ptl-fix08-pg`, port `55433`, the port `.github/workflows/ci.yml` uses), with all ten
+migrations `0000`–`0009` applied, so every DB-gated suite this doc's evidence came from executed
+instead of skipping. The limits §2–§5 record are unchanged and are not narrowed here: no Neon
+credential, no production dump and no operator secret is reachable from this checkout, so there is
+still no PITR drill and no replay onto production-shaped rows. U12-1…U12-6 stand.
+
+```
+TEST_DATABASE_URL=… npm run test:ci → 51 files passed (51); 749 passed, 0 failed, 0 skipped (749)
+npx vitest run (no database)        → 43 passed, 8 skipped (51); 626 passed, 123 skipped (749)
+npx tsc --noEmit                    → clean
+npx eslint lib app emails scripts   → clean (exit 0, no warnings or errors)
+npx prisma format --check           → already formatted
+npx prisma validate                 → valid
+npx prisma migrate diff --from-url $FRESH --to-schema-datamodel prisma/schema.prisma --script
+                                    → No difference detected.
+npm run audit:prod                  → clean
+```
+
+The first line is the CI-shaped run and satisfies CI's own gate (the workflow fails the build when the
+log contains a skipped test; the grep against it finds nothing), and `npm run build` was run against
+the test database on top of it — the production build compiles with the new migration and the new
+`lib/erasure.ts` in the graph. The second is the shape §5.1–§5.14 were written from — 8 files and 123
+tests skip there, every DB suite among them. The pass moved the suite from `11`'s 731 to **749 tests**
+(+18), and the movement is nameable: `lib/erasure.test.ts` (new, 8), `lib/schema.test.ts` (new, 3),
+`lib/contracts.test.ts` (29 → 33: the three-case wire-convention describe and its guard),
+`lib/recompute.test.ts` (3 → 5, `aggregateDrift`), `lib/reconcile.test.ts` (9 → 10, the aggregate
+finding reaching the job's `failing` expression). Two existing assertions were repaired rather than
+added, both because the fix moved the fact they had pinned: `lib/suppression.test.ts` now names
+`EmailLogStatus` instead of a bare string (R12-3), and `lib/phase8.test.ts:305-312`'s "the two
+findings" pin became three (R12-2).
+
+**The census moved, and every count in §1–§5.14 is the at-authoring one.** §5.4 walked **seven**
+migrations because seven existed on 2026-09-15; the tree holds **ten** directories today, and the three
+since are nameable: `0007_provider_event_attribution` and `0008_email_notifications` from the `08` and
+`10` packs (`6e4eca7`, `6dcd955`), and `0009_data_invariants` from this one. The replay in §5.4 was
+repeated after them — dropped database, `prisma migrate deploy`, all ten in order, clean — and
+`migrate diff` against the freshly migrated database still reports no difference, which is now a
+statement covering the hand-written `0009` as well. §5.13's `(0 rows)` for CHECK constraints became
+six, and §5.12's "no deletion path" became one, both below.
+
+**A factual claim in §5.11 and §6 was wrong, and this pass is why it was found.** This doc recorded
+`ClickEvent.ipHash` as `0 rows` / "not written by shipped code" and drew a finding-adjacent conclusion
+from it (Q3: dead table or unbuilt feature?). The zero was a snapshot artifact *and* the reading was
+wrong: `app/go/[stakeId]/route.ts:33-36` inserts a `ClickEvent` on every verified redirect, gated by
+`shouldCountClick` (bot UA filter plus 1/stake/10s and 30/IP/hr limits, `lib/clicks.ts:22-27`) and
+wrapped in a `catch` so counting can never block the redirect. The table was empty because the probes
+never followed a `/go/` link. Two consequences the fix pass had to respect rather than discover later:
+the click half of the product **does** ship, so Q3's arm is "unbuilt feature" for the counters that
+read it and not "dead table"; and `hashIp` hashes `` `${ip}:${salt}` `` with `CLICK_SALT` (falling back
+to a literal dev salt when unset, `lib/clicks.ts:14-16`), so a `ClickEvent` row is a subject-linked
+hash exactly like `Report.ipHash` and belongs in the erasure routine's scope on the same terms — which
+is where R12-4's implementation puts it.
+
+**What the six `0009` constraints are, and how they were proven to bite.** Hand-written, because
+Prisma's schema language cannot express a CHECK (R12-6): `Stake_amountUsd_nonnegative`,
+`Payment_amountUsd_nonnegative`, `Payment_providerAmount_nonnegative` (`IS NULL OR >= 0`, because a
+pending row has no provider answer yet), `Payment_refundedAt_matches_status` (a biconditional, so it
+catches both a `refunded` row with no timestamp and a timestamp on a row that is not `refunded`),
+`Element_totalPoolUsd_nonnegative` and `Element_stakeCount_nonnegative`. The trio *sum* is deliberately
+absent: a CHECK cannot aggregate another table, which is R12-2's job instead. Verified by replay rather
+than by reading the file — a dropped-and-recreated database replayed all ten migrations and then
+`UPDATE "Element" SET "totalPoolUsd" = -1` failed with the database's own error:
+
+```
+new row for relation "Element" violates check constraint "Element_totalPoolUsd_nonnegative"
+```
+
+That is the positive control the reading could not supply, and R12-6's guard is the version of it that
+runs on every checkout: `lib/schema.test.ts` asserts the constraints exist **and are validated**
+(`convalidated`, against `pg_constraint`), asserts the hand-written partial index from `0001` still
+exists after a fresh migrate — the one index `schema.prisma` cannot express and `migrate diff` cannot
+see — and re-runs a violation to prove `0009` was applied to the database under test rather than merely
+listed in the directory. All three are DB-gated, so a database-less run skips them.
+
+**The detector and the erasure routine, and the operator surface they come with.** R12-2's
+`aggregateDrift()` (`lib/recompute.ts:303`) recomputes the trio from `Stake` and returns the offending
+element ids; `/api/jobs/reconcile` calls it as a third finding (`app/api/jobs/reconcile/route.ts:159`)
+and the job now fails on it exactly as it fails on a divergent payment. R12-4's side is
+`lib/erasure.ts` (12 scopes, dry run first, `confirm: true` required by the type) plus
+`scripts/erase-subject.ts` / `npm run db:erase-subject` as the operator path, exercised end to end
+against the test database: a dry run writes nothing and prints the execute line; a non-local target
+without `--allow-remote` is refused; a missing `--days` is refused rather than guessed (the window is
+an argument, never a default, because no retention policy exists to default to — Q2); rows left inside
+the window exit 1 unless `--allow-kept` says the operator has read them; `--days 0` scrubs the identity
+columns of every row regardless of age, which is the property that makes an erasure request answerable
+while the window is still undecided. The audit trail survives as `SUBJECT_ERASED` (`lib/audit.ts:49`)
+carrying counts and the cutoff and no address, and the rows themselves survive, which is what §5.12's
+RESTRICT reading requires.
+
+**One defect was found by the verification and fixed here rather than logged**, plus one deliberate
+silence worth stating. The CLI reported `done: 0 row(s) scrubbed` after a successful scrub
+(`scripts/erase-subject.ts` passed the post-run re-scan to `reportExit` instead of the run), which
+undoes the whole point of the exit code being trustworthy — fixed. And the known limit that stays: an
+address-only run **skips** the `Report.ipHash + ClickEvent.ipHash` scope, because that scope requires
+an IP hash to match on and an address does not contain one; `Report.ipHash` is left in place by such a
+run and §5.15 is not a leak, it is the scope's own precondition, which the report prints as `skipped`
+per scope. A provider *redelivery* of an `ERROR` `ProviderEvent` can still rewrite a fresh payload copy
+over a scrubbed one — the routine cancels the unsent outbox rows naming the subject, but the webhook
+endpoint is upstream of it.
+
 ## 6. Failure and edge matrix
 
 | Failure | What happens | Evidence |
@@ -439,14 +544,28 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 | A replayed webhook | `ProviderEvent_providerEventId_key` collision → recorded as `DUPLICATE`, no second apply | `0002:20`; outcome vocabulary from `0005` |
 | Deleting a listing that has taken money | `RESTRICT` from `Stake`/`Payment`/`ClaimReservation`/`FirstClaim` → the delete fails, no cascade, ledger intact | §5.7 |
 | Deleting a listing with only history | `SET NULL` on `Element.currentLeaderId`, `AuditLog`, `Report` — the element survives with no crown | §5.7 |
-| `ClickEvent` | **Never written.** No shipped code inserts one; the table is 0 rows after every probe, so the click half of the product is not implemented | reads only, plus tests |
+| `ClickEvent` | **Wrong as first written — the table is written.** `app/go/[stakeId]/route.ts:33-36` inserts one per verified redirect; the probe table was empty because no probe followed a `/go/` link | corrected in §5.15; reads, plus the writer above |
 | An outbox row that fails 5 times | `attempts` reaches `OUTBOX_MAX_ATTEMPTS`, `nextAttemptAt` stops moving, `lastError` holds the reason, `completedAt` stays NULL — and nothing notifies anyone | `13` R13-3; the state is visible only to a `psql` session or the admin retry route |
-| A stake reversed below zero | `lib/recompute.ts:146-148` throws `ledger-invariant:reverse-below-zero` inside the transaction, aborting the whole reversal | code, not a constraint (P21, R12-1) |
+| A stake reversed below zero | `lib/recompute.ts:146-148` throws `ledger-invariant:reverse-below-zero` inside the transaction, aborting the whole reversal | code, not a constraint (P21); the sign half is now also a CHECK — §5.15, R12-1 |
 | `Element` deleted while stakes exist | `RESTRICT` | `0000:167` |
 | A value the client cannot deserialize | Prisma throws on an enum label it does not know (`schema.prisma:54-64` on `whop`) — an argument for *adding* enum values, and against removing them | §5.4 |
 | A database built by `db push` instead of `migrate deploy` | The partial unique index is **not** in `schema.prisma`, so that database lacks P5, and Prisma's differ will not say so in either direction | §5.4 last paragraph, R12-6 |
 | A malformed `OutboxEvent.payload` | `payload Json` is required (`schema.prisma:272`) and readers cast it to a per-type shape at the call site, so a bad payload fails inside the worker rather than at the boundary | `lib/outbox.ts` |
 | Clock and timezone | every timestamp is `TIMESTAMP(3)` written by `now()` or Prisma's `now()` and stored without a zone; the app reads and writes UTC and the DB session's timezone is never set explicitly. Correct in practice on a default Postgres session, undocumented as a decision | `0000` onwards; no `SET TIME ZONE` anywhere in `lib/` |
+
+**After the fix pass** (§5.15), the rows whose behaviour changed:
+
+| Failure | Current answer |
+| --- | --- |
+| A negative amount written by anything that bypasses `lib/` | **The database refuses it.** `UPDATE "Stake" SET "amountUsd" = -5` → `violates check constraint "Stake_amountUsd_nonnegative"` (`0009`), and likewise `Payment.amountUsd`, `Payment.providerAmount`, `Element.totalPoolUsd`, `Element.stakeCount`. The JS throw above is no longer the only guard, and a `psql` session, `prisma db seed` or `scripts/backfill-previews.ts` no longer gets to be the exception |
+| A `Payment` whose `refundedAt` and `status` disagree | **The database refuses it** in both directions — `Payment_refundedAt_matches_status` is a biconditional, so a `refunded` row with no timestamp fails the same way a timestamp on a pending row does |
+| The trio drifts outside `rerankElementTx` | **Detected within the job's tick.** `/api/jobs/reconcile` recomputes the trio from `Stake` (`aggregateDrift`, `lib/recompute.ts:303`) and answers **503** with the offending element ids, the same shape it already used for a divergent payment — the row §5.8 called "no detector" is gone |
+| A data-subject request | **One operator command, and the rows survive.** `npm run db:erase-subject --email … --days N [--confirm]` scrubs 12 scopes in place (address columns nulled or replaced with `erased-<id>` markers, unique columns kept unique, free-text addresses rewritten to `[erased]`, unsent outbox rows naming the subject cancelled), leaves `Payment`/`Stake`/`AuditLog` rows and their ids intact for the RESTRICT constraints, and writes a `SUBJECT_ERASED` audit row with counts and the cutoff only. Identity columns are erased whatever their age; record scopes respect `--days`, and rows it kept exit non-zero unless `--allow-kept` says they were read |
+| An address-only erasure, asked to prove no address survives | **Complete, and the report says which scopes it skipped.** The `Report.ipHash + ClickEvent.ipHash` scope requires an IP hash and is skipped by an address-only run — printed as `skipped`, not silently passed |
+| An off-vocabulary `EmailLog.status` | Still storable (`status` is a `String` column) but no longer *unnameable*: `EmailLogStatus` (`lib/email.ts:98`) is the declared vocabulary, `logged` is in it, and the schema comment that listed three values now lists four (R12-3) |
+| A database built by `db push` instead of `migrate deploy` | **Now written down and guarded** — `doc/ARCHITECTURE.md` §6 states the rule ("a database comes from `prisma/migrations` and nothing else"), and `lib/schema.test.ts` asserts the migrated database still carries `0001`'s partial index and `0009`'s validated constraints, so the divergence is caught by a test rather than by a review (R12-6) |
+| An enum-valued field read off the wire | Unchanged, and now *documented as a split* rather than left to inference: `/api/elements` stays `"family":"EXOTIC_THEORETICAL"` and `/api/activity` stays `"kind":"join"`, `doc/ARCHITECTURE.md` §9 states both conventions, and `lib/contracts.test.ts` pins both (R12-7) |
+| The runtime connection ceiling | Still unconfigured — this pass chose documentation over an unverifiable URL edit, and the decision plus its reason is now in `lib/prisma.ts` rather than absent from the repository (R12-5); U12-2 still owns the measurement |
 
 ## 7. Findings
 
@@ -457,7 +576,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** `SELECT … FROM pg_constraint WHERE contype='c' AND connamespace='public'::regnamespace` → **0 rows** (2026-09-15, scratch DB). `Stake.amountUsd`, `Payment.amountUsd`, `Element.totalPoolUsd` and `Element.stakeCount` are all bare `integer NOT NULL`. The only negative-money guard is a JS throw at `lib/recompute.ts:146-148` (`ledger-invariant:reverse-below-zero`), and the only trio guard is `assertLedgerInvariants` called from inside the writer's transaction (`lib/recompute.ts:97-101`). Both are bypassed by anything that writes this database without going through `lib/`: `npx prisma db seed`, `scripts/backfill-previews.ts`, a `psql` session, a future admin tool.
 - **Reproduction.** Run the check-constraint query above, then (on a scratch database) `UPDATE "Stake" SET "amountUsd" = -5 WHERE …` and observe that it succeeds while `Element.totalPoolUsd` keeps its old value — the trio is now inconsistent with `Stake` and nothing raised an error.
 - **Proposed fix.** Add the CHECKs that are expressible, in one migration: `Stake.amountUsd >= 0`, `Payment.amountUsd >= 0`, `Payment.providerAmount IS NULL OR "providerAmount" >= 0`, `Element.stakeCount >= 0`, `Element.totalPoolUsd >= 0`, and a `refundedAt IS NOT NULL ⇒ status = 'refunded'` pair on `Payment`. Leave the trio to R12-2, because a CHECK cannot aggregate another table.
-- **Status.** open
+- **Fix.** `prisma/migrations/0009_data_invariants/migration.sql`, hand-written (Prisma's schema language cannot express a CHECK), six constraints exactly as proposed: `Stake_amountUsd_nonnegative`, `Payment_amountUsd_nonnegative`, `Payment_providerAmount_nonnegative`, `Payment_refundedAt_matches_status` — a **biconditional**, `("status" = 'refunded') = ("refundedAt" IS NOT NULL)`, so it catches a timestamp on a row that is not `refunded` as well as the reverse — `Element_totalPoolUsd_nonnegative` and `Element_stakeCount_nonnegative`. The migration's own header carries the two pre-flight queries an operator must run before deploying (`ADD CONSTRAINT` validates existing rows, so a pre-existing violation fails the deploy rather than being accepted), and `schema.prisma` names the backing constraint above each of the six columns so the promise is visible where the column is read.
+- **Status.** fixed — verified by replay rather than by reading the file: a dropped-and-recreated database replayed all ten migrations and then `UPDATE "Element" SET "totalPoolUsd" = -1` failed with `violates check constraint "Element_totalPoolUsd_nonnegative"` (§5.15). `lib/schema.test.ts` keeps it true on every checkout — it asserts the six exist and are `convalidated`, and re-runs a violation to prove the database under test actually has them. What this does **not** claim: the trio *sum* is still unconstrained, because a CHECK cannot aggregate another table, which is why R12-2 exists instead of a seventh constraint; and the constraints bound sign, not provenance — nothing here makes a `Stake.amountUsd` agree with the `Payment.amountUsd` that funded it.
 
 ### R12-2 — The denormalized trio has no independent detector
 
@@ -466,7 +586,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** The trio is written by exactly one function (`lib/recompute.ts:85-108`) and asserted by `lib/recompute.ts:97-101` *inside that same transaction*. Nothing recomputes `Element.totalPoolUsd`/`stakeCount`/`currentLeaderId` from `Stake` and compares it afterwards: `lib/reconcile.ts` is payment-shaped ($5, read-only, `PAID`-only — `08` owns it), `/api/jobs/reconcile` calls that, and no admin route or view checks the aggregates. The zero-drift result in §5.3 came from ad-hoc SQL written for this doc, which will not run again after today.
 - **Reproduction.** Run the §5.3 drift query, hand-edit one `Stake.amountUsd` on a scratch database, and run it again: it reports the drift, and nothing in the product would have.
 - **Proposed fix.** Add the drift query as a second, always-run check inside `/api/jobs/reconcile` — it is read-only and that job already has the "divergent → 503" convention — reporting the offending element ids. It is one query over 122 rows.
-- **Status.** open
+- **Fix.** `aggregateDrift()` (`lib/recompute.ts:303`) with its `AggregateDrift` row type (`:272`), wired into the job as the third always-run finding (`app/api/jobs/reconcile/route.ts:159`) and folded into the same expression as the other two, so the job's answer is now `failing = divergent.length > 0 || unapplied.length > 0 || aggregate.length > 0` (`:173`) and the response carries `id`, `symbol` and the violated invariant per element. The detector deliberately does **not** carry a private copy of the rules: it re-ranks with the writer's own `rankStakes` and asks `ledgerInvariantFailures` (`lib/pricing.ts:188`) — the same function `assertLedgerInvariants` throws the first entry of, extracted so the pre-commit writer and the read-only detector cannot drift apart. One `findMany` over the elements with their stakes, ordered by element id so two runs of the report are comparable, no writes and no locks.
+- **Status.** fixed — `/api/jobs/reconcile` now answers **503** for a drifted trio the same way it does for a divergent payment, which is the arm the row asked for (it already had the 503 convention, so no new contract was invented). `lib/recompute.test.ts` 3 → 5 and `lib/reconcile.test.ts` 9 → 10 pin it, including the case where the drift exists only in the database. One existing assertion was repaired because this row moved it: `lib/phase8.test.ts:305-312` pinned "the two findings" and now pins three (§5.15). What it does not cover: the persisted `Stake.rank`/`isLeader` columns are not re-read (P20), so the detector is a statement about the trio, not about every denormalization this schema keeps.
 
 ### R12-3 — `EmailLog.status` documents three values and the code writes a fourth
 
@@ -475,7 +596,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** `prisma/schema.prisma:371` — `status String @default("sent") // sent | suppressed | error`. `lib/email.ts`'s `deliver()` returns `"logged"` when `RESEND_API_KEY` is unset. All 32 local rows are `logged` (`receipt` 7, `report` 14, `waitlist` 11) because no key is set here: `SELECT template, status, count(*) FROM "EmailLog" GROUP BY 1,2`. The column is a plain string, so nothing rejects the fourth value.
 - **Reproduction.** `SELECT status, count(*) FROM "EmailLog" GROUP BY 1;` on any database used without a mail key, then read the schema comment above the column.
 - **Proposed fix.** Two lines: correct the comment to the real vocabulary (`sent | suppressed | error | logged`), and make `logged` explicit in the `lib/email.ts` return type so only `sent` reads as "the vendor accepted it". `10` owns the deliverability consequence; the schema-level ask is that the comment stop lying.
-- **Status.** open
+- **Fix.** Correct the comment and make the vocabulary a type. The schema comment above `EmailLog.status` now reads `sent | suppressed | error | logged` (`prisma/schema.prisma:371`), and `lib/email.ts` declares `EmailLogStatus = DeliveryResult["status"] | ReturnType<typeof suppressionStatus>` (`:98`), which is what `deliver()` records — so the fourth value is nameable where it is produced and a fifth is a compile error rather than a string nobody documented. `lib/suppression.test.ts` was changed to write its literal *through* that type instead of against a bare string. No migration: the column stays a `String`, because a database-level vocabulary would need an enum, and the type is what the row's ask was actually about.
+- **Status.** fixed — both halves. The comment now reads `sent | suppressed | error | logged` (`prisma/schema.prisma:371`), and the vocabulary is a declared type rather than prose: `EmailLogStatus` (`lib/email.ts:98`, `DeliveryResult["status"] | ReturnType<typeof suppressionStatus>`) is what `deliver()` writes, so a seventh value is a compile error at the point it is introduced and `logged` is nameable where it matters. `lib/suppression.test.ts` was repaired rather than extended — it had pinned `status` against a bare string literal and now writes the literal *through* `EmailLogStatus`, which is the difference between pinning a value and pinning a vocabulary. Not claimed: the column is still a `String` on disk, so the database does not refuse a value the type never produced.
 
 ### R12-4 — Every PII column can be found and none can be deleted
 
@@ -484,7 +606,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** No route, script, cron or admin endpoint deletes or exports a customer row: the only `deleteMany` calls outside tests are in `scripts/clear-demo-data.ts:172-200`, whose entire purpose is to remove *demo* rows, refusing any row that has acquired a customer signal (`lib/demoData.ts:33-47`). PII lives in `Payment.email`, `Startup.email`, `WaitlistEntry.email`, `EmailLog.to`, `ManageToken.email`, `Startup.unsubToken`, `Report.ipHash` — and, per §5.11, in plain text inside `AuditLog.detail` for two actions (23 of 35 rows here) in a table documented as append-only (`schema.prisma:300-301`). Deletion is also *blocked* rather than merely unwritten: `Payment.startupId` and `Payment.elementId` are `ON DELETE RESTRICT` (§5.7), so a "delete this customer" implementation must scrub in place, not delete rows. No retention window is stated anywhere in `doc/`.
 - **Reproduction.** Read the `deleteMany` list above; then `SELECT action, count(*) FROM "AuditLog" WHERE detail LIKE '%@%' GROUP BY action;` and compare with the PII inventory in §5.11.
 - **Proposed fix.** Decide and write down a retention window, then implement it as a scrub-in-place routine (null the address columns, replace `AuditLog.detail` addresses with a marker, keep the row and its ids) behind an operator-only path, with a `scripts/` entry so it can be run without a deploy. `16` owns the policy text and `17` the runbook; the schema-level requirement is that the routine must not delete rows.
-- **Status.** open
+- **Fix.** `lib/erasure.ts` (616 lines) plus `scripts/erase-subject.ts` and `npm run db:erase-subject`. Twelve scopes in a fixed order, each reporting `matched`/`kept`/`scrubbed`: `Payment.email`; `Startup.email` + `unsubToken`; `WaitlistEntry.email`; `ManageToken.email`; `EmailAddress.email` + `token`; `Report.ipHash` + `ClickEvent.ipHash`; the identity free-text columns; `EmailLog.to`; the record free-text columns; `ProviderEvent.payload`; and `OutboxEvent.payload` twice — a row not yet sent is **cancelled**, a sent one is scrubbed. The row and its ids always survive, because that is what §5.7's RESTRICT reading forces: unique columns get a per-row marker (`erased-<id>`, or a fresh cuid for `Startup.unsubToken`), null-able ones go NULL (`Payment.email`, `Startup.email`, `Report.ipHash`), free text has every address occurrence rewritten to `[erased]` (`ERASURE_MARKER`, `lib/erasure.ts:46`) by a regex `replace` inside the transaction, and the audit trail gets one `SUBJECT_ERASED` row (`lib/audit.ts:49`) carrying counts and the cutoff and **no address** — which is the sharp edge the row named, since `AuditLog` is documented append-only and the plain address in `AuditLog.detail` was 23 of 35 rows in §5.11. The window is an **argument, never a default** (`--days` is required and `0` means keep nothing), identity columns are erased whatever their age while record scopes respect the window, and an in-window row exits non-zero unless `--allow-kept` says the operator has seen it. Exactly one retention-shaped decision is deliberately left out: no window ships as a constant, because §9 Q2 is still unanswered and guessing it here would turn a policy gap into a code default.
+- **Status.** fixed — the routine the row asked for exists, is operator-only, and is pinned by 8 tests in `lib/erasure.test.ts` (a bystander's rows and a bystander's hashes are asserted untouched, so the tests prove scoping and not merely deletion). The CLI was exercised end to end against the test database rather than read: dry run writes nothing and prints the execute line; a non-local target without `--allow-remote` is refused; a missing `--days` is refused rather than guessed; kept rows exit 1; `--days 0` reports `done: N row(s) scrubbed`. Known and stated limits, not hidden: an address-only run **skips** the `Report.ipHash + ClickEvent.ipHash` scope (that scope requires an IP hash), and a provider *redelivery* of an `ERROR` `ProviderEvent` can rewrite a fresh payload copy over a scrubbed one, because the webhook endpoint is upstream of the routine. `16` still owns the policy text and `17` the runbook; U12-6 still owns what has actually accumulated in production.
 
 ### R12-5 — Connection handling is unconfigured and unverifiable from the repository
 
@@ -493,7 +616,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** `lib/prisma.ts:5-9` is `new PrismaClient({ log: … })` and nothing more. A repository-wide search for `connection_limit`, `pool_timeout`, `statement_timeout`, `pgbouncer` or `directUrl` finds documentation only: `HANDOFF.md:645` (a *test* pool knob, offered if flakiness recurs), `HANDOFF.md:660-663` (`directUrl` is "the first thing to add" if a future migration fails on advisory locks), and nothing in `lib/`, `app/` or `prisma/schema.prisma:12-15`. `DATABASE_URL` is a Vercel **sensitive** variable whose value pulls back empty (`doc/PROD-READINESS-CHECKLIST.md:196,436`), so whether the connection string already carries a `connection_limit` cannot be determined from the repository at all.
 - **Reproduction.** The search above; then `vercel env pull` and observe an empty `DATABASE_URL` (`doc/PROD-READINESS-CHECKLIST.md:436`). The only positive proof of the runtime connection ceiling would be `SHOW max_connections` plus `SELECT count(*) FROM pg_stat_activity` against production, i.e. U12-2.
 - **Proposed fix.** Record the intended pool size as a decision — either an explicit `?connection_limit=N&pool_timeout=10` on `DATABASE_URL`, documented where its value lives, or a comment in `lib/prisma.ts` stating that Neon's pooled endpoint is the ceiling. `17` should own the resulting `pg_stat_activity` runbook step.
-- **Status.** open
+- **Fix.** Take the second arm and write down why. `lib/prisma.ts` gains the decision note: Neon's pooled endpoint is the ceiling, the client stays at Prisma's default, and the first arm — an explicit `?connection_limit=N&pool_timeout=10` on `DATABASE_URL` — is rejected in the same comment because that variable is a Vercel sensitive value whose contents cannot be read back, so a limit set there is unverifiable from the repository and stated in two places. No code path changes; the file that opens the connection is the file that now answers the question. The measurement half is not touched and stays with U12-2 and `17`.
+- **Status.** fixed — the second arm, deliberately. `lib/prisma.ts` now carries the decision and its reason: Neon's pooled endpoint is the ceiling, the client is left at Prisma's default on purpose, and the note says why the first arm was not taken — `DATABASE_URL` is a Vercel sensitive variable whose value cannot be read back, so a `connection_limit` added to it would be a change nobody can verify from the repository, and a limit stated in two places (URL and comment) is worse than one stated in the file a reader is already in. The row's other half, the measurement, is untouched and stays where it was filed: U12-2 (`SHOW max_connections` + `pg_stat_activity` against production) and, for the runbook step, `17`.
 
 ### R12-6 — The strongest constraint in the schema exists only in a hand-written migration
 
@@ -502,7 +626,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** "At most one active quote per element" is enforced by `ClaimReservation_elementId_active_key` (`0001_phase1_ownership/migration.sql:280`, a partial unique index). `prisma/schema.prisma:205-206` documents it in a comment and cannot express it. Measured consequence: `npx prisma migrate diff --from-url $DATABASE_URL --to-schema-datamodel prisma/schema.prisma --script` → `-- This is an empty migration.` (2026-09-15) — Prisma's differ does not propose dropping it, which is reassuring for `migrate dev`, and equally does not know it exists, so a database created from `schema.prisma` (`prisma db push`, or any future CI that builds from the schema rather than the migration set) would silently lack the guarantee the checkout path treats as a hard invariant, and the take-lead race would come back.
 - **Reproduction.** `npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script` against a migrated database (read-only), then search the generated SQL for `ClaimReservation` — it is absent.
 - **Proposed fix.** No code change is needed while `migrate deploy` is the only way a database is created; the durable fix is a written rule ("databases come from `prisma/migrations`, never from `schema.prisma`") plus a cheap CI assertion that `pg_indexes` contains `ClaimReservation_elementId_active_key` after a fresh migrate — §5.4 already does that replay in this review.
-- **Status.** open
+- **Fix.** Both halves of what the row asked for, neither of them a migration. The rule is written where a migration author reads it: `doc/ARCHITECTURE.md` §6 states that a database is created by `prisma migrate deploy` over `prisma/migrations` and by nothing else, and its migration table now lists ten entries with `0009_data_invariants` added. The assertion is a new DB-gated `lib/schema.test.ts`, which replays against a freshly migrated database and fails if the partial index is missing, if it is no longer partial, if any of the six `0009` constraints is absent or defined `NOT VALID`, or if a violating `UPDATE` is accepted.
+- **Status.** fixed — both halves, and the second is the one that pays. The rule is written where a migration author reads it (`doc/ARCHITECTURE.md` §6: "a database is created by `prisma migrate deploy` over this directory and by nothing else — never `prisma db push`, never a database built from `schema.prisma`, and never `migrate dev` against anything but a scratch database"), with `0009_data_invariants` added to the same table. The assertion is `lib/schema.test.ts`, DB-gated and three cases: the partial index is present after a fresh migrate **and still partial** (a plain unique index would break the second quote per element, so matching the predicate matters as much as the name), all six `0009` constraints exist with a definition that is not `NOT VALID` (a CHECK dropped and re-added as `NOT VALID` still appears in `pg_constraint` while enforcing nothing on the rows already there), and a violation attempt is refused — which is what distinguishes "the migration ran" from "the directory lists it". A database built the wrong way now fails a test rather than silently losing the take-lead guard.
 
 ### R12-7 — Case is inconsistent across the read API, and only one of the two conventions is pinned
 
@@ -511,7 +636,8 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - **Evidence.** Two payloads from the same running app (2026-09-15, dev server on port 3215): `/api/elements` → `"family":"EXOTIC_THEORETICAL","tier":"EXOTIC"` (uppercase, because `ChemicalFamily`/`PrestigeTier` are the two of nine enums with no `@map` — `schema.prisma:17-35`) and `/api/activity?limit=2` → `"kind":"join"` (lowercase, from a plain `String` column, `schema.prisma:345`). `lib/contracts.test.ts:63` pins the lowercase form as a wire contract; nothing pins the uppercase form. The third case belongs to the operator: `/api/admin/reports?status=` casts its input to the **uppercase** TypeScript member (`app/api/admin/reports/route.ts:14`) while the database stores `open` (confirmed on disk, §5.2), so the same value is spelled differently in the URL, in `psql`, and in the payload.
 - **Reproduction.** `curl.exe -sS "http://127.0.0.1:3215/api/elements" | head -c 200` and `curl.exe -sS "http://127.0.0.1:3215/api/activity?limit=2"`; then `SELECT DISTINCT status FROM "Report";` → `open`.
 - **Proposed fix.** Choose one wire convention for enum-valued fields and enforce it at the serialization boundary (a small map per route), then pin it in `lib/contracts.test.ts` the way `kind` already is. At minimum, document the split in `doc/ARCHITECTURE.md` so a client author is not left inferring it from two responses. `11` R11-6 owns the missing `?status=` validation.
-- **Status.** open
+- **Fix.** The documentation arm. `doc/ARCHITECTURE.md` §9 now states both wire conventions side by side with the reason each exists — uppercase for the two enums that have no `@map` and drive the board's CSS class names, lowercase for the kinds that map onto their stored values — `lib/contracts.test.ts` gained a three-case describe pinning them, and `app/api/admin/reports/route.ts:14` records that the operator spells in the URL the same value `psql` shows lowercase. No serializer changes, so no response body changes.
+- **Status.** fixed — the documentation arm, chosen over the normalization arm and said so explicitly: mapping one convention onto the other would rewrite bodies a client already parses (`/api/elements`' uppercase family/tier drives the board's CSS classes; `/api/activity`'s lowercase `kind` is the one form `lib/contracts.test.ts` already pinned), so the fix makes the split *stated* rather than *surprising*. `doc/ARCHITECTURE.md` §9 gives both conventions side by side with the reason each exists; `lib/contracts.test.ts` gained the three-case wire-convention describe (29 → 33) so the next author changing a serializer is told which form is expected instead of inferring it from two `curl`s; and `app/api/admin/reports/route.ts:14` carries the comment that the operator spells the same value uppercase in the URL that `psql` shows lowercase, so the third case is written where a reader hits it. Not fixed here and still filed: `11` R11-6 (the missing `?status=` validation) and the enum-`@map` question itself, which is a `03`/`09` contract decision rather than a data-layer one.
 
 ## 8. Acceptance criteria
 
@@ -530,13 +656,22 @@ psql "$DRILL_URL" -c 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_a
 - [ ] **Neon PITR restore drill performed and dated** — not done, and not doable here; the commands are in §5.14 and the row is U12-1. This is the one acceptance box batch 3 leaves open on purpose
 - [ ] A replay onto a **copy of production** (the plan's second replay target) — not done; U12-4
 
+After the fix pass (§5.15), the criteria the pass added — all ticked, in the same run that produced the block's command list:
+
+- [x] Every finding the pass closed has a `Fix.` and a `Status.` in §7 that names the file, the mechanism and the limit it did **not** close (§7 R12-1…R12-7)
+- [x] The six new constraints were proven to *bite*, not merely to exist — a positive control on a freshly replayed database, quoting the database's own error, plus `lib/schema.test.ts` re-running a violation on every checkout (§5.15)
+- [x] All ten migrations replayed in order onto a dropped-and-recreated database, and `migrate diff` against the result still reports no difference — so the hand-written `0009` leaves the schema file and the migrated database in agreement (§5.15)
+- [x] The erasure routine is a **scrub in place**: rows and ids survive, and a bystander's rows and hashes are asserted untouched by the suite (§7 R12-4)
+- [x] The suite grew and nothing was skipped: 749 passed, 0 skipped, and the movement (+18) is accounted for file by file (§5.15)
+- [x] The doc's own census errors are corrected rather than left standing: the migration count (7 → 10) and the false "`ClickEvent` is never written" claim are recorded in §5.15, with §3, §5.11, §5.12, §5.13 and §6 carrying either the corrected fact or a pointer to it — while §5.4's and §5.11's prose keeps its 2026-09-15 date and stays as written
+
 Budget: nothing in this doc was measured against production, and no statement in it depends on production state. The scratch database is reproducible from the commands in §4 in under ten minutes, which is the property that makes the rest of this doc re-checkable rather than merely believed.
 
 ## 9. Open questions
 
-- **Q1 — Should the trio be a cache at all?** At 122 elements and (today) 34 stakes, computing the board from `Stake` directly costs 0.076 ms (§5.6 Q5). The cache exists for a future shape, and it costs a writer that rewrites every stake row per mutation (`lib/recompute.ts:85-89`). `09`/`15` should decide when the cache stops paying; this doc only establishes that nothing else can verify it.
-- **Q2 — What is the retention window?** Nobody has decided. Until someone does, the schema's default is "forever" and R12-4 stands.
-- **Q3 — Is `ClickEvent` a dead table or an unbuilt feature?** No shipped path writes it. If it is unbuilt, the pricing and ownership docs should say the click half of the product does not exist; if it is dead, it is a table that costs one migration to drop and one paragraph of README to explain.
+- **Q1 — Should the trio be a cache at all?** At 122 elements and (today) 34 stakes, computing the board from `Stake` directly costs 0.076 ms (§5.6 Q5). The cache exists for a future shape, and it costs a writer that rewrites every stake row per mutation (`lib/recompute.ts:85-89`). `09`/`15` should decide when the cache stops paying; this doc only establishes that nothing else can verify it. *Unchanged by the fix pass, and now sharper:* `aggregateDrift` is the same aggregation the board would do, run once a tick, so the "what does the cache buy us" question has a measured cost side as well as the benefit §5.6 records.
+- **Q2 — What is the retention window?** Nobody has decided. Until someone does, the schema's default is "forever" and R12-4 stands. *Updated by the fix pass:* the routine now exists and takes the window as a **required argument** (`--days`, with `0` meaning keep nothing), so the missing policy no longer blocks a deletion request — it only decides how much of the *record* trail is kept alongside the identity columns, which are erased whatever their age. `16` still owns the number; the code deliberately refuses to guess one.
+- **Q3 — Is `ClickEvent` a dead table or an unbuilt feature?** No shipped path writes it. If it is unbuilt, the pricing and ownership docs should say the click half of the product does not exist; if it is dead, it is a table that costs one migration to drop and one paragraph of README to explain. *Answered by the fix pass, and the premise was wrong:* `app/go/[stakeId]/route.ts` **does** write it on every verified redirect (§5.15), so the table is neither dead nor unbuilt — the read path over it (`Stake.clicksDelivered`, the `app/s/[domain]` count, `lib/erasure.ts`'s hash scope) is what ships, and the empty scratch table was an artifact of probes that never followed a `/go/` link.
 - **Q4 — Should a preview deployment be able to write production rows?** `DATABASE_URL` is scoped Production *and* Preview against one Neon database (`HANDOFF.md:671`, `scripts/migrate-if-production.mjs:3-8`). The build-time migration risk is closed by the `VERCEL_ENV` guard; the *runtime* risk is not, since a preview of an unmerged branch reads and writes the same rows. `14` and `17` own that decision.
 
 ## 10. Cross-references
@@ -555,9 +690,15 @@ Budget: nothing in this doc was measured against production, and no statement in
 - `17` — owns the restore runbook (§5.14), the deletion routine R12-4 calls for, and the pool-size runbook step R12-5 asks for.
 - `doc/PROD-READINESS-CHECKLIST.md` §, `:15`, `:16`, `:196`, `:316`, `:436` — cited for the production inventory, the seeder hazard, the migration decision, and the reason environment values cannot be read back.
 - `HANDOFF.md:636-672` — the pooling, `directUrl` and shared-`DATABASE_URL` history.
+- `lib/erasure.ts`, `scripts/erase-subject.ts` — the R12-4 routine and its operator surface, added by this doc's fix pass (§5.15). §5.7's RESTRICT table is the reason they scrub rather than delete, so the two sections are meant to be read together.
+- `prisma/migrations/0009_data_invariants/` — the R12-1 constraints, with the pre-flight queries a deploy must run first; `doc/ARCHITECTURE.md` §6 is the written rule R12-6 asked for.
+- `ops/rollback.md` — its DB-incidents section carries the pre-flight step `0009`'s `ADD CONSTRAINT` needs (a constraint validates the rows already present, so a pre-existing violation fails the deploy rather than being refused at write time), which is the one deploy-time consequence of R12-1.
 
 ## 11. Change log
 
+- 2026-09-16 (working tree) — fix pass for R12-1…R12-7, each cited in §7 with its verification in §5.15 (a new section, written against a real Postgres: the `08`–`11` passes' `postgres:16-alpine` on host port 55433, all **ten** migrations `0000`–`0009` applied with `prisma migrate deploy`, `npm run test:ci` green at **51 files / 749 passed / 0 skipped**, the DB-less run still green at 43 passed / 8 skipped files and 626 passed / 123 skipped tests, `tsc`/`eslint` clean, `prisma format --check` and `validate` clean, `migrate diff` empty against a freshly migrated database, and `npm run build` green against the test database). The pass added one migration and two files of product code: `prisma/migrations/0009_data_invariants/` (six named CHECK constraints, hand-written because Prisma cannot express a CHECK, with the pre-flight queries and the deploy-risk note in its header) and `lib/erasure.ts` + `scripts/erase-subject.ts` (`db:erase-subject`) as the scrub-in-place routine R12-4 asks for. The suite moved **+18**, accounted for file by file in §5.15 (`lib/erasure.test.ts` 8, `lib/schema.test.ts` 3, `lib/contracts.test.ts` 29 → 33, `lib/recompute.test.ts` 3 → 5, `lib/reconcile.test.ts` 9 → 10); two existing assertions were repaired rather than added (`lib/suppression.test.ts`, `lib/phase8.test.ts`), both because the fix moved the fact they had pinned.
+
+  §6 gained the after-fix rows the pass changed, §8 a fix-pass block with one box deliberately left unticked on the policy question, §9's Q2 and Q3 answered with the arms taken, §10 the new files and the runbook step, and §3's promise table the enforcement that changed (P19, P21, P22, P27). **Two claims in this doc were wrong and are corrected rather than quietly dropped**: the migration count (§5.4 walked seven because seven existed; the tree holds ten, and §5.15 names `0007`–`0009`) and "`ClickEvent` is never written by shipped code" (§5.11, §6, Q3) — `app/go/[stakeId]/route.ts:33-36` inserts one per verified redirect, the table was empty only because no probe followed a `/go/` link, and the row is a `sha256("<ip>:<salt>")` hash and therefore PII in the erasure routine's scope. **One defect found by the verification was fixed here rather than logged**: `scripts/erase-subject.ts` reported `done: 0 row(s) scrubbed` after a successful scrub, so the exit code a runbook would trust was wrong. The pass's own limits are stated in §5.15: no PITR drill, no production-copy replay, no production connection, and a provider redelivery can still rewrite a scrubbed `ProviderEvent` payload.
 - 2026-09-15: authored 2026-09-15 against `9681bdc`, from the reads and probes in §5 — schema and migrations read in full, seven migrations replayed twice onto a throwaway PostgreSQL 16 reached over Docker on port 55440, both seeders re-run, ~20 catalog and integrity queries run, nine `EXPLAIN ANALYZE` plans collected, one read-only `prisma migrate diff`. Nothing fixed, no production connection, no production write, no destructive statement, no secret printed.
 
 ## 12. UNKNOWN log
@@ -569,4 +710,6 @@ Budget: nothing in this doc was measured against production, and no statement in
 | U12-3 | Whether any index above is genuinely unused, rather than merely unused at 34 rows — the scan counters cannot distinguish "no query needs it" from "no query is big enough yet" | The same `pg_stat_user_indexes` read after production has a few thousand stakes and a week of real traffic — read-only, but it needs production access (U12-2) |
 | U12-4 | Whether `migrate deploy` applies cleanly over the *production* rows rather than over an empty database — the plan's second replay target. An empty-database replay cannot catch a migration whose backfill collides with existing data | A production dump restored into a throwaway database, then `npx prisma migrate deploy` against it. Needs a dump, which needs credentials; the destructive risk is zero (the scratch database is the only thing written) but the data does not exist here |
 | U12-5 | How a migration behaves while the app serves traffic — lock duration, whether a deploy can hang on `ALTER TABLE`, and what a second concurrent deployment sees | Apply a pending migration against a database under write load and time it; the `0003`-style whole-table `UPDATE` is the class of migration that would show it. Not attempted: it needs a database with production-shaped volume |
-| U12-6 | What PII actually accumulates in production over time — which addresses, how many, and whether anything has already been requested for deletion | The PII inventory query from §5.11 run against production (read-only), plus the operator's own record of data-subject requests, which is not a query at all |
+| U12-6 | What PII actually accumulates in production over time — which addresses, how many, and whether anything has already been requested for deletion | The PII inventory query from §5.11 run against production (read-only), plus the operator's own record of data-subject requests, which is not a query at all. *The fix pass changes what this blocks:* an erasure request is now answerable without the answer (`npm run db:erase-subject --email … --days N`), so U12-6 no longer gates a capability — it gates knowing how often the capability is used and whether the window §9 Q2 is still undecided should be set from data rather than from policy |
+
+**Nothing in this table was settled by the fix pass.** Two rows moved from "blocks a capability" to "blocks a measurement" — U12-2 (the pool ceiling is now a documented decision with the measurement still outstanding, R12-5) and U12-6 above — and U12-1 and U12-4 were re-confirmed as out of reach from this checkout, since neither a Neon credential nor a production dump exists here.

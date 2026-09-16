@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
-import { rankStakes, assertLedgerInvariants, type DethroneInfo } from "./pricing";
+import { rankStakes, assertLedgerInvariants, ledgerInvariantFailures, type DethroneInfo } from "./pricing";
 import { withTxnRetry, MONEY_TX } from "./txn";
 
 export type RecomputeResult = {
@@ -267,4 +267,62 @@ async function applyStakeInTx(
         },
       },
     };
+}
+
+export type AggregateDrift = {
+  id: number;
+  symbol: string;
+  /** Why this element was flagged, in the writer's own words (R12-2): the
+   *  invariants that `assertLedgerInvariants` would have refused to commit. */
+  reasons: string[];
+};
+
+/**
+ * Recompute every element's denormalized trio from its `Stake` rows and report
+ * the ones that disagree (R12-2).
+ *
+ * `Element.totalPoolUsd`, `.stakeCount` and `.currentLeaderId` are written by
+ * one function on one path, and the assertion that guards them runs *inside the
+ * writing transaction* — so it can prove the value it just wrote is right, and
+ * it can never see a value that changed afterwards. A hand-run `psql` UPDATE, a
+ * deploy that half-applied, or a second writer added next year would all leave
+ * the trio drifted with nothing in the product that notices; the element would
+ * simply render wrong (leader tile, pool total, bid count) forever.
+ *
+ * This is the read-only half of that pair, and it deliberately asks the writer's
+ * own questions: `ledgerInvariantFailures` is the same list
+ * `assertLedgerInvariants` throws the first entry of, and `rankStakes` is the
+ * same ordering the write path persists. A detector with a private copy of the
+ * rules answers a different question than the writer enforces, which is how a
+ * drift report stays green while settlement rejects.
+ *
+ * Read-only and cheap by construction: 122 elements and their stakes in one
+ * query, no writes, no locks. Ordered by element id so the report is stable
+ * between runs.
+ */
+export async function aggregateDrift(): Promise<AggregateDrift[]> {
+  const elements = await prisma.element.findMany({
+    select: {
+      id: true,
+      symbol: true,
+      totalPoolUsd: true,
+      stakeCount: true,
+      currentLeaderId: true,
+      stakes: { select: { id: true, startupId: true, amountUsd: true, createdAt: true } },
+    },
+    orderBy: { id: "asc" },
+  });
+
+  const drifted: AggregateDrift[] = [];
+  for (const element of elements) {
+    const reasons = ledgerInvariantFailures(rankStakes(element.stakes), {
+      totalPoolUsd: element.totalPoolUsd,
+      stakeCount: element.stakeCount,
+      currentLeaderId: element.currentLeaderId,
+    });
+    if (reasons.length > 0) {
+      drifted.push({ id: element.id, symbol: element.symbol, reasons });
+    }
+  }
+  return drifted;
 }

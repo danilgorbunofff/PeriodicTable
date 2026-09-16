@@ -2,6 +2,8 @@
  * Transactional email — Resend via fetch when RESEND_API_KEY is set;
  * without a key, sends are logged as EmailLog{status:"logged"} so the
  * pipeline is testable end-to-end locally. Suppression + EmailLog always.
+ * The stored status vocabulary is `EmailLogStatus`, not a bare string (R12-3):
+ * only `sent` means the vendor accepted the message.
  *
  * Three rules hold for every send (R10-1, R10-5, R10-7, R10-11):
  * - The suppression list is consulted before the provider. An address that
@@ -75,7 +77,25 @@ function storedReason(raw: string | null | undefined): SuppressionReason | null 
 export type MailKind = "list" | "account" | "internal";
 
 /** The EmailLog status that records a refusal, distinct from every send. */
-export const suppressionStatus = (reason: SuppressionReason) => `suppressed:${reason}`;
+export const suppressionStatus = (reason: SuppressionReason): `suppressed:${SuppressionReason}` =>
+  `suppressed:${reason}`;
+
+/**
+ * Everything `EmailLog.status` may hold, and nothing else (R12-3).
+ *
+ * The column is a plain `String`, so the database accepts any word here; before
+ * this type the same was true of the writer, whose parameter was `string`. The
+ * vocabulary the schema comment claimed (`sent | suppressed | error`) had
+ * already lost a member — `deliver()` returns `logged` whenever there is no
+ * RESEND_API_KEY, which is the state every local database is in, so all 32 rows
+ * in the review's snapshot held a value the comment denied.
+ *
+ * Only `sent` means the provider accepted the message: `logged` is a rehearsed
+ * send with no vendor in the loop, `suppressed:<reason>` never left the
+ * building, and `error` was refused. Keep the distinction readable at the call
+ * site rather than in a comment (schema.prisma, model EmailLog).
+ */
+export type EmailLogStatus = DeliveryResult["status"] | ReturnType<typeof suppressionStatus>;
 
 export function normalizeRecipient(raw: string): string {
   return raw.trim().toLowerCase();
@@ -310,7 +330,7 @@ async function logEmail(row: {
   template: string;
   elementSymbol?: string | null;
   amountUsd?: number | null;
-  status: string;
+  status: EmailLogStatus;
   detail?: string | null;
   dedupeKey?: string | null;
   providerMessageId?: string | null;

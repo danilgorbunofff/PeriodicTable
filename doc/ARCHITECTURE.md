@@ -80,12 +80,26 @@ before settling (mismatches → operator-visible ERROR, no retry storm).
 | `0002_phase2_webhook` | `ProviderEvent` table |
 | `0003_phase3_activity` | Activity delta/result/payment linkage + backfill |
 | `0004_phase6_ops` | `Report.note` |
+| `0005_refund_reversals` | `refunded` provider outcome; refund/dispute columns |
+| `0006_stripe_provider` | `stripe` payment provider (the `whop` label is kept) |
+| `0007_provider_event_attribution` | Element/startup copied onto deliveries (R08-7) |
+| `0008_email_notifications` | `EmailLog.dedupeKey`, provider status, waitlist/outreach mail |
+| `0009_data_invariants` | Six CHECK constraints on money + denormalised counters (R12-1) |
 
-Rules: additive + reviewed; data repairs precede the constraints they serve;
-backfills prefer honest NULLs over guesses; `migrate diff` from history must
-stay empty (CI-adjacent check). Rollback: `migrate resolve --rolled-back`
-+ Neon PITR branch (`ops/rollback.md`); restore = redeploy + reseed
-(idempotent seeds).
+Rules: **a database is created by `prisma migrate deploy` over this directory
+and by nothing else** (R12-6) — never `prisma db push`, never a database built
+from `schema.prisma`, and never `migrate dev` against anything but a scratch
+database. `schema.prisma` is the client's type source, not the database's
+definition: the strongest constraint in `0001` (the partial unique index
+`ClaimReservation_elementId_active_key`) cannot be expressed in it at all, so a
+database built from the schema would silently lack the take-lead guard while
+`migrate diff` reports an empty difference (it does not know the index exists
+either). `lib/schema.test.ts` asserts the migrated database still carries that
+index and `0009`'s constraints. Additive + reviewed; data repairs precede the
+constraints they serve; backfills prefer honest NULLs over guesses; `migrate
+diff` from history must stay empty (CI-adjacent check). Rollback: `migrate
+resolve --rolled-back` + Neon PITR branch (`ops/rollback.md`); restore =
+redeploy + reseed (idempotent seeds).
 
 ## 7. Outbox processing
 
@@ -117,6 +131,23 @@ pool/count includes hidden spend; leaderboard excludes hidden — money is never
 deleted); By Element ranks leader single-stakes; Crowns count-then-spend;
 Early Adopter counts FirstClaim medals. Stats report exact units. Search rows
 carry destinations. Element-detail failure ≠ unclaimed (explicit error panel).
+
+### Wire conventions for cased values (R12-7)
+
+Enum-valued fields travel in their **Prisma member spelling**, which equals the
+database's stored label only when the enum has no `@map`:
+
+- `Element.family`, `Element.tier` → `EXOTIC_THEORETICAL`, `EXOTIC`: both enums
+  are unmapped, and the clients read that case (`lib/familyFill.ts` keys,
+  `el.tier === "EXOTIC"` in `lib/gridGeometry.ts`).
+- `Report.status` → `OPEN`: the column stores `open`, while Prisma filters and
+  returns the member name, so the operator URL takes `OPEN` too (`?status=open`
+  is a 400, not an empty queue — `lib/api.ts` `REPORT_STATUSES`).
+
+Plain `String` columns keep their literal writers' case, which is lowercase
+(`ActivityLog.kind`: `stake | reclaim | join | refund`). No route re-cases a
+field on the way out: it emits what Prisma handed over, and
+`lib/contracts.test.ts` pins both halves of this split.
 
 ## 10. Accessibility posture
 

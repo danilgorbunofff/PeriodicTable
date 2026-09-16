@@ -43,6 +43,12 @@
 
 ## DB incidents
 - Bad migrate: `prisma migrate resolve --rolled-back <name>`, restore Neon branch (PITR).
+- `ADD CONSTRAINT` that fails on deploy (0009_data_invariants): the constraint validates
+  the rows already present, so a pre-existing violation fails the deploy instead of being
+  accepted, and the error names the constraint. Run `0009`'s two pre-flight queries first
+  (they are in the migration header; both must return 0), repair any offending rows, then
+  re-run `prisma migrate deploy`. Repairing by hand is deliberate: a value that violates a
+  money invariant is an operator decision, not a script's.
 - Bad data: restore branch, re-run seeds (both idempotent).
 - FK failure on deploy (dangling audit refs, e.g. clicks pointing at deleted
   stakes): find them via the failing constraint name, repair the rows to valid

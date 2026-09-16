@@ -1,23 +1,26 @@
 /* Integration test — requires DATABASE_URL. Uses isolated test elements
-   (9999 TEST1 / 9998 TEST2) created and cleaned up by the suite. */
+   (9999 TEST1 / 9998 TEST2 / 9984 DRFT) created and cleaned up by the suite. */
 import { hasTestDb, testPrisma } from "./testDb"; // must stay first: pins DATABASE_URL before lib singletons bind
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { applyStakeTx } from "./recompute";
+import { aggregateDrift, applyStakeTx } from "./recompute";
 import { reclaimFor } from "./pricing";
 
 const prisma = testPrisma();
 const T1 = 9999;
 const T2 = 9998;
+/** Own element for the R12-2 drift scan: the T1/T2 suites above share state. */
+const T3 = 9984;
 const hasDb = hasTestDb;
 
 beforeAll(async () => {
   if (!hasDb) return;
   // clean any residue from earlier runs so amounts start at zero
-  await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2] } } });
-  await prisma.activityLog.deleteMany({ where: { elementSymbol: { in: ["TST1", "TST2"] } } });
+  await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2, T3] } } });
+  await prisma.activityLog.deleteMany({ where: { elementSymbol: { in: ["TST1", "TST2", "DRFT"] } } });
   for (const [id, sym] of [
     [T1, "TST1"],
     [T2, "TST2"],
+    [T3, "DRFT"],
   ] as const) {
     await prisma.element.upsert({
       where: { id },
@@ -34,11 +37,11 @@ afterAll(async () => {
   }
   // delete stakes first (FK), then test elements + startups; also clear any
   // residue from earlier failed runs
-  await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2] } } });
+  await prisma.stake.deleteMany({ where: { elementId: { in: [T1, T2, T3] } } });
   await prisma.stake.deleteMany({ where: { startup: { domain: { in: ["test-a.dev", "test-b.dev"] } }, elementId: { gte: 9000 } } });
-  await prisma.activityLog.deleteMany({ where: { elementSymbol: { in: ["TST1", "TST2"] } } });
-  await prisma.firstClaim.deleteMany({ where: { elementId: { in: [T1, T2] } } });
-  await prisma.element.deleteMany({ where: { id: { in: [T1, T2] } } });
+  await prisma.activityLog.deleteMany({ where: { elementSymbol: { in: ["TST1", "TST2", "DRFT"] } } });
+  await prisma.firstClaim.deleteMany({ where: { elementId: { in: [T1, T2, T3] } } });
+  await prisma.element.deleteMany({ where: { id: { in: [T1, T2, T3] } } });
   await prisma.startup.deleteMany({ where: { domain: { in: ["test-a.dev", "test-b.dev"] } } });
   await prisma.$disconnect();
 });
@@ -114,3 +117,45 @@ describe.skipIf(!hasDb)("applyStakeTx — concurrent top-ups", () => {
     expect(aTotal.stake.amountUsd).toBe(45); // 15 + 30
   });
 });
+
+describe.skipIf(!hasDb)("aggregateDrift — the always-run reconcile check (R12-2)", () => {
+  // Element-scoped assertions rather than whole-database ones: other suites own
+  // their own elements, and this file's first two suites leave T1/T2 populated.
+  const flagged = async (id: number) => (await aggregateDrift()).find((d) => d.id === id);
+
+  it("flags a trio that disagrees with the stake rows, and clears when it agrees", async () => {
+    const A = (await freshStartup("test-a.dev")).id;
+    await applyStakeTx({ elementId: T3, startupId: A, addUsd: 40, kind: "join" });
+    expect(await flagged(T3)).toBeUndefined();
+
+    // Written behind the writer's back. This is the only way drift can happen:
+    // assertLedgerInvariants runs inside the transaction that computes the trio.
+    await prisma.element.update({ where: { id: T3 }, data: { totalPoolUsd: 39 } });
+    expect((await flagged(T3))?.reasons.join(" | ")).toMatch(/pool 39 != sum 40/);
+    expect((await flagged(T3))?.symbol).toBe("DRFT");
+
+    await prisma.element.update({ where: { id: T3 }, data: { totalPoolUsd: 40, stakeCount: 3 } });
+    expect((await flagged(T3))?.reasons.join(" | ")).toMatch(/count 3 != rows 1/);
+
+    await prisma.element.update({ where: { id: T3 }, data: { stakeCount: 1, currentLeaderId: null } });
+    expect((await flagged(T3))?.reasons.join(" | ")).toMatch(/currentLeaderId mismatch/);
+
+    // The scan reports disagreement, not "this element was touched": pointing it
+    // back at the real leader is the repair, and it clears the flag.
+    await prisma.element.update({ where: { id: T3 }, data: { currentLeaderId: A } });
+    expect(await flagged(T3)).toBeUndefined();
+  });
+
+  it("does not mistake a fully reversed stake for drift", async () => {
+    // A reversed stake keeps its row at $0 (click history and first-claims point
+    // at it), so an element whose only stake was fully reversed is legitimately
+    // pool $0 / one row / no leader. A detector that netted refunds out of the
+    // row count would page on every such element forever.
+    const stake = await prisma.stake.findFirstOrThrow({ where: { elementId: T3 } });
+    await prisma.stake.update({ where: { id: stake.id }, data: { amountUsd: 0, isLeader: false } });
+    await prisma.element.update({ where: { id: T3 }, data: { totalPoolUsd: 0, stakeCount: 1, currentLeaderId: null } });
+
+    expect(await flagged(T3)).toBeUndefined();
+  });
+});
+

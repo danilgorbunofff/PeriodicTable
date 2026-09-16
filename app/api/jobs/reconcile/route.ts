@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jobGate } from "@/lib/jobs";
 import { prisma } from "@/lib/prisma";
 import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/money";
+import { aggregateDrift } from "@/lib/recompute";
 import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +33,8 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  * provider that stated none — so an unverified charge was indistinguishable
  * from a cross-checked one. This is the surface that reads them back.
  *
- * Four findings. Two fail `ok`, two are advisory, and the split is what keeps
- * the failing two worth paging on:
+ * Five findings. Three fail `ok`, two are advisory, and the split is what keeps
+ * the failing three worth paging on:
  *  - `divergent` (fails `ok`): a PAID payment whose stored provider figure
  *    contradicts the charge — it matches neither dollars nor cents, or it
  *    names a currency that is not USD. Impossible by construction, since the
@@ -46,6 +47,13 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  *    5xx (retryable), and in both cases the row is the only trace that money
  *    may have moved while the ledger did not. Deliveries younger than
  *    UNAPPLIED_GRACE_MS are excluded so a retry in flight is not a page.
+ *  - `aggregate` (fails `ok`, R12-2): an element whose stored
+ *    `totalPoolUsd`/`stakeCount`/`currentLeaderId` disagree with a
+ *    recomputation from its own `Stake` rows. The writer asserts the same
+ *    invariants inside the transaction that computes them, so this can only
+ *    fire on a value that drifted *after* it was written — a hand-run UPDATE, a
+ *    half-applied deploy, or a writer that bypassed lib/recompute.ts. It is
+ *    read-only and one query deep (lib/recompute.ts's `aggregateDrift`).
  *  - `unverified` (advisory): a PAID payment carrying no provider figure at
  *    all. Not a defect — providers may omit it — but the money was accepted on
  *    our own checkout figure alone, and this is the only place that is visible.
@@ -66,8 +74,9 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  * Read-only, authenticated and metered like its job neighbours (jobGate). It echoes
  * identifiers and amounts only, so it is safe to run from the pinger or cron.
  *
- * The two money findings are answered as **503**, not as `ok: false` inside a
- * 200. The status code is the only channel the monitor can read — the free
+ * The failing findings (`divergent`, `unapplied`, `aggregate`) are answered as
+ * **503**, not as `ok: false` inside a 200. The status code is the only channel
+ * the monitor can read — the free
  * cron-job.org tier fails a job on non-2xx and cannot inspect the body, and the
  * GitHub tick that polls this route exits non-zero on non-200 — so this report
  * could previously have found real money contradictions while the monitor that
@@ -143,6 +152,12 @@ async function getReconcileStatus(req: NextRequest) {
     return p.status === "PAID" && p.paidAt !== null && r.createdAt > p.paidAt;
   });
 
+  // R12-2: the denormalized trio, recomputed from Stake and compared. One
+  // query, no writes — the same shape of check as the two above, on the ledger
+  // rather than on payments, and the reason this route can now be the answer to
+  // "is the database telling the truth" instead of "is the money".
+  const aggregateRows = await aggregateDrift();
+
   const staleWhere = {
     status: "PENDING" as const,
     createdAt: { lt: new Date(Date.now() - STALE_PENDING_MS) },
@@ -155,7 +170,7 @@ async function getReconcileStatus(req: NextRequest) {
     take: 5,
   });
 
-  const failing = divergentRows.length > 0 || unappliedRows.length > 0;
+  const failing = divergentRows.length > 0 || unappliedRows.length > 0 || aggregateRows.length > 0;
 
   return NextResponse.json(
     {
@@ -174,6 +189,11 @@ async function getReconcileStatus(req: NextRequest) {
           payment: r.payment,
         })),
         note: "A delivery ended in ERROR and was never superseded, on a payment that is still PENDING (money captured, nothing applied) or still PAID (a reversal that never unwound). Rejections younger than an hour are excluded: those may still be a retry in flight.",
+      },
+      aggregate: {
+        count: aggregateRows.length,
+        samples: aggregateRows.slice(0, 5),
+        note: "An element's stored totalPoolUsd/stakeCount/currentLeaderId disagree with a recomputation from its stakes. The write path asserts these before commit, so a hit means the value drifted after it was written — the element renders wrong until it is repaired.",
       },
       unverified: {
         count: unverifiedCount,

@@ -14,7 +14,8 @@
                     "audit:prod":  "node scripts/audit-prod.mjs",
                     "db:migrate":  "prisma migrate dev",
                     "db:deploy":  "prisma migrate deploy",
-                    "db:clear-demo":  "tsx --env-file=.env scripts/clear-demo-data.ts"
+                    "db:clear-demo":  "tsx --env-file=.env scripts/clear-demo-data.ts",
+                    "db:erase-subject":  "tsx --env-file=.env scripts/erase-subject.ts"
                 },
     "dependencies":  {
                          "@prisma/client":  "^6.19.3",

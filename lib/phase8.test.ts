@@ -302,9 +302,13 @@ describe("an abandoned checkout stops being pending (R08-5)", () => {
 });
 
 describe("money that contradicts itself reaches a human (R08-3)", () => {
-  it("answers 503 for the two findings that can only mean a real defect", () => {
+  it("answers 503 for the three findings that can only mean a real defect", () => {
     const route = read("app/api/jobs/reconcile/route.ts");
-    expect(route).toContain("const failing = divergentRows.length > 0 || unappliedRows.length > 0;");
+    // Three since R12-2 added `aggregate`: a drifted stored aggregate is the
+    // same class of claim as the other two — it cannot be a quiet week.
+    expect(route).toContain(
+      "const failing = divergentRows.length > 0 || unappliedRows.length > 0 || aggregateRows.length > 0;"
+    );
     expect(route).toContain("status: failing ? 503 : 200");
     // The advisory findings must not be in that expression: a report that pages
     // on them is muted before the money case ever fires.
