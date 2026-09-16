@@ -20,7 +20,7 @@
    changing the poll cadence moves this test with it. */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, sep } from "path";
 import { READ_CACHE } from "./route";
 
 const root = join(__dirname, "..");
@@ -107,5 +107,5 @@ describe("R03-3 the declared read cache", () => {
 });
 
 function rel(full: string) {
-  return full.slice(root.length + 1);
+  return full.slice(root.length + 1).split(sep).join("/");
 }

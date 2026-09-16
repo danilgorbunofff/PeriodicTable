@@ -21,7 +21,12 @@
 // lib/operator.ts is dependency-free (it reads the environment and prints it),
 // so the config report can name the operator gaps alongside the rest without
 // pulling anything else into this module's import graph.
-import { logError } from "./log";
+//
+// Note: this module is reachable from the client bundle
+// (components/Modals.tsx → lib/flags.ts), so it must not import lib/log.ts —
+// that module is server-only (`node:async_hooks`) and a static import here
+// broke `next build` with UnhandledSchemeError. The startup emit therefore
+// lives in lib/prisma.ts, which calls reportProdEnvAtStartup() below.
 import { operatorAdvisories } from "./operator";
 
 export type AppEnv = "development" | "test" | "preview" | "production";
@@ -328,9 +333,12 @@ export function getProdConfigReport(env: NodeJS.ProcessEnv = process.env): {
 }
 
 /**
- * Startup validation (R07-3). Returns the missing-required descriptions and logs
- * them once per cold start at `error` level, so an incomplete production
- * environment appears in the deployment logs without anyone asking for it.
+ * Startup validation (R07-3). Returns the missing-required descriptions for the
+ * caller to emit once per cold start at `error` level, so an incomplete
+ * production environment appears in the deployment logs without anyone asking
+ * for it. The emit itself lives in lib/prisma.ts (the module every data path
+ * imports) because that module is server-only while this one is reachable from
+ * the client bundle and lib/log.ts is not.
  *
  * This is the report-only half on purpose. A throw at import time takes the
  * whole deployment down — including /api/jobs/config, the surface that explains
@@ -344,16 +352,7 @@ export function reportProdEnvAtStartup(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   if (!isProduction() || isBuildPhase()) return [];
-  const missing = getMissingProdEnv(env);
-  if (missing.length > 0) {
-    logError("env", "production-incomplete", {
-      missing: missing.length,
-      // Names only, never values: the same list `/api/jobs/config` reports to an
-      // authenticated caller.
-      vars: missing,
-    });
-  }
-  return missing;
+  return getMissingProdEnv(env);
 }
 
 /**

@@ -46,6 +46,13 @@ export function isDirectVisible(state: ModerationState): boolean {
 /** The states an operator may put a listing into, in one place (R17-14). */
 export const MODERATION_STATES: ModerationState[] = ["VISIBLE", "UNLISTED", "HIDDEN"];
 
+/** How many listings one call may move. A wave of abuse arrives as tens of
+ *  domains, not thousands, and the cap is what stops a single authenticated
+ *  call from re-rendering the whole front page at once — an operator who
+ *  genuinely has more than this should be reading the incident notes anyway,
+ *  and looping the call is how they pace it. */
+export const MAX_BATCH_DOMAINS = 50;
+
 export type ModerationOutcome = {
   domain: string;
   state: ModerationState;

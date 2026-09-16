@@ -17,14 +17,14 @@ import { POST as reportPOST } from "../app/api/report/route";
 import { GET as reportsGET } from "../app/api/admin/reports/route";
 import { PATCH as triagePATCH } from "../app/api/admin/reports/[id]/route";
 import { GET as moderateGET, POST as moderatePOST } from "../app/api/admin/startups/[domain]/moderate/route";
-import { GET as moderateBatchGET, POST as moderateBatchPOST, MAX_BATCH_DOMAINS } from "../app/api/admin/startups/moderate-batch/route";
+import { GET as moderateBatchGET, POST as moderateBatchPOST } from "../app/api/admin/startups/moderate-batch/route";
 import { POST as outboxRetryPOST } from "../app/api/admin/outbox/retry/route";
 import { POST as outboxPOST } from "../app/api/jobs/outbox/route";
 import { POST as shotPOST } from "../app/api/jobs/screenshot/route";
 import { POST as checkoutPOST } from "../app/api/checkout/route";
 import { GET as unsubGET, POST as unsubPOST } from "../app/api/unsubscribe/route";
 import { suppressionFor } from "./email";
-import { TRIAGE_PROMISE_HOURS } from "./moderation";
+import { TRIAGE_PROMISE_HOURS, MAX_BATCH_DOMAINS } from "./moderation";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;

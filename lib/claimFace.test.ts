@@ -12,7 +12,8 @@ import { join } from "path";
 import { ELEMENTS } from "./elements";
 import { FACE_STAKE_WHERE, DIRECT_STATES, isDirectVisible } from "./moderation";
 
-const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
+const src = (p: string) =>
+  readFileSync(join(__dirname, "..", p), "utf8").replace(/\r\n/g, "\n");
 
 type FakeStake = { amountUsd: number; startup: { moderationState: string } };
 

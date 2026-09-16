@@ -1,13 +1,24 @@
 import { PrismaClient } from "@prisma/client";
 import { reportProdEnvAtStartup } from "@/lib/env";
+import { logError } from "@/lib/log";
 
 // R07-3: startup configuration check. Every data path in the app reaches the
 // database through this module, so this is where an incomplete production
 // environment is reported whether or not the operator ever opens
 // /api/jobs/config — one line per cold start, and deliberately never a throw:
 // taking the deployment down would also take down the endpoint that explains
-// why. See lib/env.ts for the full rationale.
-reportProdEnvAtStartup();
+// why. The emit lives here rather than in lib/env.ts because that module is
+// reachable from the client bundle and lib/log.ts is server-only. See lib/env.ts
+// for the full rationale.
+const missingProdEnv = reportProdEnvAtStartup();
+if (missingProdEnv.length > 0) {
+  logError("env", "production-incomplete", {
+    missing: missingProdEnv.length,
+    // Names only, never values: the same list `/api/jobs/config` reports to an
+    // authenticated caller.
+    vars: missingProdEnv,
+  });
+}
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
