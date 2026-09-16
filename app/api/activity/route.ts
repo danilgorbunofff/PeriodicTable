@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { apiJson } from "@/lib/route";
+import { apiJson, apiRoute } from "@/lib/route";
 import { ELEMENTS } from "@/lib/elements";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listActivity });
 
 const ELEMENT_NAMES = new Map(ELEMENTS.map((e) => [e.symbol, e.name] as const));
 
@@ -12,8 +13,13 @@ const ELEMENT_NAMES = new Map(ELEMENTS.map((e) => [e.symbol, e.name] as const));
  * activity ids, the PAYMENT DELTA as the headline figure (never implying a
  * larger transaction), the resulting total alongside, and truthful kinds.
  */
-export async function GET(req: NextRequest) {
-  const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") ?? "6", 10) || 6, 20);
+async function listActivity(req: NextRequest) {
+  // Clamped at both ends (R11-2). The upper bound was always there; the lower
+  // one was not, and `?limit=-1` reached Prisma as `take: -1` — the newest row
+  // instead of a bounded page, which the review caught as a silently wrong
+  // feed. Junk still falls back to the six the widget asks for.
+  const requested = parseInt(req.nextUrl.searchParams.get("limit") ?? "6", 10);
+  const limit = Number.isNaN(requested) ? 6 : Math.min(Math.max(requested, 1), 20);
 
   // ActivityLog keeps a denormalised domain string, so visibility is resolved
   // against Startup here. Hidden listings must not appear: this feed publishes

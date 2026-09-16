@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { jobAuth } from "@/lib/jobs";
+import { jobGate } from "@/lib/jobs";
 import {
   configFindingsOk,
   credentialFinding,
@@ -10,8 +10,10 @@ import {
 } from "@/lib/env";
 import { probeStripeKey } from "@/lib/stripe";
 import { failedMailHealth } from "@/lib/outbox";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getConfig, POST: updateConfig });
 
 /**
  * Production config report (Phase 0 surface, non-fatal).
@@ -46,13 +48,13 @@ export const dynamic = "force-dynamic";
  *
  * Sits with the job endpoints so the external pinger *can* exercise it on every
  * tick (add it to the pinger's URL list — until something calls this, the gaps
- * are still invisible). Authenticated like its neighbours (jobAuth), so the
+ * are still invisible). Authenticated and metered like its neighbours (jobGate), so the
  * report itself is not public. Auth is checked before health, so an
  * unauthenticated caller gets 401 rather than a 503 that would leak which
  * variables are missing.
  */
-export async function GET(req: NextRequest) {
-  const denied = jobAuth(req, req.nextUrl.searchParams.get("secret"));
+async function getConfig(req: NextRequest) {
+  const denied = await jobGate(req, "jobs/config", req.nextUrl.searchParams.get("secret"));
   if (denied) return denied;
 
   const { findings } = getProdConfigReport();
@@ -88,6 +90,6 @@ export async function GET(req: NextRequest) {
   );
 }
 
-export async function POST(req: NextRequest) {
-  return GET(req);
+async function updateConfig(req: NextRequest) {
+  return getConfig(req);
 }

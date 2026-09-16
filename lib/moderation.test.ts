@@ -243,6 +243,63 @@ describe.skipIf(!hasDb)("moderation enforcement", () => {
   });
 });
 
+describe.skipIf(!hasDb)("report intake contract (R11-5) and the operator queue (R11-6)", () => {
+  /* R11-5: the limiter used to answer 200 `{ok:true,note:"rate-limited"}` — a
+   * success to every `res.ok` check on the client, and to any uptime probe
+   * counting 2xx. A person whose report was dropped was told it was filed. */
+  it("answers 429 with the shared envelope when the hourly key is spent", async () => {
+    const from = { "x-forwarded-for": "203.0.113.9", "Content-Type": "application/json" };
+    const call = () =>
+      reportPOST(req("/api/report", { method: "POST", headers: from, body: JSON.stringify({ domain: "modvis-t.dev", reason: "limit probe" }) }));
+    for (let i = 0; i < 10; i++) {
+      const ok = await call();
+      expect(ok.status).toBe(200);
+      expect(((await ok.json()) as { ok?: boolean }).ok).toBe(true);
+    }
+    const over = await call();
+    expect(over.status).toBe(429);
+    const body = (await over.json()) as { error: string; code: string };
+    expect(body.code).toBe("RATE_LIMITED");
+    expect(body.error).toBeTruthy();
+    expect(over.headers.get("x-request-id")).toBeTruthy();
+    // The refused report is not stored: the 429 is the whole answer.
+    expect(await prisma.report.count({ where: { reason: "limit probe" } })).toBe(10);
+  });
+
+  it("refuses an unknown ?status= instead of rendering an empty queue", async () => {
+    const bad = await reportsGET(req("/api/admin/reports?status=nope", { headers: adminHeaders }));
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { code: string }).code).toBe("BAD_STATUS");
+    // The typo a person actually makes: `?status=open` used to be an empty
+    // list, which reads as "no reports" — how a real report gets missed.
+    expect((await reportsGET(req("/api/admin/reports?status=open", { headers: adminHeaders }))).status).toBe(400);
+    expect((await reportsGET(req("/api/admin/reports?status=OPEN", { headers: adminHeaders }))).status).toBe(200);
+    expect((await reportsGET(req("/api/admin/reports", { headers: adminHeaders }))).status).toBe(200);
+  });
+
+  it("walks the queue with ?before=, and an unknown cursor is empty rather than a fault", async () => {
+    const stake = await prisma.stake.findFirstOrThrow({ where: { elementId: T7, startup: { domain: "modvis-t.dev" } } });
+    const older = await prisma.report.create({ data: { stakeId: stake.id, domain: "modvis-t.dev", reason: "cursor probe a" } });
+    const newer = await prisma.report.create({
+      data: { stakeId: stake.id, startupId: older.startupId, domain: "modvis-t.dev", reason: "cursor probe b" },
+    });
+    const page1 = (await (await reportsGET(req("/api/admin/reports", { headers: adminHeaders }))).json()) as { id: string }[];
+    const page2 = (await (await reportsGET(req(`/api/admin/reports?before=${newer.id}`, { headers: adminHeaders }))).json()) as { id: string }[];
+    // The cursor page starts where the previous one stopped and repeats
+    // nothing at or above the cursor row.
+    expect(page2[0]?.id).toBe(older.id);
+    const head = page1.slice(0, page1.findIndex((r) => r.id === newer.id) + 1);
+    expect(head).toHaveLength(1);
+    expect(page2.map((r) => r.id)).not.toContain(head[0].id);
+    // Filter and cursor compose, and a cursor id that does not exist is not a 500.
+    const filtered = (await (await reportsGET(req(`/api/admin/reports?status=OPEN&before=${newer.id}`, { headers: adminHeaders }))).json()) as { id: string }[];
+    expect(filtered[0]?.id).toBe(older.id);
+    const ghost = await reportsGET(req("/api/admin/reports?before=cursor-probe-missing", { headers: adminHeaders }));
+    expect(ghost.status).toBe(200);
+    expect((await ghost.json()) as unknown[]).toEqual([]);
+  });
+});
+
 describe.skipIf(!hasDb)("workers and delivery ops", () => {
   it("job endpoints authenticate in production shape, pass locally", async () => {
     const ok = await outboxPOST(req("/api/jobs/outbox", jsonInit({ limit: 1 }, false)));

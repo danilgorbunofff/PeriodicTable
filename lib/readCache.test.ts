@@ -49,7 +49,10 @@ describe("R03-3 the declared read cache", () => {
   it("does not let the element list smuggle a query-dependent cache key", () => {
     // The list is the same for everyone; the detail route keys `?me=` per URL,
     // which is what keeps one visitor's reclaim quote out of another's cache.
-    expect(src("app/api/elements/route.ts")).toMatch(/export async function GET\(\)/);
+    // The list takes no request at all, so nothing query-dependent can reach
+    // its cache key; the detail route keys `?me=` per URL. The impl is named
+    // rather than exported since R11-3 put every route behind `apiRoute()`.
+    expect(src("app/api/elements/route.ts")).toMatch(/async function listElements\(\)/);
     expect(src("app/api/elements/[sym]/route.ts")).toMatch(/searchParams\.get\("me"\)/);
   });
 

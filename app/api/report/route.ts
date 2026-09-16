@@ -4,14 +4,23 @@ import { prisma } from "@/lib/prisma";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { enqueueOutbox, drainDueWithin } from "@/lib/outbox";
+import { apiRoute, apiError } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postReport });
 
-/** Report / takedown intake (Phase 4). Rate-limited, always 200 to avoid oracle. */
-export async function POST(req: NextRequest) {
+/**
+ * Report / takedown intake (Phase 4).
+ *
+ * Throttled per IP. Over budget it answers 429 with the shared {error, code}
+ * envelope (R11-5) — it used to answer 200 `{ok:true, note:"rate-limited"}`,
+ * which is a success to every `res.ok` check on the client and to any uptime
+ * probe counting 2xx, so a throttled report looked like a filed one.
+ */
+async function postReport(req: NextRequest) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`report:${ip}`, 10, 3_600_000))) {
-    return NextResponse.json({ ok: true, note: "rate-limited" });
+    return apiError("Too many requests. Try again later.", { status: 429, code: "RATE_LIMITED" });
   }
   let body: { stakeId?: string; domain?: string; reason?: string };
   try {

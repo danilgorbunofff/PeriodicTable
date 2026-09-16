@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { jobAuth } from "@/lib/jobs";
+import { jobGate } from "@/lib/jobs";
 import { prisma } from "@/lib/prisma";
 import { providerAmountAgrees, providerCurrencyAgrees } from "@/lib/money";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getReconcileStatus, POST: postReconcile });
 
 /** A rejected delivery younger than this may still be a retry in flight: the
  *  webhook answers 5xx for retryable failures and Stripe redelivers on its own
@@ -61,7 +63,7 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  * first. Paid payments are low-volume by nature; if that ever stops being true,
  * this wants a grouped query rather than a column of rows.
  *
- * Read-only, authenticated like its job neighbours (jobAuth). It echoes
+ * Read-only, authenticated and metered like its job neighbours (jobGate). It echoes
  * identifiers and amounts only, so it is safe to run from the pinger or cron.
  *
  * The two money findings are answered as **503**, not as `ok: false` inside a
@@ -75,8 +77,8 @@ const STALE_PENDING_MS = 24 * 60 * 60_000;
  * which are worth reading and not worth paging on. A report that paged on them
  * would be muted before the money case ever fired.
  */
-export async function GET(req: NextRequest) {
-  const denied = jobAuth(req, req.nextUrl.searchParams.get("secret"));
+async function getReconcileStatus(req: NextRequest) {
+  const denied = await jobGate(req, "jobs/reconcile", req.nextUrl.searchParams.get("secret"));
   if (denied) return denied;
 
   const paidRows = await prisma.payment.findMany({
@@ -197,6 +199,6 @@ export async function GET(req: NextRequest) {
  * have been. A cron run here would also produce a response nobody reads; the
  * status code is the signal, so this belongs on a monitor's URL list next to
  * /api/jobs/config, which is exactly where the tick put it. */
-export async function POST(req: NextRequest) {
-  return GET(req);
+async function postReconcile(req: NextRequest) {
+  return getReconcileStatus(req);
 }

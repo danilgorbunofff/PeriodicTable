@@ -288,10 +288,11 @@ describe("an abandoned checkout stops being pending (R08-5)", () => {
 
   it("is exposed as an authenticated, bounded job", () => {
     const route = read("app/api/jobs/abandoned-checkouts/route.ts");
-    expect(route).toContain("jobAuth");
+    expect(route).toContain("jobGate");
     expect(route).toContain("ABANDON_MAX_BATCH");
-    expect(route).toContain("export async function POST");
-    expect(route).toContain("export async function GET");
+    // Exactly these two verbs, both through the route boundary that fills in
+    // the 405/OPTIONS answers and the request id (R11-3).
+    expect(route).toMatch(/apiRoute\(\{ GET: \w+, POST: \w+ \}\)/);
     // The status it writes has to be reachable and auditable, or CANCELED is
     // still a state nothing produces.
     expect(read("lib/abandonedCheckouts.ts")).toContain("status: PaymentStatus.CANCELED");

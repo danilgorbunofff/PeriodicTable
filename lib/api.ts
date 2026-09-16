@@ -190,7 +190,17 @@ export type CheckoutResponse = {
 };
 
 /** Report POST response. */
-export type ReportResponse = { ok: true } | { ok: true; note: string };
+export type ReportResponse = { ok: true };
+
+/**
+ * Report triage states — one list for both operator routes (R11-6): the queue
+ * filter and the PATCH transition validate against the same values, so a typo
+ * returns 400 instead of an empty queue that looks like a real one.
+ */
+export const REPORT_STATUSES = ["OPEN", "TRIAGED", "ACTIONED", "DISMISSED"] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+export const isReportStatus = (v: unknown): v is ReportStatus =>
+  typeof v === "string" && (REPORT_STATUSES as readonly string[]).includes(v);
 
 /** Waitlist POST response. */
 export type WaitlistResponse = { ok: true; id: string };

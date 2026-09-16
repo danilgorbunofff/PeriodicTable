@@ -1,6 +1,7 @@
 /* Phase 4 contract tests — pure (no DB): shape guards, board math,
    fetchJson error mapping. */
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { NextRequest, NextResponse } from "next/server";
 import {
   ApiError,
   fetchJson,
@@ -11,10 +12,173 @@ import {
   isSearchHits,
   isElementDetail,
 } from "./api";
+import { apiJson, apiRoute, codeForStatus, withContract } from "./route";
 import { aggregateEarlyAdopters, aggregateTableOrder, rankByElement, rankCrowns, rankEarlyAdopters } from "./boards";
+import { readdirSync, readFileSync } from "fs";
+import { join } from "path";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+const req = (url: string, init?: ConstructorParameters<typeof NextRequest>[1]) =>
+  new NextRequest(new URL(url, "http://localhost"), init);
+
+describe("route boundary (R11-3)", () => {
+  it("answers an unimplemented method with a JSON 405 that names the allowed ones", async () => {
+    const route = apiRoute({ GET: () => apiJson({ ok: true }) });
+    const res = await route.POST(req("/api/board", { method: "POST" }));
+    expect(res.status).toBe(405);
+    expect(await res.json()).toEqual({ error: "Method not allowed. Allowed: GET, HEAD, OPTIONS.", code: "METHOD_NOT_ALLOWED" });
+    expect(res.headers.get("Allow")).toBe("GET, HEAD, OPTIONS");
+    expect(res.headers.get("x-request-id")).toBeTruthy();
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("answers OPTIONS with the same Allow list and no body", async () => {
+    const route = apiRoute({ GET: () => apiJson({}), POST: () => apiJson({}) });
+    const res = await route.OPTIONS(req("/api/x", { method: "OPTIONS" }));
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Allow")).toBe("GET, HEAD, POST, OPTIONS");
+    expect(await res.text()).toBe("");
+    expect(res.headers.get("x-request-id")).toBeTruthy();
+  });
+
+  it("turns an uncaught throw into a correlated JSON 500", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const route = apiRoute({
+      GET: () => {
+        throw new Error("synthetic explosion");
+      },
+    });
+    const res = await route.GET(req("/api/x"));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Internal error.", code: "INTERNAL" });
+    const id = res.headers.get("x-request-id");
+    expect(id).toBeTruthy();
+    // The log line and the response header must name the same request.
+    expect(logged.mock.calls[0]?.join(" ")).toContain(id as string);
+    expect(logged.mock.calls[0]?.join(" ")).toContain("synthetic explosion");
+  });
+
+  it("reports an unreachable database as 503, not as an internal bug", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const init = apiRoute({
+      GET: () => {
+        throw Object.assign(new Error("Can't reach database server"), { name: "PrismaClientInitializationError" });
+      },
+    });
+    expect(await (await init.GET(req("/api/x"))).json()).toEqual({ error: "Service unavailable.", code: "DB_UNAVAILABLE" });
+    expect((await init.GET(req("/api/x"))).status).toBe(503);
+
+    // Node's errno arrives wrapped in a Prisma error rather than on the root.
+    const nested = apiRoute({
+      GET: () => {
+        throw Object.assign(new Error("wrapper"), { name: "PrismaClientKnownRequestError", cause: { code: "ECONNREFUSED" } });
+      },
+    });
+    expect((await nested.GET(req("/api/x"))).status).toBe(503);
+  });
+
+  it("keeps the caller's request id so one id spans caller, log line and response", async () => {
+    const route = apiRoute({ GET: () => apiJson({ ok: true }) });
+    const res = await route.GET(req("/api/x", { headers: { "x-request-id": "caller-supplied-id" } }));
+    expect(res.headers.get("x-request-id")).toBe("caller-supplied-id");
+    const failing = withContract(() => NextResponse.json({ error: "Nope." }, { status: 403 }));
+    expect((await failing(req("/api/x", { headers: { "x-request-id": "caller-supplied-id" } }))).headers.get("x-request-id")).toBe(
+      "caller-supplied-id"
+    );
+  });
+
+  it("gives a code to a JSON refusal that shipped without one, and keeps its body", async () => {
+    const route = apiRoute({ POST: () => NextResponse.json({ error: "Nope." }, { status: 403 }) });
+    const res = await route.POST(req("/api/x", { method: "POST" }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Nope.", code: "FORBIDDEN" });
+  });
+
+  it("fills in a body for an empty refusal and leaves an error page alone", async () => {
+    const bare = apiRoute({ GET: () => new Response(null, { status: 429 }) });
+    const filled = await bare.GET(req("/api/x"));
+    expect(filled.status).toBe(429);
+    expect(await filled.json()).toEqual({ error: "Too many requests. Try again later.", code: "RATE_LIMITED" });
+
+    // A proxy/HTML error page is the one body that is not ours to describe.
+    const page = apiRoute({ GET: () => new Response("<html>502</html>", { status: 502, headers: { "content-type": "text/html" } }) });
+    const untouched = await page.GET(req("/api/x"));
+    expect(untouched.status).toBe(502);
+    expect(await untouched.text()).toBe("<html>502</html>");
+    expect(untouched.headers.get("x-request-id")).toBeTruthy();
+  });
+
+  it("does not touch a 2xx body or add anything to it", async () => {
+    const route = apiRoute({ GET: () => apiJson({ ok: true }) });
+    // The envelope stays in the header: checkout's idempotent replay is
+    // asserted byte-for-byte against the first response (lib/routes.test.ts).
+    expect(await (await route.GET(req("/api/x"))).text()).toBe('{"ok":true}');
+  });
+
+  it("maps statuses to codes on the way out", () => {
+    expect(codeForStatus(404)).toBe("NOT_FOUND");
+    expect(codeForStatus(503)).toBe("UNAVAILABLE");
+    expect(codeForStatus(599)).toBe("INTERNAL");
+    expect(codeForStatus(418)).toBe("BAD_REQUEST");
+  });
+});
+
+/** Every `app/api/**\/route.ts` as [path relative to app/api, source]. */
+function routeSources(): [string, string][] {
+  const root = join(__dirname, "..", "app", "api");
+  const out: [string, string][] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "route.ts") out.push([full.slice(root.length + 1), readFileSync(full, "utf8")]);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/* The boundary is only worth anything if every route goes through it: one
+   file exporting a bare verb handler reopens the 405/request-id split, and one
+   file calling `jobAuth` directly reopens the unmetered loop the review
+   measured. Both are invisible to the type checker, so they are asserted here. */
+describe("route wiring (R11-3, R11-4)", () => {
+  const routes = routeSources();
+
+  it("puts every route file behind the shared boundary", () => {
+    expect(routes).toHaveLength(28);
+    for (const [path, src] of routes) {
+      expect(src, `${path} must use apiRoute`).toContain("apiRoute(");
+      expect(src, `${path} must not export a raw verb handler`).not.toMatch(
+        /export (async )?function (GET|POST|PUT|PATCH|DELETE|OPTIONS)\b/,
+      );
+    }
+  });
+
+  it("meters every admin and job route, and no route bypasses a gate", () => {
+    const gated = routes.filter(([path]) => path.startsWith("admin/") || path.startsWith("jobs/"));
+    expect(gated.map(([path]) => path).sort()).toEqual([
+      "admin/outbox/retry/route.ts",
+      "admin/reports/[id]/route.ts",
+      "admin/reports/route.ts",
+      "admin/startups/[domain]/moderate/route.ts",
+      "jobs/abandoned-checkouts/route.ts",
+      "jobs/config/route.ts",
+      "jobs/outbox/route.ts",
+      "jobs/reconcile/route.ts",
+      "jobs/screenshot/route.ts",
+    ]);
+    for (const [path, src] of routes) {
+      expect(src, `${path} must not call adminAuth() directly`).not.toMatch(/\badminAuth\(/);
+      expect(src, `${path} must not call jobAuth() directly`).not.toMatch(/\bjobAuth\(/);
+      if (path.startsWith("admin/")) expect(src, `${path} must use adminGate`).toContain("adminGate(");
+      if (path.startsWith("jobs/")) expect(src, `${path} must use jobGate`).toContain("jobGate(");
+    }
+  });
 });
 
 describe("fetchJson (P1-07)", () => {

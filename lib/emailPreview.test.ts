@@ -107,7 +107,8 @@ describe("the email preview surface (R10-8, R10-9)", () => {
     set("NODE_ENV", "production");
     const prod = await preview();
     expect(prod.status).toBe(404);
-    expect(await prod.json()).toEqual({ error: "Not found." });
+    // The code is the boundary's: every non-2xx gets one (R11-3).
+    expect(await prod.json()).toEqual({ error: "Not found.", code: "NOT_FOUND" });
 
     // A Vercel preview deployment is also NODE_ENV=production, and is exactly
     // where a template is checked after a change.

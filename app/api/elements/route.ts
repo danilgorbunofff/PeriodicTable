@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { apiJson, READ_CACHE } from "@/lib/route";
+import { apiJson, READ_CACHE, apiRoute } from "@/lib/route";
 import { FACE_STAKE_WHERE } from "@/lib/moderation";
 import { cellOf } from "@/lib/gridGeometry";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listElements });
 
-export async function GET() {
+async function listElements() {
   const elements = await prisma.element.findMany({
     orderBy: { id: "asc" },
     include: {

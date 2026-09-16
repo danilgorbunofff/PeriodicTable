@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { clientIp } from "@/lib/ip";
 import { rateLimitAsync } from "@/lib/rateStore";
+import { apiRoute } from "@/lib/route";
 import {
   normalizeRecipient,
   resendEventEffect,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postResendWebhook });
 
 /** How much of the provider's text to keep. Long enough to name the reason,
  *  short enough that a body echoing the recipient is not stored at length. */
@@ -62,7 +64,7 @@ function recipientOf(data: ResendPayload["data"]): string | null {
  *   is retrying a delivery we would fail again — and, eventually, disabling the
  *   endpoint.
  */
-export async function POST(req: NextRequest) {
+async function postResendWebhook(req: NextRequest) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`resend:${ip}`, 120, 60_000))) {
     return NextResponse.json({ error: "Too many requests." }, { status: 429 });

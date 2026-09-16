@@ -7,8 +7,10 @@ import { receiptHtml, receiptSubject } from "@/emails/receipt";
 import { refundHtml, refundSubject } from "@/emails/refund";
 import { reportHtml, reportSubject } from "@/emails/report";
 import { waitlistHtml, waitlistSubject } from "@/emails/waitlist";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getEmailPreview });
 
 /**
  * Dev-only email preview (spec 02), reworked in R10-8/R10-9.
@@ -34,7 +36,7 @@ export const dynamic = "force-dynamic";
  * - It previewed two of the five templates. All of them are reachable now, since
  *   the route is also how a template change is checked.
  */
-export async function GET(req: NextRequest) {
+async function getEmailPreview(req: NextRequest) {
   if (getAppEnv() === "production") {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }

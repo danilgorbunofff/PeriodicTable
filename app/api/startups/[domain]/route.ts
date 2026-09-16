@@ -5,8 +5,10 @@ import { validateProfileInput } from "@/lib/validate";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { audit } from "@/lib/audit";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ PATCH: patchStartup });
 
 /**
  * Verified-owner profile update (Phase 1). Requires a management session
@@ -21,7 +23,7 @@ export const dynamic = "force-dynamic";
  * write this field: a request that supplies it is refused rather than silently
  * ignored, because a dropped field reads to the caller as a saved one.
  */
-export async function PATCH(req: NextRequest, { params }: { params: { domain: string } }) {
+async function patchStartup(req: NextRequest, { params }: { params: { domain: string } }) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`profile:${ip}`, 30, 3_600_000))) {
     return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });

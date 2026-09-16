@@ -8,15 +8,17 @@ import { hashIp } from "@/lib/clicks";
 import { audit } from "@/lib/audit";
 import { suppressionFor } from "@/lib/email";
 import { enqueueOutbox, drainDueWithin } from "@/lib/outbox";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: joinWaitlist });
 
 /**
  * Waitlist intake (Phase 1 storage; Phase 2 wires the paused-checkout path
  * to it). Validated + normalized; one row per email (re-submits refresh
  * consent, never duplicate).
  */
-export async function POST(req: NextRequest) {
+async function joinWaitlist(req: NextRequest) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`waitlist:${ip}`, 10, 3_600_000))) {
     return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });

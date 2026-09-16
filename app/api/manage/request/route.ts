@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requestManageToken } from "@/lib/manage";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: requestManageLink });
 
 /**
  * Request a management magic link for a startup domain. Always 200 with the
@@ -13,7 +15,7 @@ export const dynamic = "force-dynamic";
  * so the note below must not promise delivery (see lib/manage.ts). Non-production
  * still returns the raw token for dev convenience.
  */
-export async function POST(req: NextRequest) {
+async function requestManageLink(req: NextRequest) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`manage:${ip}`, 10, 3_600_000))) {
     return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });

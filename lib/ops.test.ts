@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
 import { clientIp } from "./ip";
 import { normalizeUrl, isPublicHost, domainFromUrl } from "./validate";
 import { rateLimitAsync, setSharedRateLimitStore, type RateLimitStore } from "./rateStore";
-import { jobAuth, adminAuth } from "./jobs";
+import { jobAuth, adminAuth, adminGate, jobGate, ADMIN_LIMIT, JOB_LIMIT } from "./jobs";
 import { isDiscoverable, isDirectVisible } from "./moderation";
 
 type Env = Record<string, string | undefined>;
@@ -234,6 +234,71 @@ describe("adminAuth", () => {
     expect(adminAuth(req("wrong") as never)?.status).toBe(403);
     expect(adminAuth(req() as never)?.status).toBe(403);
     expect(adminAuth(req("opaque-admin") as never)).toBeNull();
+  });
+});
+
+describe("adminGate / jobGate — the metered gates (R11-4)", () => {
+  const withBearer = (token: string) => ({ authorization: `Bearer ${token}` });
+  const adminReq = (token?: string, route = "admin/probe") =>
+    new NextRequest(`http://localhost/api/${route}`, token ? { headers: withBearer(token) } : undefined);
+  const jobReq = (token?: string, route = "jobs/probe") =>
+    new NextRequest(`http://localhost/api/${route}`, token ? { headers: withBearer(token) } : undefined);
+
+  it("checks the credential before it spends budget, so probing is free", async () => {
+    set("ADMIN_TOKEN", "gate-a");
+    // The review's reproduction: fifty consecutive unauthorised calls, all 200
+    // for the job route it probed. Refusals must not consume the operator's own
+    // budget either, or a stranger could lock the operator out of triage.
+    for (let i = 0; i < ADMIN_LIMIT + 1; i++) {
+      const denied = await adminGate(adminReq("wrong"), "admin/probe-free");
+      expect(denied?.status).toBe(403);
+      expect(denied?.headers.get("x-request-id")).toBeTruthy();
+    }
+    expect(await adminGate(adminReq("gate-a"), "admin/probe-free")).toBeNull();
+  });
+
+  it(`meters allowed admin calls per credential per route (${ADMIN_LIMIT}/window)`, async () => {
+    set("ADMIN_TOKEN", "gate-b");
+    for (let i = 0; i < ADMIN_LIMIT; i++) {
+      expect(await adminGate(adminReq("gate-b"), "admin/probe-limit")).toBeNull();
+    }
+    const over = await adminGate(adminReq("gate-b"), "admin/probe-limit");
+    expect(over?.status).toBe(429);
+    const body = (await over!.json()) as { error: string; code: string };
+    expect(body.code).toBe("RATE_LIMITED");
+    // The budget is per credential and per route: one exhausted endpoint must
+    // not close triage on the others, and a rotation is not a shared bucket.
+    expect(await adminGate(adminReq("gate-b"), "admin/probe-other")).toBeNull();
+    set("ADMIN_TOKEN", "gate-c");
+    expect(await adminGate(adminReq("gate-c"), "admin/probe-limit")).toBeNull();
+  });
+
+  it("refusals use the shared envelope: code, message, request id", async () => {
+    set("ADMIN_TOKEN", undefined);
+    const noToken = await adminGate(adminReq("anything"), "admin/probe-envelope");
+    expect(noToken?.status).toBe(403);
+    expect((await noToken!.json()) as unknown).toEqual({ error: "forbidden", code: "FORBIDDEN" });
+    // In production the job failure is an authentication failure, not a
+    // permissions one, and it says so in the same shape.
+    set("CRON_SECRET", "gate-secret");
+    set("VITEST", undefined);
+    set("NODE_ENV", "production");
+    set("VERCEL_ENV", "production");
+    const unauth = await jobGate(jobReq("wrong"), "jobs/probe-envelope", null);
+    expect(unauth?.status).toBe(401);
+    expect((await unauth!.json()) as unknown).toEqual({ error: "unauthorized", code: "UNAUTHORIZED" });
+  });
+
+  it(`meters job calls per credential, including the body/query secret path (${JOB_LIMIT}/window)`, async () => {
+    set("CRON_SECRET", "gate-secret");
+    for (let i = 0; i < JOB_LIMIT; i++) {
+      expect(await jobGate(jobReq(undefined, "jobs/probe-limit?secret=gate-secret"), "jobs/probe-limit", null)).toBeNull();
+    }
+    const over = await jobGate(jobReq(undefined, "jobs/probe-limit?secret=gate-secret"), "jobs/probe-limit", null);
+    expect(over?.status).toBe(429);
+    expect(((await over!.json()) as { code: string }).code).toBe("RATE_LIMITED");
+    // Same secret, different endpoint: its own budget.
+    expect(await jobGate(jobReq(undefined, "jobs/probe-limit-2?secret=gate-secret"), "jobs/probe-limit-2", null)).toBeNull();
   });
 });
 

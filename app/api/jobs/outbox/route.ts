@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { jobAuth } from "@/lib/jobs";
+import { jobGate } from "@/lib/jobs";
 import { claimDueOutbox, processOutboxRowById } from "@/lib/outbox";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getOutboxStatus, POST: runOutbox });
 
 /**
  * Outbox worker (Phase 6): receipt/outbid email, preview generation, and
@@ -12,14 +14,14 @@ export const maxDuration = 30;
  * Every delivery carries its dedupe key with exponential backoff; terminal
  * failures persist lastError for the operator retry endpoint.
  */
-export async function POST(req: NextRequest) {
+async function runOutbox(req: NextRequest) {
   let body: { secret?: string; limit?: number } = {};
   try {
     body = await req.json();
   } catch {
     body = {};
   }
-  const denied = jobAuth(req, body.secret ?? null);
+  const denied = await jobGate(req, "jobs/outbox", body.secret ?? null);
   if (denied) return denied;
 
   const deadline = Date.now() + 20_000;
@@ -37,6 +39,6 @@ export async function POST(req: NextRequest) {
 }
 
 /** Vercel Cron invokes the path with GET (see vercel.json); same auth, default bounds. */
-export async function GET(req: NextRequest) {
-  return POST(req);
+async function getOutboxStatus(req: NextRequest) {
+  return runOutbox(req);
 }

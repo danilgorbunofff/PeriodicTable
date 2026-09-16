@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { consumeManageToken, manageCookieHeader } from "@/lib/manage";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: verifyManageLink });
 
 /** Consume a one-time magic-link token → verified session cookie. */
-export async function POST(req: NextRequest) {
+async function verifyManageLink(req: NextRequest) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`manage-verify:${ip}`, 20, 3_600_000))) {
     return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });

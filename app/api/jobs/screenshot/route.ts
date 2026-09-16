@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { jobAuth } from "@/lib/jobs";
+import { jobGate } from "@/lib/jobs";
 import { claimDueOutbox, processOutboxRowById } from "@/lib/outbox";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getScreenshotStatus, POST: runScreenshot });
 
 /**
  * Preview worker (Phase 6, P1-14/P1-15): persists Startup.previewImgUrl from
@@ -28,14 +30,14 @@ export const maxDuration = 30;
  * listing clears its preview (see the moderate endpoint); the row's payload
  * keeps only the startup id + source URL.
  */
-export async function POST(req: NextRequest) {
+async function runScreenshot(req: NextRequest) {
   let body: { secret?: string; limit?: number; backfill?: boolean } = {};
   try {
     body = await req.json();
   } catch {
     body = {};
   }
-  const denied = jobAuth(req, body.secret ?? null);
+  const denied = await jobGate(req, "jobs/screenshot", body.secret ?? null);
   if (denied) return denied;
 
   if (body.backfill) {
@@ -71,6 +73,6 @@ export async function POST(req: NextRequest) {
 }
 
 /** Vercel Cron invokes the path with GET (see vercel.json); same auth, default bounds. */
-export async function GET(req: NextRequest) {
-  return POST(req);
+async function getScreenshotStatus(req: NextRequest) {
+  return runScreenshot(req);
 }

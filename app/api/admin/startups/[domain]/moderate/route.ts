@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { adminAuth } from "@/lib/jobs";
-import { apiJson, apiError } from "@/lib/route";
+import { adminGate } from "@/lib/jobs";
+import { apiJson, apiError, apiRoute } from "@/lib/route";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getModerationState, POST: moderateStartup });
 
 const STATES = ["VISIBLE", "HIDDEN", "UNLISTED"] as const;
 
@@ -14,8 +15,8 @@ const STATES = ["VISIBLE", "HIDDEN", "UNLISTED"] as const;
  * stay; only public visibility changes. Hiding also clears the stored
  * preview (retention policy) and is fully audited with operator + reason.
  */
-export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
-  const denied = adminAuth(req);
+async function moderateStartup(req: NextRequest, { params }: { params: { domain: string } }) {
+  const denied = await adminGate(req, "admin/startups/[domain]/moderate");
   if (denied) return denied;
   const domain = decodeURIComponent(params.domain).trim().toLowerCase();
   let body: { state?: string; reason?: string; operator?: string };
@@ -55,8 +56,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
   return apiJson({ ok: true, domain, state: updated.moderationState });
 }
 
-export async function GET(req: NextRequest, { params }: { params: { domain: string } }) {
-  const denied = adminAuth(req);
+async function getModerationState(req: NextRequest, { params }: { params: { domain: string } }) {
+  const denied = await adminGate(req, "admin/startups/[domain]/moderate");
   if (denied) return denied;
   const domain = decodeURIComponent(params.domain).trim().toLowerCase();
   const startup = await prisma.startup.findUnique({

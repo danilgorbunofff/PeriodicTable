@@ -129,7 +129,7 @@ describe("the route's gate order (R06-2, R06-9, R06-10)", () => {
   });
 
   it("answers a replayed key with the envelope the first call would have (R06-9)", () => {
-    const replay = ROUTE.slice(at("async function idempotentReplay"), at("export async function POST"));
+    const replay = ROUTE.slice(at("async function idempotentReplay"), at("async function postCheckout("));
     expect(replay).toMatch(/provider: getProviderMode\(\),[\s\S]{0,400}guaranteedTake: true/);
     expect(replay).toMatch(/held\.expiresAt\.toISOString\(\)/);
     // A key reused for a different claim is still a conflict.

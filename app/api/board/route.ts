@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { apiJson, apiError } from "@/lib/route";
+import { apiJson, apiError, apiRoute } from "@/lib/route";
 import { aggregateEarlyAdopters, rankByElement, rankCrowns, rankEarlyAdopters } from "@/lib/boards";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listBoard });
 
 /**
  * Leaderboards with three DISTINCT metrics (Phase 4, P1-10):
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
  * - crowns: #1 seat count, then cumulative spend
  * - early: first-claim medals from immutable FirstClaim records
  */
-export async function GET(req: NextRequest) {
+async function listBoard(req: NextRequest) {
   const tab = req.nextUrl.searchParams.get("tab") ?? "crowns";
 
   if (tab === "crowns") {

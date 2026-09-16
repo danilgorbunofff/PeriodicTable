@@ -14,12 +14,14 @@ import {
 } from "@/lib/stripe";
 import { validateProviderMoney } from "@/lib/money";
 import { settlePayment, reversePayment, recordProviderEvent } from "@/lib/settle";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 
 // Settlement writes the whole ledger in one Serializable transaction against
 // Neon; see MONEY_TX for why the default 5 s Prisma budget is not enough.
 export const maxDuration = 60;
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postStripeWebhook });
 
 /**
  * Stripe webhook.
@@ -36,7 +38,7 @@ export const maxDuration = 60;
  *   settlement is atomic (settlePayment); unexpected failures get non-2xx so
  *   Stripe redelivers (item 7).
  */
-export async function POST(req: NextRequest) {
+async function postStripeWebhook(req: NextRequest) {
   const raw = await req.text();
   if (!verifyStripeSignature(raw, req.headers.get("stripe-signature"))) {
     return NextResponse.json({ error: "bad signature" }, { status: 401 });

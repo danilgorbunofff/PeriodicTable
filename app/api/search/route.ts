@@ -2,10 +2,11 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
-import { apiJson, apiError } from "@/lib/route";
+import { apiJson, apiError, apiRoute } from "@/lib/route";
 import type { SearchHit } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: searchElements });
 
 /**
  * Unified search (Phase 4, P1-06). Startup rows carry every field the client
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * plus its profile URL. Element rows are plain tiles. At most 8 rows,
  * startups first.
  */
-export async function GET(req: NextRequest) {
+async function searchElements(req: NextRequest) {
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`search:${ip}`, 60, 60_000))) {
     return apiError("Too many searches. Slow down.", { status: 429, code: "RATE_LIMITED" });

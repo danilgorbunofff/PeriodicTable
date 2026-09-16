@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { audit } from "@/lib/audit";
 import { resolveUnsubTarget, suppressionFor, suppressEmail, unsuppressEmail } from "@/lib/email";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: confirmUnsubscribe, POST: postUnsubscribe });
 
 /**
  * One-click unsubscribe (Phase 6, P1-18 + RFC 8058), re-pointed at the address
@@ -70,7 +72,7 @@ function button(action: string, label: string, primary: boolean): string {
   return `<button type="submit" name="action" value="${action}" style="margin:6px 4px 0;background:${bg};color:${fg};font-weight:800;padding:12px 24px;border-radius:999px;border:1px solid #111;font-size:15px;cursor:pointer;">${label}</button>`;
 }
 
-export async function GET(req: NextRequest) {
+async function confirmUnsubscribe(req: NextRequest) {
   const raw = req.nextUrl.searchParams.get("token") ?? "";
   // The token is a cuid we minted; anything else cannot resolve, so sanitizing
   // the hidden field only keeps a crafted value from breaking the markup.
@@ -142,7 +144,7 @@ async function apply(token: string, action: Action): Promise<void> {
   await audit({ action: "EMAIL_UNSUBSCRIBED", actorType: "owner", detail: current.email });
 }
 
-export async function POST(req: NextRequest) {
+async function postUnsubscribe(req: NextRequest) {
   const contentType = req.headers.get("content-type") ?? "";
   let token = "";
   let action: Action = "unsubscribe";

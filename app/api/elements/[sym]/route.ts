@@ -1,13 +1,14 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { takeLeadPrice, joinMin, reclaimFor } from "@/lib/pricing";
-import { apiJson, apiError, READ_CACHE } from "@/lib/route";
+import { apiJson, apiError, READ_CACHE, apiRoute } from "@/lib/route";
 import { findElementBySymbol } from "@/lib/elements";
 import { getActiveReservation } from "@/lib/reservations";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getElement });
 
-export async function GET(req: NextRequest, { params }: { params: { sym: string } }) {
+async function getElement(req: NextRequest, { params }: { params: { sym: string } }) {
   const raw = decodeURIComponent(params.sym);
   // Canonical casing (R04-4): `/api/elements/au` and `/api/elements/AU` must
   // price the element `/api/elements/Au` prices. The canonical form comes from

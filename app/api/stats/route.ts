@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { apiJson } from "@/lib/route";
+import { apiJson, apiRoute } from "@/lib/route";
 import { FACE_STAKE_WHERE } from "@/lib/moderation";
 import type { StatsResponse } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getStats });
 
 let cache: { at: number; data: StatsResponse } | null = null;
 const TTL = 30_000;
@@ -19,7 +20,7 @@ const TTL = 30_000;
  * `totalStakedUsd` remain hidden-inclusive money aggregates — concealed and
  * reversed stakes stay in the totals, as the moderation run documents.
  */
-export async function GET() {
+async function getStats() {
   if (cache && Date.now() - cache.at < TTL) {
     return apiJson(cache.data);
   }

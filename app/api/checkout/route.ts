@@ -20,6 +20,7 @@ import {
 import { withTxnRetry, MONEY_TX } from "@/lib/txn";
 import { audit } from "@/lib/audit";
 import { joinSpace } from "@/lib/stakeQuote";
+import { apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ export const dynamic = "force-dynamic";
 // Neon from Vercel; the default 5 s Prisma budget can expire mid-flight on a cold
 // compute resume. See MONEY_TX.
 export const maxDuration = 60;
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postCheckout });
 
 type Body = {
   elementSym: string;
@@ -151,7 +153,7 @@ async function idempotentReplay(
 // lives, so a second line would only repeat the first.
 let partialConfigLogged = false;
 
-export async function POST(req: NextRequest) {
+async function postCheckout(req: NextRequest) {
   // R07-5: this warning used to sit *below* the paused guard, so the environment
   // that most needed it — production with a half-set Stripe pair, where payments
   // are paused — never reached it. It is logged before the guard now, because a

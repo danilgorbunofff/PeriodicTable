@@ -407,6 +407,32 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     // A $0 row must not price the lead either: the floor is still $5, not $1.
     expect(json.prices.takeLead).toBe(5001);
   });
+  it("clamps the activity limit at both ends (R11-2)", async () => {
+    // Prisma reads `take: -1` as "one row, from the end of the set", so
+    // `?limit=-1` answered with a single oldest event instead of a page: a
+    // silently wrong feed rather than a bounded one. Junk still means six.
+    const negative = (await (await activityGET(req("/api/activity?limit=-1"))).json()) as unknown;
+    expect(isActivityRows(negative)).toBe(true);
+    if (!isActivityRows(negative)) return;
+    expect(negative.length).toBe(1);
+
+    const huge = (await (await activityGET(req("/api/activity?limit=1000000"))).json()) as unknown;
+    expect(isActivityRows(huge)).toBe(true);
+    if (!isActivityRows(huge)) return;
+    expect(huge.length).toBeGreaterThan(0);
+    expect(huge.length).toBeLessThanOrEqual(20);
+
+    const junk = (await (await activityGET(req("/api/activity?limit=abc"))).json()) as unknown;
+    expect(isActivityRows(junk)).toBe(true);
+    if (!isActivityRows(junk)) return;
+    expect(junk.length).toBeGreaterThan(0);
+    expect(junk.length).toBeLessThanOrEqual(6);
+
+    const two = (await (await activityGET(req("/api/activity?limit=2"))).json()) as unknown;
+    expect(isActivityRows(two)).toBe(true);
+    if (!isActivityRows(two)) return;
+    expect(two.length).toBe(2); // in-range values are still honoured exactly
+  });
 });
 
 describe.skipIf(!hasDb)("audit inside a transaction", () => {

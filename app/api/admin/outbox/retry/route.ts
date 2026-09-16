@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { adminAuth } from "@/lib/jobs";
-import { apiJson, apiError } from "@/lib/route";
+import { adminGate } from "@/lib/jobs";
+import { apiJson, apiError, apiRoute } from "@/lib/route";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: retryOutbox });
 
 /**
  * Operator retry for a terminally-failed outbox delivery (Phase 6 item 3):
@@ -23,8 +24,8 @@ export const dynamic = "force-dynamic";
  * burn attempts through the retry ladder is refused as before: it was already
  * redelivered up to OUTBOX_MAX_ATTEMPTS times.
  */
-export async function POST(req: NextRequest) {
-  const denied = adminAuth(req);
+async function retryOutbox(req: NextRequest) {
+  const denied = await adminGate(req, "admin/outbox/retry");
   if (denied) return denied;
   let body: { dedupeKey?: string };
   try {

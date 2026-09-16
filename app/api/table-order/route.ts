@@ -1,15 +1,16 @@
 import { prisma } from "@/lib/prisma";
-import { apiJson } from "@/lib/route";
+import { apiJson, apiRoute } from "@/lib/route";
 import { aggregateTableOrder } from "@/lib/boards";
 
 export const dynamic = "force-dynamic";
+export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: listTableOrder });
 
 /**
  * Table Order rail source (Phase 4, P1-10): total cumulative spend across
  * EVERY startup stake (not leaders only), crown counts, deterministic
  * order. Top 10 — matches the rail's TOP 10 · MOST SPENT header.
  */
-export async function GET() {
+async function listTableOrder() {
   const stakes = await prisma.stake.findMany({
     where: { startup: { moderationState: "VISIBLE" } },
     select: {
