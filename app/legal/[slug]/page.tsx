@@ -38,25 +38,25 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
   const sections = legalSections(slug);
   return (
     <main id="main" className="min-h-screen bg-profilebg text-ink">
-      <div className="max-w-2xl mx-auto px-4 py-8">
+      <div className="max-w-2xl mx-auto px-4 py-6">
         <Link href="/" className="text-sm font-bold text-mutedink hover:text-ink">← the table</Link>
-        <h1 className="font-display text-2xl font-bold mt-3">{page.title}</h1>
-        <p className="text-sm text-mutedink mt-2 leading-relaxed">{page.desc}</p>
+        <h1 className="font-display text-2xl font-bold mt-2">{page.title}</h1>
+        <p className="text-sm text-mutedink mt-1.5 leading-relaxed">{page.desc}</p>
         {sections.map((s) => (
-          <section key={s.h} className="mt-5">
+          <section key={s.h} className="mt-4">
             <h2 className="font-display text-base font-bold text-ink">{s.h}</h2>
             {(s.ps ?? []).map((p) => (
-              <p key={p.slice(0, 24)} className="text-sm text-mutedink mt-2 leading-relaxed">{p}</p>
+              <p key={p.slice(0, 24)} className="text-sm text-mutedink mt-1.5 leading-relaxed">{p}</p>
             ))}
             {s.bullets && (
-              <ul className="mt-2 space-y-1.5">
+              <ul className="mt-1.5 space-y-1">
                 {s.bullets.map((b) => (
                   <li key={b.slice(0, 24)} className="text-sm text-mutedink leading-relaxed pl-4 -indent-4">• {b}</li>
                 ))}
               </ul>
             )}
             {s.table && (
-              <dl className="mt-2 space-y-1.5">
+              <dl className="mt-1.5 space-y-1">
                 {s.table.map((row) => (
                   <div key={row.label} className="text-sm text-mutedink leading-relaxed">
                     <dt className="font-bold inline">{row.label}: </dt>
@@ -67,7 +67,7 @@ export default function LegalPage({ params }: { params: { slug: string } }) {
             )}
           </section>
         ))}
-        <div className="text-xs text-mutedink mt-8">
+        <div className="text-xs text-mutedink mt-6">
           {LEGAL_LINKS.filter((l) => l.href !== `/legal/${slug}`).map((l, i) => (
             <span key={l.href}>
               {i > 0 && " · "}

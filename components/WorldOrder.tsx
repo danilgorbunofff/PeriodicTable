@@ -4,6 +4,7 @@ import { Avatar } from "./Avatar";
 import useSWR from "swr";
 import { fetchJson, isTableOrderRows, type TableOrderRow } from "../lib/api";
 import { NO_STAKES_YET } from "../lib/activityFace";
+import { track } from "../lib/analytics";
 
 export function WorldOrder({
   onClose,
@@ -107,6 +108,9 @@ export function WorldOrder({
               href={r.stakeId ? `/go/${r.stakeId}` : `/s/${encodeURIComponent(r.domain)}`}
               target="_blank"
               rel="sponsored nofollow noopener"
+              onClick={() => {
+                if (r.stakeId) track("go_click", { domain: r.domain });
+              }}
               className={`grid items-center text-left no-underline transition-colors ${
                 podium
                   ? `mb-1 grid-cols-[34px_32px_1fr_auto] gap-2.5 rounded-[14px] border ${podium.border} ${podium.bg} ${podium.hover} px-2.5 py-3`

@@ -4,6 +4,7 @@ import { logError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
 import { classifyAndValidate, joinMin, validateTake } from "@/lib/pricing";
 import { isEmail, validateCheckoutInput } from "@/lib/validate";
+import { CHECKOUT_MSG } from "@/lib/checkoutFace";
 import { findElementBySymbol } from "@/lib/elements";
 import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured } from "@/lib/stripe";
 import { rateLimitAsync } from "@/lib/rateStore";
@@ -212,7 +213,7 @@ async function postCheckout(req: NextRequest) {
     return NextResponse.json({ error: "Something went wrong. Try again." }, { status: 400 });
   }
   if (!attestValid(body.attest)) {
-    return NextResponse.json({ error: "Please confirm you own or may promote this URL.", field: "attest" }, { status: 400 });
+    return NextResponse.json({ error: CHECKOUT_MSG.attest, field: "attest" }, { status: 400 });
   }
   // R16-7: the checkbox's words are versioned. A tab left open across a rules
   // change would otherwise attest to a revision it never showed, and the record

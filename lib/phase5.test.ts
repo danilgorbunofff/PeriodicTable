@@ -40,6 +40,21 @@ describe("analytics contract", () => {
   });
 });
 
+describe("go_click parity (static)", () => {
+  const read = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
+  it("fires on the outbound links, and only where the link really leaves", () => {
+    // The counter lives on /go/:stakeId, so the event belongs to the surfaces
+    // that still link through it. Rows that point at /s/:domain are internal
+    // navigation and must not be counted as delivered clicks.
+    for (const p of ["components/WorldOrder.tsx", "components/ActivityCard.tsx"]) {
+      expect(read(p), p).toMatch(/stakeId\) track\("go_click"/);
+    }
+  });
+  it("the bidder drawer no longer fires it — its outbound link is gone", () => {
+    expect(read("components/TerritoryView.tsx")).not.toMatch(/go_click/);
+  });
+});
+
 /* The click path hashes the IP, but the waitlist audit write did not: it stored
  * the raw address in AuditLog.actorRef *alongside* the email in `detail`, so a
  * single row carried both a person and their address. These pin the invariant

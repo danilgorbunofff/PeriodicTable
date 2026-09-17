@@ -54,7 +54,7 @@ export const SERVICE_TERM_SENTENCE = `Stakes never expire, and the board is comm
  * `lib/legalDocs.ts` changes — the digest in `lib/legalContent.test.ts` fails the
  * suite if you forget.
  */
-export const LEGAL_UPDATED = "2026-09-16";
+export const LEGAL_UPDATED = "2026-09-17";
 
 /** The wording a stake is bought under — stored with a payment, sent by the
  * checkout modal, and compared by the checkout route. Never rendered. */

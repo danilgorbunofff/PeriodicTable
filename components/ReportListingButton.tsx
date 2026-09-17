@@ -2,8 +2,7 @@
 import { useState } from "react";
 import { Modal } from "./Modal";
 
-/** Report affordance for surfaces without their own report flow (profile
- * page). Same confirm-before-send contract as the bidder rows: clicking
+/** Report affordance for the profile page. Confirm-before-send: clicking
  * only arms the modal; Confirm sends exactly one POST; Cancel/Escape sends
  * nothing. */
 export function ReportListingButton({

@@ -15,8 +15,11 @@ export type CheckoutTab = "url" | "social";
 
 /** Fields the modal renders a message under (`co-<field>-error`). A server
  *  `field` outside this list would be set and never shown, so it has to fall
- *  back to the shared error line instead (R06-4). */
-export const FIELD_RENDERERS = ["url", "title", "pitch", "email"] as const;
+ *  back to the shared error line instead (R06-4). `attest` is on the list
+ *  because the route refuses it twice — an unticked box, and a tab whose rules
+ *  revision is stale (R16-7) — and both sentences belong on the checkbox the
+ *  buyer has to touch, not on a line under the button. */
+export const FIELD_RENDERERS = ["url", "title", "pitch", "email", "attest"] as const;
 
 export function fieldHasRenderer(field: string): boolean {
   return (FIELD_RENDERERS as readonly string[]).includes(field);
@@ -28,7 +31,7 @@ export const CHECKOUT_MSG = {
   email: "That email doesn't look right.",
   title: "Name must be 2–32 characters.",
   pitch: "Pitch must be 2–140 characters.",
-  attest: "Please confirm you own this URL or may promote it.",
+  attest: "Please confirm you own or may promote this URL.",
   humanCheck: "The human check could not load — reload or use another network.",
   canceled:
     "Not paid — nothing was charged. Your claim is still here, and any take quote it held stays reserved for up to 15 minutes.",
@@ -96,8 +99,17 @@ export function submitBlocked(input: {
     return { field: "url", message: urlMessage(input.tab) };
   }
   if (emailShapeBad(input.email)) return { field: "email", message: CHECKOUT_MSG.email };
-  if (titleShapeBad(input.title)) return { field: "title", message: CHECKOUT_MSG.title };
-  if (pitchShapeBad(input.pitch)) return { field: "pitch", message: CHECKOUT_MSG.pitch };
+  // The name and the pitch are labelled `required` in the form and are the two
+  // fields the server silently substitutes (the domain and "Staked on <element>")
+  // when they arrive empty — so an empty one is refused here, with the sentence
+  // the length rule already has, instead of being quietly invented for the
+  // buyer (R06-1).
+  if (input.title.trim().length === 0 || titleShapeBad(input.title)) {
+    return { field: "title", message: CHECKOUT_MSG.title };
+  }
+  if (input.pitch.trim().length === 0 || pitchShapeBad(input.pitch)) {
+    return { field: "pitch", message: CHECKOUT_MSG.pitch };
+  }
   if (!input.attest) return { field: "attest", message: CHECKOUT_MSG.attest };
   if (input.humanCheckFailed) return { field: null, message: CHECKOUT_MSG.humanCheck, shown: true };
   if (input.clientErr) return { field: null, message: input.clientErr };
