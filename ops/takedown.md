@@ -10,26 +10,27 @@ single report: `ops/abuse-wave.md`.
 ## The daily sweep (R20-9)
 
 Both clocks this playbook publishes start when something *arrives*, not when
-somebody reads it — `abuse@` is "actioned within 72 hours", `hello@` is "2–3
-business days" — and the report queue is a **pull** surface that notifies nobody
+somebody reads it — a complete rights complaint is "actioned within 72 hours"
+(`/legal/contact`) and any other mail is answered "within a few business days" —
+and the report queue is a **pull** surface that notifies nobody
 (`app/api/admin/reports/route.ts`). So the watching is a schedule, not a habit:
 
 - **Once a day, every day:** read the queue's own numbers (`X-Report-Queue-Open`
-  / `-Overdue` / `-Oldest-Hours`, §Triage step 1) and open the inboxes the site
-  publishes: `abuse@` (reports and rights complaints, 72 h), `payments@`, `hi@`
-  (replies to our own mail land here too), `hello@` and `privacy@` — the five
-  addresses `lib/legal.ts`'s `SUPPORT` lists, so this line cannot drift from the
-  pages that publish them. An empty day is a ten-second check; what it buys is
-  that nothing ages unread while a page promises a turn-around.
+  / `-Overdue` / `-Oldest-Hours`, §Triage step 1) and open the one inbox the site
+  publishes — `info@periodictable.lol`, which is `lib/legal.ts`'s `SUPPORT_EMAIL`,
+  so this line cannot drift from the pages that name it. Everything arrives
+  there: reports and rights complaints (72 h), payment questions, privacy
+  requests, and the replies to our own mail. An empty day is a ten-second check;
+  what it buys is that nothing ages unread while a page promises a turn-around.
 - **Friday, and the day before any planned absence:** sweep, and act the *same
-  day* on anything DMCA-shaped or lawyer-shaped. A Friday complaint read on
+  day* on anything DMCA-shaped or lawyer-shaped. A Friday rights complaint read on
   Monday is already at the 72-hour promise, and moderation is reversible, so
   containment (hide with the factual reason, §Contain) is the cheap first move,
   and the reviewer's decision can follow it.
 - **If a week is going to be best-effort:** change the published window for it
-  rather than missing it. A missed promise on the contact page is a worse
-  failure than a modest one, and the two sentences that publish these windows are
-  in the legal corpus (`lib/legalDocs.ts`), not in this file.
+  rather than missing it. A missed promise on the contact or rules page is a
+  worse failure than a modest one, and the sentences that publish these windows
+  are in the legal corpus (`lib/legalDocs.ts`), not in this file.
 
 ## Intake
 - Report button on every rank row → `POST /api/report { stakeId, reason }` → `Report{status: OPEN}` row.

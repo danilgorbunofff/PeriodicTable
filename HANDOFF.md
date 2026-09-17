@@ -609,15 +609,18 @@ newest production deployment, not GitHub's commit status (see the traps below).
       `/s/[domain]` resolve to 10.14:1 (7.25:1 for white-on-navy) once measured
       against the gradient stops. Remaining incompletes are the `aria-hidden`
       decorative `bg-sym` watermarks — not real text.
-- [ ] **`/pay/[paymentId]` renders its "DEV SIMULATOR" UI in production.** The
-      *API* it calls (`POST /api/dev/pay`) is correctly 403'd whenever Whop is
-      configured, so no payment can be settled from it — but the **page** has no
-      guard (there is no `middleware.ts` at all), so anyone hitting
-      `periodictable.lol/pay/anything` sees internal dev tooling and a checkout
-      that cannot work. Found during the a11y sweep. Low severity (no data
-      exposure), and the fix is a product/routing call rather than a one-liner —
-      the page is `"use client"`, so gating on `getProviderMode()` needs either a
-      server wrapper that calls `notFound()` or a new `middleware.ts`.
+- [x] **Closed — `/pay/[paymentId]` is gated on the server, so a live deployment
+      404s it.** The page was `"use client"` and rendered the "DEV SIMULATOR" UI
+      to anyone who guessed the URL; it is now a server component that calls
+      `notFound()` behind three gates before `PaySimulator` is ever rendered —
+      the provider mode, `devSimulatorEnabled()` (a production box with a missing
+      secret used to read as `dev`, R07-1/R07-2, and so did a preview sharing the
+      production database) and the payment row's own provider (R07-6, which keeps
+      a legacy `WHOP` row from showing a button whose every press is a 403). The
+      first of the two options this entry named was taken, so no `middleware.ts`
+      was needed. Verified live 2026-09-17: `periodictable.lol/pay/anything`
+      answers **404** with the site's own not-found chrome and no simulator text
+      anywhere in the response.
 - [x] `EMAIL_FROM` and the rest of the deployment lead with
       `info@periodictable.lol`. It is the only mailbox the site publishes: the
       `hi@`, `hello@`, `payments@`, `abuse@` and `privacy@` boxes quoted in
