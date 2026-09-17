@@ -7,6 +7,7 @@ import { relTime } from "../lib/relTime";
 import { liveState, type LiveState } from "../lib/liveState";
 import { activityFace, kindLabel } from "../lib/activityFace";
 import { faviconFor } from "../lib/screenshots";
+import { track } from "../lib/analytics";
 
 /** First negative delta in the system: a reversal must read as a debit, not a gain. */
 function deltaText(delta: number): string {
@@ -92,6 +93,9 @@ export function ActivityCard({
                 href={s.stakeId ? `/go/${s.stakeId}` : `/s/${encodeURIComponent(s.domain)}`}
                 target="_blank"
                 rel="sponsored nofollow noopener"
+                onClick={() => {
+                  if (s.stakeId) track("go_click", { element: s.elementSymbol, domain: s.domain });
+                }}
                 className="block rounded-lg p-[6px] text-left no-underline transition-colors hover:bg-icy"
               >
                 <div className="flex items-center gap-[9px]">

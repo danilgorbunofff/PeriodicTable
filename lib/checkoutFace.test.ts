@@ -63,6 +63,18 @@ describe("submitBlocked — one sentence for every refusal (R06-1)", () => {
     expect(blocked({ attest: false })).toEqual({ field: "attest", message: CHECKOUT_MSG.attest });
   });
 
+  it("refuses an empty name or pitch instead of inventing one (R06-1)", () => {
+    // Both are labelled `required`, and both have a server-side fallback (the
+    // resolved domain, "Staked on <element>") — so an empty one used to reach
+    // the board as text the buyer never wrote, with nothing said about it.
+    for (const title of ["", "   "]) {
+      expect([title, blocked({ title })]).toEqual([title, { field: "title", message: CHECKOUT_MSG.title }]);
+    }
+    for (const pitch of ["", "\n "]) {
+      expect([pitch, blocked({ pitch })]).toEqual([pitch, { field: "pitch", message: CHECKOUT_MSG.pitch }]);
+    }
+  });
+
   it("announces a human check that never loaded, without printing it twice", () => {
     // The widget itself renders this sentence (R06-6), so the form must not
     // add a second copy under the button — it marks it as already shown.
@@ -123,10 +135,13 @@ describe("field shape — the same rules the server enforces (R06-10)", () => {
   });
 
   it("renders exactly the fields the modal has nodes for (R06-4)", () => {
-    expect([...FIELD_RENDERERS]).toEqual(["url", "title", "pitch", "email"]);
+    expect([...FIELD_RENDERERS]).toEqual(["url", "title", "pitch", "email", "attest"]);
     expect(fieldHasRenderer("email")).toBe(true);
-    // `attest` is a checkbox, not an input with a `co-attest-error` node.
-    expect(fieldHasRenderer("attest")).toBe(false);
+    // `attest` is a checkbox rather than a text input, but it has a node of its
+    // own now: the route refuses the box twice (unticked, and a tab holding a
+    // stale rules revision) and both sentences belong on the box the buyer has
+    // to touch instead of on the shared line under the button.
+    expect(fieldHasRenderer("attest")).toBe(true);
     expect(fieldHasRenderer("startup.domain")).toBe(false);
   });
 });
@@ -204,11 +219,18 @@ describe("checkoutRefusal — what a refused response means (R06-3, R06-4)", () 
       field: { field: "email", message: "That email doesn't look right." },
       priceMoved: null,
     });
-    // No `co-attest-error` node exists, so the sentence has to reach the line
-    // under the button instead of vanishing into state.
-    const attest = checkoutRefusal(400, { error: "Please confirm you own this URL.", field: "attest" });
-    expect(attest.field).toBeNull();
-    expect(attest.serverErr).toBe("Please confirm you own this URL.");
+    // The checkbox has a `co-attest-error` node, so both attest refusals — the
+    // unticked box and the stale rules revision — land under it.
+    expect(checkoutRefusal(400, { error: CHECKOUT_MSG.attest, field: "attest" })).toEqual({
+      serverErr: null,
+      field: { field: "attest", message: CHECKOUT_MSG.attest },
+      priceMoved: null,
+    });
+    // No node for this one, so the sentence reaches the line under the button
+    // instead of vanishing into state.
+    const other = checkoutRefusal(400, { error: "startup.url is required.", field: "startup.domain" });
+    expect(other.field).toBeNull();
+    expect(other.serverErr).toBe("startup.url is required.");
   });
 
   it("reads a replay of a checkout that already ended (R06-9)", () => {

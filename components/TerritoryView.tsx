@@ -1,16 +1,11 @@
 "use client";
-import { useState } from "react";
 import useSWR from "swr";
 import { ChunkyButton } from "./ChunkyButton";
 import { Avatar } from "./Avatar";
-import { Modal } from "./Modal";
 import type { ElementNode } from "../lib/elements";
 import { fetchJson, isElementDetail, type ElementDetail } from "../lib/api";
 import { FAMILY_FILL } from "../lib/familyFill";
 import { MIN_STAKE, takeLeadPrice } from "../lib/pricing";
-import { track } from "../lib/analytics";
-
-type ReportState = { domain: string; state: "pending" | "done" | "error" } | null;
 
 export function TerritoryView({
   el,
@@ -35,10 +30,6 @@ export function TerritoryView({
   // P1-08: failure is NEVER rendered as business state. Error without data
   // gets an error panel — never the unclaimed CTA.
   const rows = data?.stakes ?? [];
-  const [report, setReport] = useState<ReportState>(null);
-  // Confirm-before-report: the report button only arms this state; nothing
-  // is sent until the user confirms in the modal (no accidental reports).
-  const [confirm, setConfirm] = useState<{ stakeId: string; domain: string } | null>(null);
   const top = rows[0];
   // These two are the fallbacks for a payload that arrived without prices, and
   // they are prices the button actually sends: R19-6 moved them onto the same
@@ -54,22 +45,6 @@ export function TerritoryView({
   // canonical article "Dark matter" (exact casing, no redirect hop).
   const WIKI_OVERRIDES: Record<string, string> = { DM: "Dark_matter" };
   const wikiUrl = `https://en.wikipedia.org/wiki/${WIKI_OVERRIDES[el.symbol] ?? el.name.replace(/ /g, "_")}`;
-
-  async function sendReport(stakeId: string, domain: string) {    if (report?.domain === domain && report.state === "pending") return;
-    setReport({ domain, state: "pending" });
-    try {
-      const res = await fetch("/api/report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stakeId, reason: "reported from drawer" }),
-      });
-      const json = (await res.json().catch(() => null)) as { ok?: boolean } | null;
-      // P2-04: confirm ONLY a persisted report; surface failure honestly.
-      setReport({ domain, state: res.ok && json?.ok ? "done" : "error" });
-    } catch {
-      setReport({ domain, state: "error" });
-    }
-  }
 
   return (
     <div className="flex flex-col h-full relative">
@@ -196,57 +171,27 @@ export function TerritoryView({
                       : "hover:bg-icy";
               const badgeBg = i === 0 ? "bg-medalgold" : i === 1 ? "bg-medalsilver" : i === 2 ? "bg-medalbronze" : "bg-sale";
               return (
-              // Bidder actions are siblings, never nested (P2-10): the domain
-              // opens the profile, Visit counts the click, Report moderates.
-              <div
+              // The whole row opens the bidder's profile, so nothing inside it
+              // is a nested action: the row is the link and the only target.
+              <a
                 key={r.domain}
+                href={`/s/${encodeURIComponent(r.domain)}`}
+                aria-label={`Open ${r.domain} bidder info`}
                 className={`relative block px-3 py-2 rounded-2xl transition-colors ${rankBg}`}
               >
                 <div className="flex items-center gap-2">
                   <span className={`grid h-7 min-w-[30px] shrink-0 place-items-center rounded-lg ${badgeBg} text-[11px] font-extrabold text-ink`}>#{i + 1}</span>
                   <Avatar src={r.logo} domain={r.domain} size={24} rounded="rounded-full" />
-                  <a
-                    href={`/s/${encodeURIComponent(r.domain)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-bold text-ink truncate hover:underline"
-                  >
+                  <span className="text-sm font-bold text-ink truncate">
                     {r.domain}
-                  </a>
+                  </span>
                   <span className="ml-auto text-sm font-extrabold text-moneyink whitespace-nowrap">${r.amount}</span>
                 </div>
                 <div className="text-xs text-mutedink truncate pl-[38px]">{r.pitch}</div>
-                <div className="pl-[38px] mt-0.5 flex items-center gap-2">
+                <div className="pl-[38px] mt-0.5">
                   <span className="text-[11px] text-liveink font-bold">🟢 {r.clicks} clicks delivered</span>
-                  <a
-                    href={r.stakeId ? `/go/${r.stakeId}` : `/s/${encodeURIComponent(r.domain)}`}
-                    target="_blank"
-                    rel="sponsored nofollow noopener"
-                    onClick={() => track("go_click", { element: el.symbol, domain: r.domain })}
-                    className="text-[11px] font-bold text-moneyink hover:underline"
-                  >
-                    Visit →
-                  </a>
-                  <button
-                    aria-label={`Report ${r.domain}`}
-                    title="Report listing"
-                    disabled={report?.domain === r.domain && report.state === "pending"}
-                    onClick={() => {
-                      if (report?.domain === r.domain && report.state === "pending") return;
-                      setConfirm({ stakeId: r.stakeId, domain: r.domain });
-                    }}
-                    className="text-[11px] text-mutedink hover:text-ink underline disabled:no-underline"
-                  >
-                    {report?.domain === r.domain
-                      ? report.state === "pending"
-                        ? "reporting…"
-                        : report.state === "done"
-                          ? "reported ✓"
-                          : "failed — retry?"
-                      : "report"}
-                  </button>
                 </div>
-              </div>
+              </a>
               );
             })}
             {error && (
@@ -264,30 +209,6 @@ export function TerritoryView({
           </div>
         </>
       )}
-      <Modal open={confirm !== null} onClose={() => setConfirm(null)} label="Confirm report" size="md">
-        <h2 className="font-display text-xl font-bold pr-10">Report {confirm?.domain}?</h2>
-        <p className="text-sm text-mutedink mt-2">
-          This flags the listing for operator review (phishing, trademark, malware).
-          Stakes and payments are never touched — only visibility is reviewed.
-        </p>
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <button
-            onClick={() => setConfirm(null)}
-            className="h-11 px-5 rounded-full bg-icy text-sm font-bold text-ink hover:bg-hairline [@media(pointer:coarse)]:min-h-[44px]"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              if (confirm) sendReport(confirm.stakeId, confirm.domain);
-              setConfirm(null);
-            }}
-            className="h-11 px-5 rounded-full bg-ink text-sm font-bold text-white [@media(pointer:coarse)]:min-h-[44px]"
-          >
-            Report listing
-          </button>
-        </div>
-      </Modal>
     </div>
   );
 }

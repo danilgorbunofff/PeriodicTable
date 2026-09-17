@@ -172,6 +172,29 @@ describe("modal contract (static)", () => {
   });
 });
 
+describe("bidder rows are single links (static)", () => {
+  const drawer = src("components/TerritoryView.tsx");
+  // Only the bidder list — the map and its rows — so the header's own buttons
+  // and the wiki links stay out of the sweep.
+  const rows = drawer.slice(
+    drawer.indexOf("rows.map((r, i) =>"),
+    drawer.indexOf("Showing cached standings"),
+  );
+  it("the whole row opens the bidder page, and nothing inside it is interactive", () => {
+    // One tab stop per bidder, and the domain sits inside that link rather than
+    // in a nested one (a nested link is a duplicate stop and an AT trap).
+    expect(rows).toMatch(/aria-label=\{`Open \$\{r\.domain\} bidder info`\}/);
+    expect(rows.match(/<a[\s>]/g) ?? []).toHaveLength(1);
+    expect(rows.match(/<\/a>/g) ?? []).toHaveLength(1);
+    expect(rows).not.toMatch(/<button/);
+  });
+  it("the row stays on this tab, so the drawer leaves no outbound link behind", () => {
+    expect(rows).not.toMatch(/target="_blank"/);
+    expect(rows).not.toMatch(/\/go\//);
+    expect(drawer).not.toMatch(/track\(/);
+  });
+});
+
 describe("camera contract (static, P2-11)", () => {
   const cam = src("components/TableCamera.tsx");
   it("yields to overlays, controls, and consumed keys", () => {

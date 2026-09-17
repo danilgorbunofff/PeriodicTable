@@ -28,6 +28,11 @@ import { paymentsLiveClient } from "../lib/flags";
 import { track } from "../lib/analytics";
 import type { ElementNode } from "../lib/elements";
 
+/** The red warning for a control the form refused (R06-4). IcyInput draws no
+ *  border of its own, so a border here has nothing to fight — and the sentence
+ *  under the control, not the colour, is what says which rule was broken. */
+const INVALID_FIELD = "border-2 border-red-600";
+
 export function HowItWorks({ open, onClose }: { open: boolean; onClose: () => void }) {
   /* R19-6: the three steps are the first price copy a visitor reads, and they
    * were the last place quoting it by hand — "$5" and "pay only the difference
@@ -219,6 +224,10 @@ export function CheckoutPreview({
     existingTotals: stakeTotals,
   });
   const clientErr = classified.ok ? null : classified.error;
+  // The pricing preview's refusal *is* the amount's rule (whole dollars, the
+  // first-join floor, a tie, a taken slot), so it marks the amount field the
+  // same way the shape checks above mark theirs.
+  const badAmount = clientErr != null;
   const paused = !paymentsLiveClient();
 
   // R04-1: the app minted that amount (outbid mail `?stake=`, element-page CTA)
@@ -458,6 +467,7 @@ export function CheckoutPreview({
             placeholder={tab === "url" ? "https://yourstartup.com" : "@yourhandle"}
             aria-invalid={badUrl || serverField?.field === "url"}
             aria-describedby={badUrl || serverField?.field === "url" ? "co-url-error" : undefined}
+            className={badUrl || serverField?.field === "url" ? INVALID_FIELD : undefined}
           />
           {(badUrl || serverField?.field === "url") && (
             <div id="co-url-error" className="text-xs text-red-700">
@@ -474,6 +484,7 @@ export function CheckoutPreview({
             maxLength={32}
             aria-invalid={badTitle || serverField?.field === "title"}
             aria-describedby={badTitle || serverField?.field === "title" ? "co-title-error" : undefined}
+            className={badTitle || serverField?.field === "title" ? INVALID_FIELD : undefined}
           />
           {(badTitle || serverField?.field === "title") && (
             <div id="co-title-error" className="text-xs text-red-700">
@@ -490,6 +501,7 @@ export function CheckoutPreview({
             maxLength={140}
             aria-invalid={badPitch || serverField?.field === "pitch"}
             aria-describedby={badPitch || serverField?.field === "pitch" ? "co-pitch-error" : undefined}
+            className={badPitch || serverField?.field === "pitch" ? INVALID_FIELD : undefined}
           />
           {(badPitch || serverField?.field === "pitch") && (
             <div id="co-pitch-error" className="text-xs text-red-700">
@@ -505,6 +517,7 @@ export function CheckoutPreview({
             placeholder="you@startup.com"
             aria-invalid={badEmail || serverField?.field === "email"}
             aria-describedby={badEmail || serverField?.field === "email" ? "co-email-error" : undefined}
+            className={badEmail || serverField?.field === "email" ? INVALID_FIELD : undefined}
           />
           {(badEmail || serverField?.field === "email") && (
             <div id="co-email-error" className="text-xs text-red-700">
@@ -516,7 +529,14 @@ export function CheckoutPreview({
           <label htmlFor="co-amount" className="mb-1 block text-[11px] font-extrabold text-mutedink">Stake amount (whole dollars)</label>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-mutedink">$</span>
-            <IcyInput id="co-amount" name="co-amount" type="number" min={1} required value={amount} onChange={(e) => onAmount(Number(e.target.value))} className="pl-8" />
+            <IcyInput
+              id="co-amount" name="co-amount" type="number" min={1} required
+              value={amount}
+              onChange={(e) => { onAmount(Number(e.target.value)); setServerField(null); }}
+              aria-invalid={badAmount}
+              aria-describedby={badAmount ? "co-amount-error" : undefined}
+              className={badAmount ? `pl-8 ${INVALID_FIELD}` : "pl-8"}
+            />
           </div>
         </div>
       </div>
@@ -556,7 +576,7 @@ export function CheckoutPreview({
           );
         })}
       </div>
-      {clientErr && <div className="mt-2 text-xs text-red-700 font-bold">{clientErr}</div>}
+      {badAmount && <div id="co-amount-error" className="mt-2 text-xs text-red-700 font-bold">{clientErr}</div>}
       {serverErr && <div className="mt-2 text-xs text-red-700 font-bold">{serverErr}</div>}
       <input
         type="text"
@@ -569,7 +589,14 @@ export function CheckoutPreview({
         name="website"
       />
       <label className="mt-2 flex items-start gap-2 text-xs text-mutedink">
-        <input type="checkbox" checked={attest} onChange={(e) => setAttest(e.target.checked)} className="mt-0.5" />
+        <input
+          type="checkbox"
+          checked={attest}
+          onChange={(e) => { setAttest(e.target.checked); setServerField(null); }}
+          className={serverField?.field === "attest" ? `mt-0.5 ${INVALID_FIELD}` : "mt-0.5"}
+          aria-invalid={serverField?.field === "attest"}
+          aria-describedby={serverField?.field === "attest" ? "co-attest-error" : undefined}
+        />
         {/* The attested words are `CONSENT_STATEMENT`, rendered whole with the
             linked phrase spliced in — not a paraphrase. The server records a
             digest of that exact string (R16-6), so the evidence matches what was
@@ -587,6 +614,9 @@ export function CheckoutPreview({
           ))}
         </span>
       </label>
+      {serverField?.field === "attest" && (
+        <div id="co-attest-error" className="mt-1 text-xs text-red-700 font-bold">{serverField.message}</div>
+      )}
       {process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ? (
         <TurnstileWidget
           sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY}
@@ -599,10 +629,14 @@ export function CheckoutPreview({
           onLoadFail={() => setHumanCheckFailed(true)}
         />
       ) : null}
+      {/* Never `disabled={... || !attest}`: a disabled button swallows the click,
+          so an unticked box produced no request, no message and no mark on the
+          box the buyer still had to touch (R06-4). The click is allowed through
+          and the refusal is what goes red. */}
       <ChunkyButton
         type="submit"
         className="w-full mt-2 text-sm px-5 h-12"
-        disabled={submitting || !attest}
+        disabled={submitting}
       >
         {submitting ? "Starting checkout…" : "Continue to checkout →"}
       </ChunkyButton>
@@ -677,7 +711,7 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
           ? [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-[44px] rounded-2xl bg-icy animate-pulse" />)
           : null}
         {tab === "el" && rows?.map((row, i) => (
-          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
+          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
@@ -686,7 +720,7 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
           </a>
         ))}
         {tab === "crowns" && rows?.map((row, i) => (
-          <a key={row.domain} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
+          <a key={row.domain} href={`/s/${encodeURIComponent(row.domain)}`} className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
@@ -695,7 +729,7 @@ export function BoardPreview({ open, onClose }: { open: boolean; onClose: () => 
           </a>
         ))}
         {tab === "early" && rows?.map((row, i) => (
-          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
+          <a key={row.domain + row.elementSym} href={`/s/${encodeURIComponent(row.domain)}`} className={`flex items-center gap-2 px-3 py-2 rounded-2xl transition-colors ${rankClass(i)} text-left no-underline`}>
             {rankBadge(i)}
             <Avatar src={row.logoUrl} domain={row.domain} size={24} rounded="rounded-full" />
             <span className="text-sm font-bold text-ink">{row.domain}</span>
