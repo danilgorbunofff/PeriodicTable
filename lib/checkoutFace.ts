@@ -65,6 +65,59 @@ export function pitchShapeBad(pitch: string): boolean {
   return pitch.length > 0 && (pitch.trim().length < 2 || pitch.trim().length > 140);
 }
 
+export type CheckoutFormErrors = {
+  url?: string;
+  email?: string;
+  title?: string;
+  pitch?: string;
+  attest?: string;
+  /** Pricing preview refusal — rendered under the amount field. */
+  amount?: string;
+  /** Human-check failure — printed by the widget, announced by the form. */
+  humanCheck?: string;
+};
+
+export type CheckoutFormInput = {
+  tab: CheckoutTab;
+  url: string;
+  title: string;
+  pitch: string;
+  email: string;
+  attest: boolean;
+  /** The domain the form resolved, or null when it resolved none. */
+  domain: string | null;
+  /** The pricing preview's refusal (lib/pricing.ts classifyAndValidate). */
+  clientErr: string | null;
+  /** True once the Turnstile script failed to load (R06-6). */
+  humanCheckFailed: boolean;
+};
+
+/**
+ * Every refusal on the form at once, keyed by where it renders.
+ *
+ * `submitBlocked` below is the first of these in gate order — kept so the
+ * submit handler can still announce one sentence — but the modal marks all
+ * keys red together, so an untouched form goes red everywhere it must instead
+ * of one field per click.
+ */
+export function validateCheckoutForm(input: CheckoutFormInput): CheckoutFormErrors {
+  const errors: CheckoutFormErrors = {};
+  if (urlShapeBad(input.tab, input.url) || !input.domain) {
+    errors.url = urlMessage(input.tab);
+  }
+  if (emailShapeBad(input.email)) errors.email = CHECKOUT_MSG.email;
+  if (input.title.trim().length === 0 || titleShapeBad(input.title)) {
+    errors.title = CHECKOUT_MSG.title;
+  }
+  if (input.pitch.trim().length === 0 || pitchShapeBad(input.pitch)) {
+    errors.pitch = CHECKOUT_MSG.pitch;
+  }
+  if (!input.attest) errors.attest = CHECKOUT_MSG.attest;
+  if (input.humanCheckFailed) errors.humanCheck = CHECKOUT_MSG.humanCheck;
+  if (input.clientErr) errors.amount = input.clientErr;
+  return errors;
+}
+
 export type SubmitBlock = {
   /** Input to hang the sentence under, or null for the shared error line. */
   field: "url" | "email" | "title" | "pitch" | "attest" | null;
@@ -81,38 +134,20 @@ export type SubmitBlock = {
  * form (or a handle typed without its `@`, which resolves no domain) produced
  * no request and no explanation (R06-1).
  */
-export function submitBlocked(input: {
-  tab: CheckoutTab;
-  url: string;
-  title: string;
-  pitch: string;
-  email: string;
-  attest: boolean;
-  /** The domain the form resolved, or null when it resolved none. */
-  domain: string | null;
-  /** The pricing preview's refusal (lib/pricing.ts classifyAndValidate). */
-  clientErr: string | null;
-  /** True once the Turnstile script failed to load (R06-6). */
-  humanCheckFailed: boolean;
-}): SubmitBlock | null {
-  if (urlShapeBad(input.tab, input.url) || !input.domain) {
-    return { field: "url", message: urlMessage(input.tab) };
-  }
-  if (emailShapeBad(input.email)) return { field: "email", message: CHECKOUT_MSG.email };
+export function submitBlocked(input: CheckoutFormInput): SubmitBlock | null {
+  const errors = validateCheckoutForm(input);
+  if (errors.url) return { field: "url", message: errors.url };
+  if (errors.email) return { field: "email", message: errors.email };
   // The name and the pitch are labelled `required` in the form and are the two
   // fields the server silently substitutes (the domain and "Staked on <element>")
   // when they arrive empty — so an empty one is refused here, with the sentence
   // the length rule already has, instead of being quietly invented for the
   // buyer (R06-1).
-  if (input.title.trim().length === 0 || titleShapeBad(input.title)) {
-    return { field: "title", message: CHECKOUT_MSG.title };
-  }
-  if (input.pitch.trim().length === 0 || pitchShapeBad(input.pitch)) {
-    return { field: "pitch", message: CHECKOUT_MSG.pitch };
-  }
-  if (!input.attest) return { field: "attest", message: CHECKOUT_MSG.attest };
-  if (input.humanCheckFailed) return { field: null, message: CHECKOUT_MSG.humanCheck, shown: true };
-  if (input.clientErr) return { field: null, message: input.clientErr };
+  if (errors.title) return { field: "title", message: errors.title };
+  if (errors.pitch) return { field: "pitch", message: errors.pitch };
+  if (errors.attest) return { field: "attest", message: errors.attest };
+  if (errors.humanCheck) return { field: null, message: errors.humanCheck, shown: true };
+  if (errors.amount) return { field: null, message: errors.amount };
   return null;
 }
 

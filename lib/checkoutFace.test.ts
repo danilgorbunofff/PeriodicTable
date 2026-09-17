@@ -10,6 +10,7 @@ import {
   titleShapeBad,
   urlMessage,
   urlShapeBad,
+  validateCheckoutForm,
   type CheckoutTab,
 } from "./checkoutFace";
 import { isEmail } from "./validate";
@@ -251,5 +252,37 @@ describe("checkoutRefusal — what a refused response means (R06-3, R06-4)", () 
     expect(checkoutRefusal(429, { error: "Too many checkout attempts. Try again later." }).serverErr).toBe(
       "Too many checkout attempts. Try again later."
     );
+  });
+});
+describe("validateCheckoutForm — every refusal at once", () => {
+  it("marks an untouched form everywhere, not one field per click", () => {
+    const errors = validateCheckoutForm({ ...form, url: "", title: "", pitch: "", attest: false, domain: null });
+    expect(errors.url).toBe(CHECKOUT_MSG.url);
+    expect(errors.title).toBe(CHECKOUT_MSG.title);
+    expect(errors.pitch).toBe(CHECKOUT_MSG.pitch);
+    expect(errors.attest).toBe(CHECKOUT_MSG.attest);
+  });
+
+  it("stays quiet for a complete form", () => {
+    expect(validateCheckoutForm(form)).toEqual({});
+  });
+
+  it("agrees with submitBlocked on the first refusal", () => {
+    const input = { ...form, url: "", title: "", pitch: "", attest: false, domain: null };
+    const errors = validateCheckoutForm(input);
+    const first = submitBlocked(input);
+    expect(first).toEqual({ field: "url", message: errors.url });
+  });
+
+  it("reports field and non-field refusals under their own keys", () => {
+    const errors = validateCheckoutForm({
+      ...form,
+      email: "a@b",
+      humanCheckFailed: true,
+      clientErr: "$12 is taken — add $1 more.",
+    });
+    expect(errors.email).toBe(CHECKOUT_MSG.email);
+    expect(errors.humanCheck).toBe(CHECKOUT_MSG.humanCheck);
+    expect(errors.amount).toBe("$12 is taken — add $1 more.");
   });
 });

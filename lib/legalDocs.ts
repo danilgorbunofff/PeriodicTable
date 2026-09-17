@@ -25,6 +25,7 @@
  */
 
 import { ANALYTICS_EVENTS } from "./analytics";
+import { MIN_STAKE, TAKEOVER_MARGIN } from "./pricing";
 import { SERVICE_TERM, SUPPORT_EMAIL, type LegalSlug } from "./legal";
 
 export type LegalSection = {
@@ -39,12 +40,12 @@ export type LegalPage = { title: string; desc: string; sections: LegalSection[] 
 /** The one sentence that says what holding an element is not. The FAQ imports it
  * rather than paraphrasing, so the two surfaces cannot drift. */
 export const OWNERSHIP_SENTENCE =
-  "Holding an element is the top advertisement on that element and nothing else: not equity or ownership in this site, not a security or an investment, not a claim on revenue, not a patent, trademark or domain right, not a licence, and not a transferable asset. It is a rank that lasts until someone stakes more, and it can be taken at any moment for a dollar over whatever the holder has staked there.";
+  `Holding an element is the top advertisement on that element and nothing else: not equity or ownership in this site, not a security or an investment, not a claim on revenue, not a patent, trademark or domain right, not a licence, and not a transferable asset. It is a rank that lasts until someone stakes more, and it can be taken at any moment by beating the holder's total by $${TAKEOVER_MARGIN}.`;
 
 /** The one sentence that says why a rank can move. Same treatment as
  * `OWNERSHIP_SENTENCE`: quoted, not paraphrased. */
 export const STAKE_SENTENCE =
-  "Because a stake is always public and the top amount always beatable, an element that is held today can be taken tomorrow: nothing here is a permanent claim to a tile.";
+  "Because a stake is always public and the top amount always beatable, an element that is held today can be taken tomorrow: the lead is never permanent, even though what was staked there never expires as a discount on that element.";
 
 /** The three groups of collected data, rendered as three sections of the privacy
  * page. Retention lives with each item, so a reader gets the purpose and the
@@ -55,7 +56,7 @@ export const PRIVACY_COLLECTED: { h: string; bullets: string[] }[] = [
     bullets: [
       "Your email address, so the receipt can reach you and a holder can be told when someone outbids them. Kept until the listing ends — do not stake with an address you would mind losing access to.",
       "The listing itself: the title, the one-line pitch, the domain shown on the row, and the destination a click is sent to. Public by design — it is the product — and kept while the listing is on the board.",
-      "Clicks, counted into a total on the row, with no IP address or user agent stored next to one and no per-visitor history to build a profile from.",
+      "Clicks, counted into one aggregate total on the row, with no IP address or user agent stored next to a click and no per-visitor history to build a profile from: only the total is kept.",
     ],
   },
   {
@@ -150,14 +151,14 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
       {
         h: "How a seat is won",
         ps: [
-          "An empty element costs $5. After that the price is set by whoever holds it: to take an element you have to beat the current holder's total by $1. One holder per element, one listing per payment, and what you have already staked on an element counts towards your next stake there — a discount that never expires, not a balance that can be withdrawn. Your row shows the domain you name and the destination you choose, and the rank moves when someone outbids you.",
+          `An empty element costs $${MIN_STAKE}. After that the price is set by whoever holds it: to take an element you have to beat the current holder's total by $${TAKEOVER_MARGIN}. One holder per element, one listing per payment, and what you have already staked on an element counts towards your next stake there — a discount that never expires, not a balance that can be withdrawn. The lead itself is never permanent: it lasts until someone stakes more. Your row shows the domain you name and the destination you choose, and the rank moves when someone outbids you.`,
           STAKE_SENTENCE,
         ],
       },
       {
         h: "Launch inventory, and no endorsement",
         ps: [
-          "A handful of seats were opened by the operator before launch, naming real companies and linking to their sites, so a visitor does not meet an empty table. Those seats were not paid for and not approved by the company named on them, which may not know the seat exists. Any of them can be taken for a dollar over what it holds, and any inventory seat nobody has paid for is released by the operator.",
+          `A handful of seats were opened by the operator before launch, naming real companies and linking to their sites, so a visitor does not meet an empty table. Those seats were not paid for and not approved by the company named on them, which may not know the seat exists. Any of them can be taken for $${TAKEOVER_MARGIN} over whatever it holds, and any inventory seat nobody has paid for is released by the operator.`,
           "This site is an independent project, not affiliated with, endorsed by, sponsored by or connected to the companies listed on it, or to IUPAC or any other scientific body. Element names, symbols and atomic numbers describe the layout of a table; trademarks, logos and brand names belong to their owners.",
           "On the icons: listing icons are fetched by our server, never by the browser — they are served from this domain, so no icon service learns which pages a visitor reads, and screenshots are captured the same way. What is collected, and by whom, is on the privacy page.",
         ],
@@ -166,7 +167,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "Third-party links",
         ps: [
           "Listings point to websites we do not own, operate or vet. We are not responsible for their content, products, safety, privacy practices or accuracy, and following a link is at your own risk — the destination domain is printed on the row before it is clicked.",
-          "Nothing is reviewed before it appears, but reports are acted on: every row opens the listing's own page, and that page reports it. Rules & payments sets out what may be listed, and what happens when it may not be.",
+          "Nothing is reviewed before it appears, but reports are acted on: a visible row opens the listing's own page, and that page reports it, while a row already hidden is reported through the mailbox on the contact page. A complete rights complaint is actioned within 72 hours. Rules & payments sets out what may be listed, and what happens when it may not be.",
         ],
       },
       {
@@ -193,7 +194,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
       {
         h: "Price, payment and tax",
         ps: [
-          "The floor is $5 — the minimum first stake on an empty element, and the minimum for joining an element that already has a holder. To take an element from someone else your total there must reach their total plus $1. Amounts are in whole US dollars, and outbidding by more than a dollar is always allowed. What you have already staked on an element counts towards your next stake there and never expires: a discount on that element, not equity, and it cannot be sold, transferred or withdrawn.",
+          `The floor is $${MIN_STAKE} — the minimum first stake on an empty element, and the minimum for joining an element that already has a holder. To take an element from someone else your total there must reach their total plus $${TAKEOVER_MARGIN}. Amounts are in whole US dollars, and outbidding by more than the margin is always allowed. What you have already staked on an element counts towards your next stake there and never expires: a discount on that element, not equity, and it cannot be sold, transferred or withdrawn.`,
           "Payments are handled by our payment partner, which is also the seller of record — this site is the advertising publisher. Card details are entered on their page and never reach this site, and a stake is a one-time charge with no subscription. During launch, checkout can be gated behind a waitlist: a waitlist shown at the payment step is expected and not an error.",
           TAX_SENTENCE,
           DESCRIPTOR_SENTENCE,
@@ -202,14 +203,14 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
       {
         h: "Finality: no refunds",
         ps: [
-          "Every stake is final. A stake buys advertising that is delivered as soon as the payment settles — the listing appears on the table and in the leaderboards — and it is bought for one named element, so it cannot be given back once delivered. Paying is your express request that performance begin immediately rather than at the end of any cooling-off period.",
+          "Every stake is final, except where the law gives you a right that cannot be waived (see the last bullet). A stake buys advertising that is delivered as soon as the payment settles — the listing appears on the table and in the leaderboards — and it is bought for one named element, so it cannot be given back once delivered. Paying is your express request that performance begin immediately rather than at the end of any cooling-off period.",
         ],
         bullets: [
-          "No refunds, cancellations, withdrawals, exchanges, credits or transfers — and no refund for part of a period, or for a listing you stop using.",
+          "No refunds, cancellations, withdrawals, exchanges, credits or transfers — and no refund for a listing you stop using.",
           "No refund because you were outbid, because the rank changed or because you changed your mind.",
           "No refund for a listing hidden or removed for breaking these rules, for a credible complaint from a rights holder, for legal risk, or because the product changed, a feature was removed, the board was redrawn or the site was down.",
           "A reversal or dispute outcome that returns the money reverses the stake with it: the listing falls back to the previous holder and the rank it bought is lost.",
-          "Where the law gives you a right that cannot be waived, that right is unaffected by this section. Everything else in it stands.",
+          "Where the law gives you a right that cannot be waived — including a stake made by a child, which is reversed and returned on request — that right is unaffected by this section. Everything else in it stands.",
         ],
       },
       {
@@ -222,7 +223,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "What may be listed, and what we remove",
         ps: [
           "Links must be lawful and safe for a general audience. Prohibited: malware, phishing, deceptive or fraudulent offers, illegal goods or services, sexually explicit content, hate or harassment, impersonation, and anything that infringes someone else's rights or breaks the law that applies to it. You confirm you have the right to publish what you submit and to promote the destination you name, and you keep whatever rights you had in it.",
-          "Listings are not reviewed before they appear, but any listing can be hidden or removed at any time — for breaking these rules, for a credible complaint from a rights holder, for legal risk or for abuse of the board — without refund, as the finality section says. Repeated abuse ends access to the site.",
+          "Listings are not reviewed before they appear, but reports are acted on — a complete rights complaint within 72 hours — and any listing can be hidden or removed at any time — for breaking these rules, for a credible complaint from a rights holder, for legal risk or for abuse of the board — without refund, as the finality section says. A hidden listing leaves the public surfaces but its stake still counts toward the element total. Repeated abuse ends access to the site.",
         ],
       },
       {
@@ -244,7 +245,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         ps: [
           "A stake does not run down. A holder stays ahead on an element until someone outbids them, and being outbid burns nothing: what was staked stays as a discount on that element that never expires, as the price section says.",
           `The board is committed to run at least until ${SERVICE_TERM.until}. That is a floor, not a deadline: if the commitment is extended, the later date is published in this section and on the questions page, and until then the date here is the one that applies.`,
-          `If the site ever does stop, this page says so and every current holder is emailed at least ${SERVICE_TERM.noticeDays} days beforehand. No further stakes are taken from the day that notice is published — checkout is switched off rather than left running into a wind-down — and stakes already taken are not refunded, which is the finality rule above applied to the worst case. The listing is removed with the board rather than refunded.`,
+          `If the site ever does stop, this page says so and every current holder is emailed at least ${SERVICE_TERM.noticeDays} days beforehand. No further stakes are taken from the day that notice is published — checkout is switched off rather than left running into a wind-down — and stakes already taken are not refunded (except where the law requires it), which is the finality rule above applied to the worst case. The listing is removed with the board rather than refunded.`,
           "This section is a commitment about a date and about notice. It is not a warranty that the service will run for any particular period beyond the date it names, and it does not turn a stake into a security, a share or a claim on revenue.",
         ],
       },
@@ -252,7 +253,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "The last few clauses",
         ps: [
           "These documents, the pages they link to and the wording shown at checkout are the whole agreement about a stake. Nothing said elsewhere — a post, an email, a reply — adds a term to it.",
-          "If a clause here turns out to be unenforceable, the rest of it stands and the clause is read as narrowly as it must be to be enforceable; not enforcing a clause once does not give it up, and headings are for reading, not for interpreting. These documents and any dispute connected to them or to a stake are governed by the law of the place where the operator does business, and the courts there hear the dispute — except where the law gives a consumer the right to bring a claim where they live.",
+          "If a clause here turns out to be unenforceable, the rest of it stands and the clause is read as narrowly as it must be to be enforceable; not enforcing a clause once does not give it up, and headings are for reading, not for interpreting. These documents and any dispute connected to them or to a stake are governed by the law that applies where the operator does business, and the courts there hear the dispute. No jurisdiction is published on the contact page yet, so until one is, the mailbox there is where notices and claims start — except where the law gives a consumer the right to bring a claim where they live.",
           "The words on this page are the words that apply: there is no change log to check them against. The rules the checkout quotes are these rules, and the wording accepted is recorded with the payment it was made under.",
         ],
       },
@@ -272,7 +273,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
       {
         h: "A payment question",
         ps: [
-          "Include the payment reference from your receipt email (or the date, the amount and the last four digits of the card) and the address you paid with: those facts are what let us find the payment, and nobody other than the payer can be given details of a charge. Write before opening a chargeback — a dispute filed without a message first breaches the rules and ends access to the site.",
+          "Include the payment reference from your receipt email (or the date, the amount and the last four digits of the card) and the address you paid with: those facts are what let us find the payment, and nobody other than the payer can be given details of a charge. Write before opening a chargeback — a dispute filed without a message first breaches the rules: listings can be removed permanently, further stakes can be refused, and the fees and costs a dispute causes may be recovered.",
           DESCRIPTOR_SENTENCE,
         ],
       },
@@ -294,7 +295,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "Who is responsible, and who this is for",
         ps: [
           `The person who runs this site is the data controller for everything described here, and the only contact point published is the mailbox on the contact page (${SUPPORT_EMAIL}) — no company, postal address or telephone number is published anywhere, deliberately. One thing does not depend on that: the payment partner is the merchant of record for every charge, so the transaction, its records and the tax position are theirs, and what is held here is the minimum described below.`,
-          `This service is for adults: the rules require you to be 18 or over, or the age of majority where you live, and the checkout asks you to confirm it. A stake made by a child is reversed and the payment returned on request — write to ${SUPPORT_EMAIL}.`,
+          `This service is for adults: the rules require you to be 18 or over, or the age of majority where you live, and the checkout asks you to confirm it. A stake made by a child is reversed and the payment returned on request — write to ${SUPPORT_EMAIL}. That reversal is the non-waivable exception the finality section names.`,
         ],
       },
       {
@@ -310,15 +311,15 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "What is published",
         ps: [
           "Published, and public the moment a stake settles: the element, the title and pitch, the domain on the row, the destination of the link, the total staked on that element, and how many times the row has been clicked.",
-          "Never published: an email address, a payment reference, card details, a report, or the hash behind a rate limit. Row-level click logs are visible to the operator and are not published, and the totals carry no identity — no per-visitor history, and one click cannot be tied to another.",
+          "Never published: an email address, a payment reference, card details, a report, or the hash behind a rate limit. The operator sees only the same aggregate totals a visitor sees, and the totals carry no identity — no per-visitor history, and one click cannot be tied to another.",
         ],
       },
       {
         h: "Cookies and analytics",
         ps: [
-          "No page of this site sets a cookie of its own, and there is no advertising or profiling cookie anywhere — including behind analytics, which is off in production unless the operator switches it on.",
+          "No page of this site sets a cookie of its own, and there is no advertising or profiling cookie anywhere — including behind analytics, which stays off until the operator switches it on and only then asks for consent.",
           `The events: ${ANALYTICS_EVENTS.join(", ")}, plus an aggregate pageview count. They record that something happened and the shape of the page — not who did it. No analytics script is loaded before consent, and it does not load until you say yes. A visitor who never answers makes no request to Plausible at all, because the gate is the script rather than a flag inside it.`,
-          "When analytics is on it is Plausible: cookieless, IP-anonymising, limited to the events above, and the switch is held in the deployment configuration and never changes at runtime. Analytics is off in production, and that is not a figure of speech: NEXT_PUBLIC_PLAUSIBLE_DOMAIN is left unset in the deployment, so no request reaches Plausible from this site.",
+          "When analytics is on it is Plausible: cookieless, IP-anonymising, limited to the events above, and the switch is held in the deployment configuration and never changes at runtime. Analytics is off in production, and that is not a figure of speech: NEXT_PUBLIC_PLAUSIBLE_DOMAIN is left unset in the deployment, so no request reaches Plausible from this site and no consent banner loads it.",
         ],
       },
       {
@@ -339,7 +340,7 @@ export const LEGAL_PAGES: Record<LegalSlug, LegalPage> = {
         h: "Retention, and deletion",
         ps: [
           "Payment rows are kept while the listing exists and afterwards for as long as tax, accounting and dispute handling require, because a deleted row cannot answer a chargeback. Reports and their mail log are kept for 30 days after sending. Rate-limit hashes expire on a short window and are never joined to anything else.",
-          "A deletion request is honoured by taking the row off the board and dropping the personal part of every row that can be dropped without breaking one of those obligations — an email address attached to a payment that is later disputed is kept until the dispute window passes, and then it goes. Every deployment also runs a scheduled erasure sweep: finished rows older than the retention window are deleted by a job, not by hand.",
+          "A deletion request is honoured by taking the row off the board and dropping the personal part of every row that can be dropped without breaking one of those obligations — an email address attached to a payment that is later disputed is kept until the dispute window passes, and then it goes. Every deployment also runs a scheduled erasure sweep that applies the windows above — payment rows until tax, accounting and dispute handling no longer require them, reports and mail log 30 days after sending, rate-limit hashes on their short window — by a job, not by hand.",
           "In the UK, the EEA or Switzerland you also have the right to object to processing, to ask for a portable copy of what is held and to complain to your national supervisory authority; the controller is not established there, so a request goes to the mailbox above and is answered within 30 days.",
         ],
       },

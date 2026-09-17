@@ -24,7 +24,8 @@ const gate = MODALS.slice(MODALS.indexOf("async function submit()"), MODALS.inde
 
 describe("the form cannot submit silently (R06-1)", () => {
   it("asks one pure function instead of returning with no text", () => {
-    expect(gate).toContain("const blocked = submitBlocked({");
+    expect(gate).toContain("const errors = validateCheckoutForm({");
+    expect(gate).toContain("submitBlocked({");
     expect(gate).toContain("if (submitting) return;");
     // The old gate: `if (badUrl || badEmail || badTitle || badPitch) return;`
     // (or the same with no domain) — a click that produced no request and no
@@ -35,18 +36,23 @@ describe("the form cannot submit silently (R06-1)", () => {
   });
 
   it("hands the gate the same state it renders", () => {
-    expect(gate).toMatch(/submitBlocked\(\{[\s\S]{0,220}\btab,[\s\S]{0,40}\burl,[\s\S]{0,80}\bdomain,/);
+    expect(gate).toMatch(/validateCheckoutForm\(\{[\s\S]{0,220}\btab,[\s\S]{0,40}\burl,[\s\S]{0,80}\bdomain,/);
     expect(gate).toMatch(/clientErr,[\s\S]{0,40}humanCheckFailed,/);
+    expect(gate).toContain("submitBlocked({");
   });
 
-  it("puts the sentence under the input, or on the one shared line (R06-4)", () => {
-    expect(gate).toMatch(/if \(blocked\.field && fieldHasRenderer\(blocked\.field\)\)/);
-    expect(gate).toMatch(/setServerField\(\{ field: blocked\.field, message: blocked\.message \}\)/);
+  it("marks every missing field at once, with the shared line for the rest (R06-4)", () => {
+    expect(gate).toContain("setSubmitTried(true);");
+    expect(gate).toContain("setServerField(null);");
     expect(gate).toContain("setServerErr(blocked.shown ? null : blocked.message);");
   });
 
   it("follows the tab for the one field the server answers two rules for (R06-5)", () => {
-    expect(MODALS).toMatch(/\{serverField\?\.field === "url" \? <span className="font-bold">\{serverField\.message\}<\/span> : urlMessage\(tab\)\}/);
+    expect(MODALS).toContain('(submitTried && formErrors.url) || urlMessage(tab)');
+    expect(MODALS).toContain("(submitTried && formErrors.title)");
+    expect(MODALS).toContain("(submitTried && formErrors.pitch)");
+    expect(MODALS).toContain("(submitTried && formErrors.email)");
+    expect(MODALS).toContain("(submitTried && formErrors.attest)");
   });
 
   it("announces a human check that never loaded, once (R06-6)", () => {

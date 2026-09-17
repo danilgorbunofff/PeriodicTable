@@ -62,10 +62,10 @@ const text = (slug: LegalSlug) => legalCanonicalText(slug);
 /** Every digest as of the mailbox/legal rewrite. A failure here is not a broken
  * test: it is a published word asking to be re-approved. */
 const DIGESTS: Record<LegalSlug, string> = {
-  about: "6a12577e92cd25d8e84e4999b4854739c920003a79573cd22e79421cfd347407",
-  rules: "aaeb028ee0a6fd8269723c903a7dedfdbb5a8e8fdc7cb820fcf124aa311b11e5",
-  contact: "d290fc66b8c1909249546e85a42145deafd3fc3f5448cde54485360c9e1dc014",
-  privacy: "8778026829fff5ea7607c35187f82b13ef8d16b5e7b6aac23721fe3b46ff4bd4",
+  about: "3f70cc2fcc460ee7b134fce775b13a1e10688605467d4bad1a738f70d6561b59",
+  rules: "a05d1b18984bcc7b649e36ec241739a7302ea5ded617bbb05e6898ec0e4b0b8f",
+  contact: "23a1a83d8ede04b0057960e847739fca78b8c4ffcf9d0fa83cfb027474ae480d",
+  privacy: "a2877416c5393f3599a3b46d6697e2e7e28df9a796aad6006e3d350d988844bf",
 };
 
 describe("legal corpus", () => {

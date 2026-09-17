@@ -17,12 +17,12 @@ import {
   CHECKOUT_MSG,
   checkoutRefusal,
   emailShapeBad,
-  fieldHasRenderer,
   pitchShapeBad,
   submitBlocked,
   titleShapeBad,
   urlMessage,
   urlShapeBad,
+  validateCheckoutForm,
 } from "../lib/checkoutFace";
 import { paymentsLiveClient } from "../lib/flags";
 import { track } from "../lib/analytics";
@@ -117,6 +117,7 @@ export function CheckoutPreview({
   const [humanCheckFailed, setHumanCheckFailed] = useState(false);
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [serverField, setServerField] = useState<{ field: string; message: string } | null>(null);
+  const [submitTried, setSubmitTried] = useState(false);
   const [priceMoved, setPriceMoved] = useState<number | null>(null);
   const [waitErr, setWaitErr] = useState<string | null>(null);
   const [waitBusy, setWaitBusy] = useState(false);
@@ -228,6 +229,25 @@ export function CheckoutPreview({
   // first-join floor, a tie, a taken slot), so it marks the amount field the
   // same way the shape checks above mark theirs.
   const badAmount = clientErr != null;
+  // All-at-once gate: empty required fields stay quiet live (bad* is false on
+  // "") but join the error map once a submit was tried, so one click marks
+  // every missing field instead of one per click.
+  const formErrors = validateCheckoutForm({
+    tab,
+    url,
+    title,
+    pitch,
+    email,
+    attest,
+    domain,
+    clientErr,
+    humanCheckFailed,
+  });
+  const showUrl = badUrl || (submitTried && !!formErrors.url) || serverField?.field === "url";
+  const showTitle = badTitle || (submitTried && !!formErrors.title) || serverField?.field === "title";
+  const showPitch = badPitch || (submitTried && !!formErrors.pitch) || serverField?.field === "pitch";
+  const showEmail = badEmail || (submitTried && !!formErrors.email) || serverField?.field === "email";
+  const showAttest = (submitTried && !!formErrors.attest) || serverField?.field === "attest";
   const paused = !paymentsLiveClient();
 
   // R04-1: the app minted that amount (outbid mail `?stake=`, element-page CTA)
@@ -237,6 +257,27 @@ export function CheckoutPreview({
   // good. Reconciled against a board the client cannot see in full? No —
   // lib/stakeQuote returns null rather than price a listing it was not shown.
   const liveAmount = quote.reconciledAmount;
+  useEffect(() => {
+    if (!open) {
+      setSubmitTried(false);
+      setServerField(null);
+      setServerErr(null);
+      setPriceMoved(null);
+      setSubmitting(false);
+    }
+  }, [open]);
+  // Back/forward cache: riding to the provider page and pressing Back restores
+  // this component from memory with `submitting` still true — the button would
+  // sit on "Starting checkout…" and the stuck flag survives every element
+  // switch until a real reload. A restored page is not mid-flight, so the
+  // restore itself ends the in-flight state.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setSubmitting(false);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
   useEffect(() => {
     if (!open || !amountMinted || liveAmount == null) return;
     if (Math.round(amount) === liveAmount) return;
@@ -298,9 +339,11 @@ export function CheckoutPreview({
     // untouched form, or a handle typed without its `@` (which resolves no
     // domain), did nothing at all when clicked (R06-1). The sentences live in
     // lib/checkoutFace.ts so the client and server word the same rule the same
-    // way, and the tab picks the right one (R06-5).
+    // way, and the tab picks the right one (R06-5). All field errors mark red
+    // together via `submitTried` + `formErrors`; the first one is still
+    // announced for screen readers through `submitBlocked`.
     if (submitting) return;
-    const blocked = submitBlocked({
+    const errors = validateCheckoutForm({
       tab,
       url,
       title,
@@ -311,15 +354,27 @@ export function CheckoutPreview({
       clientErr,
       humanCheckFailed,
     });
-    if (blocked) {
-      if (blocked.field && fieldHasRenderer(blocked.field)) {
-        setServerField({ field: blocked.field, message: blocked.message });
-        setServerErr(null);
-      } else {
-        setServerField(null);
-        // `shown`: the failed widget already prints this exact sentence, so
-        // printing it again under the button would say it twice (R06-6).
+    if (Object.keys(errors).length > 0) {
+      setSubmitTried(true);
+      const blocked = submitBlocked({
+        tab,
+        url,
+        title,
+        pitch,
+        email,
+        attest,
+        domain,
+        clientErr,
+        humanCheckFailed,
+      });
+      setServerField(null);
+      // Field sentences render under their inputs via `show*`; only the
+      // non-field ones reach the shared line. `shown`: the failed widget
+      // already prints this exact sentence (R06-6).
+      if (blocked && !blocked.field) {
         setServerErr(blocked.shown ? null : blocked.message);
+      } else {
+        setServerErr(null);
       }
       return;
     }
@@ -437,9 +492,23 @@ export function CheckoutPreview({
         <div className="mt-2 rounded-2xl bg-goldwash p-3 text-xs font-bold">⚠️ {CHECKOUT_MSG.canceled}</div>
       )}
       {/* Polite announcements for async checkout states (Phase 5): submitting,
-          price moves, and server errors — focus itself never moves. */}
+          price moves, and server errors — focus itself never moves. Announces
+          every client error at once, not just the first. */}
       <div role="status" aria-live="polite" className="sr-only">
-        {submitting ? "Starting checkout…" : serverErr ?? (serverField ? serverField.message : priceMoved != null ? `Price moved to $${priceMoved}.` : humanCheckFailed ? CHECKOUT_MSG.humanCheck : "")}
+        {submitting
+          ? "Starting checkout…"
+          : (serverErr ??
+            (serverField
+              ? serverField.message
+              : priceMoved != null
+                ? `Price moved to $${priceMoved}.`
+                : submitTried
+                  ? [formErrors.url, formErrors.title, formErrors.pitch, formErrors.email, formErrors.attest, formErrors.amount, formErrors.humanCheck]
+                      .filter(Boolean)
+                      .join(" ")
+                  : humanCheckFailed
+                    ? CHECKOUT_MSG.humanCheck
+                    : ""))}
       </div>
       <form
         noValidate
@@ -465,13 +534,13 @@ export function CheckoutPreview({
             value={url}
             onChange={(e) => { setUrl(e.target.value); setServerField(null); }}
             placeholder={tab === "url" ? "https://yourstartup.com" : "@yourhandle"}
-            aria-invalid={badUrl || serverField?.field === "url"}
-            aria-describedby={badUrl || serverField?.field === "url" ? "co-url-error" : undefined}
-            className={badUrl || serverField?.field === "url" ? INVALID_FIELD : undefined}
+            aria-invalid={showUrl}
+            aria-describedby={showUrl ? "co-url-error" : undefined}
+            className={showUrl ? INVALID_FIELD : undefined}
           />
-          {(badUrl || serverField?.field === "url") && (
+          {showUrl && (
             <div id="co-url-error" className="text-xs text-red-700">
-              {serverField?.field === "url" ? <span className="font-bold">{serverField.message}</span> : urlMessage(tab)}
+              {serverField?.field === "url" ? <span className="font-bold">{serverField.message}</span> : (submitTried && formErrors.url) || urlMessage(tab)}
             </div>
           )}        </div>
         <div>
@@ -482,13 +551,13 @@ export function CheckoutPreview({
             onChange={(e) => { setTitle(e.target.value); setServerField(null); }}
             placeholder="Startup name (2–32 chars)"
             maxLength={32}
-            aria-invalid={badTitle || serverField?.field === "title"}
-            aria-describedby={badTitle || serverField?.field === "title" ? "co-title-error" : undefined}
-            className={badTitle || serverField?.field === "title" ? INVALID_FIELD : undefined}
+            aria-invalid={showTitle}
+            aria-describedby={showTitle ? "co-title-error" : undefined}
+            className={showTitle ? INVALID_FIELD : undefined}
           />
-          {(badTitle || serverField?.field === "title") && (
+          {showTitle && (
             <div id="co-title-error" className="text-xs text-red-700">
-              {serverField?.field === "title" ? <span className="font-bold">{serverField.message}</span> : CHECKOUT_MSG.title}
+              {serverField?.field === "title" ? <span className="font-bold">{serverField.message}</span> : (submitTried && formErrors.title) || CHECKOUT_MSG.title}
             </div>
           )}        </div>
         <div>
@@ -499,13 +568,13 @@ export function CheckoutPreview({
             onChange={(e) => { setPitch(e.target.value); setServerField(null); }}
             placeholder="One-line pitch (2–140 chars)"
             maxLength={140}
-            aria-invalid={badPitch || serverField?.field === "pitch"}
-            aria-describedby={badPitch || serverField?.field === "pitch" ? "co-pitch-error" : undefined}
-            className={badPitch || serverField?.field === "pitch" ? INVALID_FIELD : undefined}
+            aria-invalid={showPitch}
+            aria-describedby={showPitch ? "co-pitch-error" : undefined}
+            className={showPitch ? INVALID_FIELD : undefined}
           />
-          {(badPitch || serverField?.field === "pitch") && (
+          {showPitch && (
             <div id="co-pitch-error" className="text-xs text-red-700">
-              {serverField?.field === "pitch" ? <span className="font-bold">{serverField.message}</span> : CHECKOUT_MSG.pitch}
+              {serverField?.field === "pitch" ? <span className="font-bold">{serverField.message}</span> : (submitTried && formErrors.pitch) || CHECKOUT_MSG.pitch}
             </div>
           )}        </div>
         <div>
@@ -515,13 +584,13 @@ export function CheckoutPreview({
             value={email}
             onChange={(e) => { setEmail(e.target.value); setServerField(null); }}
             placeholder="you@startup.com"
-            aria-invalid={badEmail || serverField?.field === "email"}
-            aria-describedby={badEmail || serverField?.field === "email" ? "co-email-error" : undefined}
-            className={badEmail || serverField?.field === "email" ? INVALID_FIELD : undefined}
+            aria-invalid={showEmail}
+            aria-describedby={showEmail ? "co-email-error" : undefined}
+            className={showEmail ? INVALID_FIELD : undefined}
           />
-          {(badEmail || serverField?.field === "email") && (
+          {showEmail && (
             <div id="co-email-error" className="text-xs text-red-700">
-              {serverField?.field === "email" ? <span className="font-bold">{serverField.message}</span> : CHECKOUT_MSG.email}
+              {serverField?.field === "email" ? <span className="font-bold">{serverField.message}</span> : (submitTried && formErrors.email) || CHECKOUT_MSG.email}
             </div>
           )}
         </div>
@@ -557,7 +626,7 @@ export function CheckoutPreview({
       {priceMoved != null && (
         <div className="mt-2 rounded-2xl bg-goldwash p-3 text-xs font-bold">
           Price moved to ${priceMoved} — continue?
-          <button className="ml-2 underline" onClick={() => { onAmount(priceMoved); setPriceMoved(null); setServerErr(null); }}>
+          <button type="button" className="ml-2 underline" onClick={() => { onAmount(priceMoved); setPriceMoved(null); setServerErr(null); }}>
             Use ${priceMoved}
           </button>
         </div>
@@ -566,8 +635,11 @@ export function CheckoutPreview({
         {(need != null && need > 50 ? [need, need + 25, need + 100] : [10, 25, 50]).map((p) => {
           const chip = need != null ? Math.max(p, need) : p;
           return (
+            // Inside the form, so the HTML default submit would fire checkout
+            // on every chip tap once the rest of the form happened to be valid.
             <button
               key={p}
+              type="button"
               onClick={() => onAmount(chip)}
               className="flex-1 rounded-xl bg-icy py-1.5 text-xs font-extrabold text-ink hover:bg-goldwash"
             >
@@ -593,9 +665,9 @@ export function CheckoutPreview({
           type="checkbox"
           checked={attest}
           onChange={(e) => { setAttest(e.target.checked); setServerField(null); }}
-          className={serverField?.field === "attest" ? `mt-0.5 ${INVALID_FIELD}` : "mt-0.5"}
-          aria-invalid={serverField?.field === "attest"}
-          aria-describedby={serverField?.field === "attest" ? "co-attest-error" : undefined}
+          className={showAttest ? `mt-0.5 ${INVALID_FIELD}` : "mt-0.5"}
+          aria-invalid={showAttest}
+          aria-describedby={showAttest ? "co-attest-error" : undefined}
         />
         {/* The attested words are `CONSENT_STATEMENT`, rendered whole with the
             linked phrase spliced in — not a paraphrase. The server records a
@@ -614,8 +686,8 @@ export function CheckoutPreview({
           ))}
         </span>
       </label>
-      {serverField?.field === "attest" && (
-        <div id="co-attest-error" className="mt-1 text-xs text-red-700 font-bold">{serverField.message}</div>
+      {showAttest && (
+        <div id="co-attest-error" className="mt-1 text-xs text-red-700 font-bold">{serverField?.field === "attest" ? serverField.message : (submitTried && formErrors.attest) || CHECKOUT_MSG.attest}</div>
       )}
       {process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ? (
         <TurnstileWidget

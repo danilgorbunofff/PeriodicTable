@@ -18,4 +18,4 @@ export const FAQ_SHORT = "FAQ";
 
 /** Printed on the page and used as the sitemap's `lastModified` (R01-5): for a
  * static page the honest stamp is the date the words changed. */
-export const FAQ_REVISED = "2026-09-16";
+export const FAQ_REVISED = "2026-09-18";

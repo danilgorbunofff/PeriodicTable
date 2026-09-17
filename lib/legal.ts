@@ -54,7 +54,7 @@ export const SERVICE_TERM_SENTENCE = `Stakes never expire, and the board is comm
  * `lib/legalDocs.ts` changes — the digest in `lib/legalContent.test.ts` fails the
  * suite if you forget.
  */
-export const LEGAL_UPDATED = "2026-09-17";
+export const LEGAL_UPDATED = "2026-09-18";
 
 /** The wording a stake is bought under — stored with a payment, sent by the
  * checkout modal, and compared by the checkout route. Never rendered. */
@@ -117,9 +117,12 @@ export type ReceiptLegal = {
 
 /** The sentence the buyer affirms at checkout. Rendered verbatim — with the
  * `CONSENT_LINK_TEXT` words linked — and hashed into `lib/consent.ts`, so the
- * words shown and the words recorded cannot drift (R16-6, R16-7). */
+ * words shown and the words recorded cannot drift (R16-6, R16-7). Short on
+ * purpose: finality and what a stake buys live in the rules the link points
+ * to, so repeating them here doubles the agreement rather than strengthening
+ * it. */
 export const CONSENT_STATEMENT =
-  "I am 18+ and I own or may promote this URL. I accept the rules & terms — including that a stake is final (no refunds or withdrawals) and that I am buying advertising, not a bet or an investment.";
+  "I am 18+ and I own or may promote this URL. I accept the rules & terms.";
 
 /** The linked words inside `CONSENT_STATEMENT`, and where they point. */
 export const CONSENT_LINK_TEXT = "rules & terms";
