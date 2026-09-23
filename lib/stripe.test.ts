@@ -189,6 +189,23 @@ describe("stripeMoney", () => {
     expect(money.currency).toBe("usd");
   });
 
+  // Managed Payments / automatic tax adds tax on top of our price: a $5 tile
+  // arrives as subtotal 500 + tax 105 = total 605. The ledger stakes the
+  // payment row's $5, so agreement is read from the pre-tax subtotal —
+  // otherwise every taxed checkout ends as amount-mismatch:6.05 (seen live
+  // 2026-09-23, evt_1UIuujQ8DCQQlpW505tf0SDm).
+  it("prefers amount_subtotal over amount_total for a taxed session", () => {
+    const money = stripeMoney(
+      event(
+        "checkout.session.completed",
+        session({ amount_subtotal: 500, amount_total: 605, currency: "usd" }),
+      ),
+    );
+    expect(money.amountUsd).toBe(5);
+    expect(money.currency).toBe("usd");
+    expect(money.providerRef).toBe("cs_1");
+  });
+
   // A charge/dispute/refund id is a different object's identity; storing one as
   // providerRef strands the row against the session event that follows it.
   it("never claims a providerRef from a non-session object", () => {

@@ -409,6 +409,7 @@ type StripeObject = {
   id?: unknown;
   object?: unknown;
   amount?: unknown;
+  amount_subtotal?: unknown;
   amount_total?: unknown;
   currency?: unknown;
   status?: unknown;
@@ -562,6 +563,14 @@ export function stripeEventId(payload: unknown, rawBody: string): string {
  * Stripe quotes integer cents everywhere, so normalise to dollars once, here,
  * rather than leaving every consumer to remember which unit it is holding.
  *
+ * Sessions are read from `amount_subtotal` (the pre-tax line-item total) rather
+ * than `amount_total`: with automatic tax / Managed Payments enabled the total
+ * carries tax on top of our price (a $5 tile arrives as subtotal 500, total
+ * 605), and validating the total against the payment row rejects every taxed
+ * checkout. The ledger stakes `payment.amountUsd` either way — this only
+ * decides what "the provider agrees" means. Charges/refunds carry no subtotal
+ * and keep the old `amount` reading.
+ *
  * providerRef is claimed ONLY from a checkout session. A charge, dispute or
  * refund id is a different object's identity; writing one into the payment's
  * providerRef would strand the row against the session event that follows and
@@ -570,7 +579,7 @@ export function stripeMoney(payload: unknown): ProviderMoney {
   const o = stripeObject(payload);
   if (!o) return { amountUsd: null, currency: null, providerRef: null };
 
-  const rawCents = o.amount_total ?? o.amount ?? null;
+  const rawCents = o.amount_subtotal ?? o.amount_total ?? o.amount ?? null;
   const cents = typeof rawCents === "number" ? rawCents : null;
   const currency = typeof o.currency === "string" ? o.currency.toLowerCase() : null;
   const isSession = o.object === "checkout.session";
