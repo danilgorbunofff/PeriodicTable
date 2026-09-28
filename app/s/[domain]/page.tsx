@@ -7,7 +7,6 @@ import { ELEMENTS } from "../../../lib/elements";
 import { FAMILY_FILL } from "../../../lib/familyFill";
 import { Avatar } from "../../../components/Avatar";
 import { ReportListingButton } from "../../../components/ReportListingButton";
-import { faviconFor } from "../../../lib/screenshots";
 import { siteOrigin } from "../../../lib/siteUrl";
 import { MIN_STAKE } from "../../../lib/pricing";
 
@@ -66,11 +65,11 @@ function logProfileRead(where: string, domain: string, err: unknown) {
 
 export async function generateMetadata({ params }: { params: { domain: string } }): Promise<Metadata> {
   const domain = decodeURIComponent(params.domain);
-  let startup: { title: string; pitch: string | null; logoUrl: string | null } | null = null;
+  let startup: { title: string; pitch: string | null; logoUrl: string | null; previewImgUrl: string | null } | null = null;
   try {
     startup = await prisma.startup.findUnique({
       where: { domain },
-      select: { title: true, pitch: true, logoUrl: true },
+      select: { title: true, pitch: true, logoUrl: true, previewImgUrl: true },
     });
   } catch (err) {
     // R15-3: this read had no guard, so a database outage threw out of
@@ -82,6 +81,16 @@ export async function generateMetadata({ params }: { params: { domain: string } 
     return { title: "Startup profile — periodictable.lol" };
   }
   if (!startup) return { title: "Startup not found — periodictable.lol" };
+  // The preview image is the only image we know exists: the icon proxy answers
+  // 404 when the icon service has nothing for a domain (the caller's own
+  // fallback draws an initial chip in the UI, which a crawler cannot do), so a
+  // listing without a stored shot falls back to the site's own card rather than
+  // to a broken image URL.
+  const ogImage = startup.previewImgUrl
+    ? startup.previewImgUrl
+    : startup.logoUrl && !startup.logoUrl.startsWith("/api/favicon")
+      ? `${siteOrigin()}${startup.logoUrl}`
+      : `${siteOrigin()}/og/home`;
   return {
     title: `${domain} is on the table | periodictable.lol`,
     description: startup.pitch || `${startup.title} is on the periodic table.`,
@@ -96,7 +105,7 @@ export async function generateMetadata({ params }: { params: { domain: string } 
       // R16-3: and it is our proxy, absolute, because a crawler has no origin to
       // resolve a relative path against (and because the icon service must not
       // be asked directly by anyone unbidden).
-      images: startup.logoUrl ? [`${siteOrigin()}${faviconFor(domain, 128)}`] : undefined,
+      images: [ogImage],
     },
   };
 }

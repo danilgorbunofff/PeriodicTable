@@ -42,6 +42,10 @@ const SEATS: MockSeat[] = [
   ["vitest.dev", "Vitest", "Next-generation testing framework.", "Og", "Oganesson", 25],
 ];
 
+/* A local asset for a seat whose icon must not depend on the icon service: the
+   site's own seat draws the app icon. Everything else goes through the proxy. */
+const LOGO_OVERRIDES: Record<string, string> = { "periodictable.lol": "/icon.png" };
+
 export const MOCK_STAKES: MockStake[] = SEATS.map(
   ([domain, title, pitch, symbol, elementName, hoursAgo]) => ({
     domain,
@@ -50,7 +54,7 @@ export const MOCK_STAKES: MockStake[] = SEATS.map(
     symbol,
     elementName,
     amount: SEAT_USD,
-    logo: faviconFor(domain, 64),
+    logo: LOGO_OVERRIDES[domain] ?? faviconFor(domain, 64),
     ts: NOW - hoursAgo * H,
     clicks: 0,
     firstClaim: true,

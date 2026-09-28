@@ -546,34 +546,33 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
       // requires the account path, not a lookalike domain.
       spy.mockClear();
       const lookalike = await faviconGET(req("/api/favicon?domain=instagram.com.evil.dev&sz=64"));
-      expect(lookalike.status).toBe(302);
+      expect(lookalike.status).toBe(404);
       expect(spy.mock.calls.length).toBe(0);
 
       spy.mockClear();
-      const placeholder = async (query: string, label: string) => {
+      // No icon → 404, so the caller's own fallback draws (Avatar's initial
+      // chip). The route used to 302 every iconless listing at the Wikipedia
+      // globe, which read as Wikimedia branding.
+      const noIcon = async (query: string, label: string) => {
         const res = await faviconGET(req(`/api/favicon?${query}`));
-        expect([label, res.status]).toEqual([label, 302]);
-        // Next resolves `redirect()` against the request URL, so the host is
-        // the check: our own origin and our own asset, never an upstream one.
-        const location = res.headers.get("location") ?? "";
-        expect([label, new URL(location).origin]).toEqual([label, "http://localhost"]);
-        expect([label, new URL(location).pathname]).toEqual([label, "/wikipedia-globe.png"]);
-        // Every refusal is served from our own asset: no upstream call at all.
+        expect([label, res.status]).toEqual([label, 404]);
+        expect([label, res.headers.get("location")]).toEqual([label, null]);
+        expect([label, res.headers.get("cache-control")]).toEqual([label, "public, max-age=600"]);
+        // Every refusal answers locally: no upstream call at all.
         expect([label, spy.mock.calls.length]).toEqual([label, 0]);
       };
-      await placeholder("domain=not-a-listing-r16.dev&sz=64", "unlisted domain");
-      await placeholder(`domain=${LISTING}&sz=999`, "disallowed size");
-      await placeholder("domain=&sz=64", "missing domain");
+      await noIcon("domain=not-a-listing-r16.dev&sz=64", "unlisted domain");
+      await noIcon(`domain=${LISTING}&sz=999`, "disallowed size");
+      await noIcon("domain=&sz=64", "missing domain");
 
-      // A live domain whose icon is not an image, or is missing, falls back
-      // rather than shipping a broken tile — and the fallback is cached only
-      // briefly, so a transient upstream failure is retried soon.
+      // A live domain whose icon is not an image, or is missing, is also a 404
+      // — briefly cached, so a transient upstream failure is retried soon.
       const degraded = async (response: Response | Error, label: string) => {
         spy.mockClear();
         if (response instanceof Error) spy.mockRejectedValue(response);
         else spy.mockResolvedValue(response);
         const res = await faviconGET(req(`/api/favicon?domain=${LISTING}&sz=32`));
-        expect([label, res.status]).toEqual([label, 302]);
+        expect([label, res.status]).toEqual([label, 404]);
         expect([label, res.headers.get("cache-control")]).toEqual([label, "public, max-age=600"]);
       };
       await degraded(new Response("<html>not an icon</html>", { headers: { "content-type": "text/html" } }), "html response");

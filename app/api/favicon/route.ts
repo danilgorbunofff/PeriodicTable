@@ -28,21 +28,25 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: favico
  * (no caller-supplied host is ever fetched), only known sizes are accepted, and
  * the host must belong to a listing in this database — product listings are
  * their host, social listings are `host + path`, so a host match accepts
- * either. Anything else is answered with the local placeholder rather than an
- * error — this is an `<img src>`, where a generic picture beats a broken one.
+ * either.
+ *
+ * When there is no icon to serve the answer is **404**, not a stand-in image:
+ * every caller is an `<img>` behind `components/Avatar.tsx`, whose own fallback
+ * is an icy chip with the domain's initial — the honest mark for "this listing
+ * has no icon". The route used to 302 to `/wikipedia-globe.png` (the drawer's
+ * Wiki-link asset), which made every iconless listing look like Wikimedia.
  */
 
 /** Sizes the table actually asks for (`Avatar` 20/24/32/48, hover 128). */
 const ALLOWED_SIZES = new Set([20, 24, 32, 48, 64, 128]);
 const UPSTREAM_TIMEOUT_MS = 4000;
-const FALLBACK = "/wikipedia-globe.png";
 
 async function favicon(req: Request) {
   const url = new URL(req.url);
   const size = Number(url.searchParams.get("sz") ?? "64");
   const domain = normaliseDomain(url.searchParams.get("domain"));
 
-  if (!domain || !ALLOWED_SIZES.has(size)) return placeholder(req);
+  if (!domain || !ALLOWED_SIZES.has(size)) return noIcon();
 
   // One indexed lookup: the icon service is reached only for a host this site
   // actually publishes — the host itself (a product listing) or the host of a
@@ -51,7 +55,7 @@ async function favicon(req: Request) {
   const known = await prisma.startup
     .count({ where: { OR: [{ domain }, { domain: { startsWith: `${domain}/` } }] } })
     .catch(() => 0);
-  if (known === 0) return placeholder(req);
+  if (known === 0) return noIcon();
 
   const upstream = await fetch(upstreamFaviconUrl(domain, size), {
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
@@ -59,10 +63,10 @@ async function favicon(req: Request) {
   }).catch(() => null);
 
   const contentType = upstream?.headers.get("content-type") ?? "";
-  if (!upstream || !upstream.ok || !contentType.startsWith("image/")) return placeholder(req);
+  if (!upstream || !upstream.ok || !contentType.startsWith("image/")) return noIcon();
 
   const bytes = await upstream.arrayBuffer().catch(() => null);
-  if (!bytes || bytes.byteLength === 0) return placeholder(req);
+  if (!bytes || bytes.byteLength === 0) return noIcon();
 
   return new NextResponse(bytes, {
     status: 200,
@@ -77,11 +81,12 @@ async function favicon(req: Request) {
   });
 }
 
-/** Anything we will not or cannot proxy: the same placeholder `Avatar` falls
- *  back to. A 302 rather than a 404, so `<img>` still renders something. */
-function placeholder(req: Request) {
-  return NextResponse.redirect(new URL(FALLBACK, req.url), {
-    status: 302,
+/** No icon: let the caller draw its own fallback. Briefly cached, because "the
+ *  service has nothing for this domain yet" can change (a new listing's icon
+ *  appears once the icon service indexes it), and a 404 is a small answer. */
+function noIcon() {
+  return new NextResponse(null, {
+    status: 404,
     headers: { "Cache-Control": "public, max-age=600" },
   });
 }

@@ -42,6 +42,10 @@ type SeedSeat = {
   pitch: string;
   symbol: string;
   ts: number;
+  /** A local asset for a seat whose icon must not depend on the icon service
+   *  (the site's own seat draws the app icon); everything else goes through the
+   *  proxy, `faviconFor`. */
+  logo?: string;
 };
 
 /* One seat per element, all at the floor. The amounts are not restated here: a
@@ -50,7 +54,7 @@ type SeedSeat = {
    draws); the ten below it are the platforms this site runs on, on standard
    elements so the elite and exotic tiles stay free. */
 const SEATS: SeedSeat[] = [
-  { domain: "periodictable.lol", title: "PeriodicTable.lol", pitch: "Put your startup on the table. Literally.", symbol: "Pt", ts: NOW - 1 * H },
+  { domain: "periodictable.lol", title: "PeriodicTable.lol", pitch: "Put your startup on the table. Literally.", symbol: "Pt", ts: NOW - 1 * H, logo: "/icon.png" },
   { domain: "vercel.com", title: "Vercel", pitch: "Deploy and host the modern web.", symbol: "H", ts: NOW - 2 * H },
   { domain: "nextjs.org", title: "Next.js", pitch: "The React framework for the web.", symbol: "N", ts: NOW - 3 * H },
   { domain: "react.dev", title: "React", pitch: "The library for web and native user interfaces.", symbol: "Al", ts: NOW - 5 * H },
@@ -156,9 +160,11 @@ async function main() {
         title: s.title,
         pitch: s.pitch,
         url: `https://${s.domain}`,
-        logoUrl: faviconFor(s.domain, 64),
+        logoUrl: s.logo ?? faviconFor(s.domain, 64),
       },
-      update: { title: s.title, pitch: s.pitch },
+      // The seeder owns these inventory rows, so a bare re-run also refreshes
+      // the logo (the site's own seat moved from the proxy to /icon.png).
+      update: { title: s.title, pitch: s.pitch, logoUrl: s.logo ?? faviconFor(s.domain, 64) },
     });
     const existing = await prisma.stake.findUnique({
       where: { elementId_startupId: { elementId: element.id, startupId: startup.id } },
