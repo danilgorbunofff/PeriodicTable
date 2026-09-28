@@ -29,8 +29,8 @@ describe("readLaunchBoard — the seeded shape", () => {
   it("reads ready and quotes the $6 takeover when every unpaid seat is inventory at the floor", () => {
     const reading = readLaunchBoard([
       seat({ domain: "resend.com", symbol: "C" }),
-      seat({ domain: "lemonsqueezy.com", symbol: "Au" }),
-      seat({ domain: "cal.com", symbol: "Si" }),
+      seat({ domain: "vercel.com", symbol: "Au" }),
+      seat({ domain: "nextjs.org", symbol: "Si" }),
     ]);
 
     expect(reading.ready).toBe(true);
@@ -46,13 +46,13 @@ describe("readLaunchBoard — the seeded shape", () => {
 
   it("counts tiles and dollars per holder, and marks inventory holders", () => {
     const reading = readLaunchBoard([
-      seat({ domain: "replicate.com", symbol: "DM" }),
-      seat({ domain: "replicate.com", symbol: "U" }),
-      seat({ domain: "replicate.com", symbol: "Pu" }),
+      seat({ domain: "vitest.dev", symbol: "DM" }),
+      seat({ domain: "vitest.dev", symbol: "U" }),
+      seat({ domain: "vitest.dev", symbol: "Pu" }),
     ]);
 
     expect(reading.domains).toEqual([
-      { domain: "replicate.com", tiles: 3, usd: 15, paid: false, inventory: true },
+      { domain: "vitest.dev", tiles: 3, usd: 15, paid: false, inventory: true },
     ]);
   });
 
@@ -102,9 +102,9 @@ describe("readLaunchBoard — what breaks the claim", () => {
   });
 
   it("settles equal totals by domain so two readings agree", () => {
-    const rows = [seat({ domain: "cal.com", symbol: "U", amountUsd: 39 }), seat({ domain: "huggingface.co", symbol: "U", amountUsd: 39 })];
-    expect(readLaunchBoard(rows).tiles[0].leader).toBe("cal.com");
-    expect(readLaunchBoard([...rows].reverse()).tiles[0].leader).toBe("cal.com");
+    const rows = [seat({ domain: "prisma.io", symbol: "U", amountUsd: 39 }), seat({ domain: "nextjs.org", symbol: "U", amountUsd: 39 })];
+    expect(readLaunchBoard(rows).tiles[0].leader).toBe("nextjs.org");
+    expect(readLaunchBoard([...rows].reverse()).tiles[0].leader).toBe("nextjs.org");
   });
 });
 
@@ -159,7 +159,8 @@ describe("readLaunchBoard — paid bidders are not failures", () => {
 
 describe("launch board contract", () => {
   it("treats the seeder allowlist as inventory by default", () => {
-    const symbols = ["C", "Ne", "Ti", "Au", "Ag", "Cu"];
+    // One element per seated domain: a repeated symbol would read as a ladder.
+    const symbols = ["Pt", "H", "N", "Al", "Fe", "Zr", "Xe", "W", "Pb", "Rn", "Og"];
     const reading = readLaunchBoard(
       LAUNCH_INVENTORY_DOMAINS.map((domain, i) => seat({ domain, symbol: symbols[i % symbols.length] }))
     );

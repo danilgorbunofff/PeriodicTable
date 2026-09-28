@@ -6,7 +6,7 @@
 **Inputs:** all prior phases · ROADMAP §8, §14.
 
 **Outputs:**
-- 18 seats for six real companies — one per element, all at the $5 floor (`prisma/launch-seed.ts`, `seed-list.csv`, allowlist in `lib/launchInventory.ts`)
+- 11 seats — the site's own Pt seat plus the ten platforms it is built with — one per element, all at the $5 floor (`prisma/launch-seed.ts`, `seed-list.csv`, allowlist in `lib/launchInventory.ts`)
 - Plausible + custom funnel events — consent-gated and **off** until `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` is set (R19-1, U19-3)
 - Launch gate checklist + rollback runbook + takedown playbook
 

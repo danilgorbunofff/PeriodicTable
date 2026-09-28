@@ -21,7 +21,7 @@ export function homeMetadata(env: Record<string, string | undefined> = process.e
     // Absolute here, so the tags carry one host even where metadataBase cannot
     // resolve (robots, sitemap and canonicals read the same helper).
     metadataBase: new URL(origin),
-    title: "periodictable.lol — Put your startup on the table. Literally.",
+    title: "PeriodicTable.lol",
     description: DESCRIPTION,
     // The board is `/`; `/?el=H` is the same document, so it folds here (R01-4).
     // Routes that own their identity set their own canonical.

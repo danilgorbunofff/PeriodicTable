@@ -300,7 +300,7 @@ function HomeInner() {
       </TableCamera>
 
       {/* wordmark + hero + search */}
-      <div className="absolute left-[18px] top-[18px] z-[var(--z-cards)] flex max-w-[400px] max-h-[calc(100dvh-36px)] flex-col gap-2.5 overflow-y-auto">
+      <div className="absolute left-[18px] top-[18px] z-[var(--z-cards)] flex max-w-[400px] min-[441px]:max-w-[410px] max-h-[calc(100dvh-36px)] flex-col gap-2.5 overflow-y-auto">
           <div className="w-fit rounded-full bg-white px-[18px] py-2 font-display text-[22px] font-bold shadow-float">
             <span>periodictable<span className="text-money">.lol</span></span>
           </div>

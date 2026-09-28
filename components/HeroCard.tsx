@@ -64,12 +64,12 @@ export function HeroCard({
   }
 
   return (
-    <Card className="w-[398px] max-w-[calc(100vw-36px)] rounded-[18px] px-4 pt-4 pb-[15px] shadow-float overflow-hidden transition-[width] duration-200 ease-out">
+    <Card className="w-[398px] min-[441px]:w-[406px] max-w-[calc(100vw-36px)] rounded-[18px] px-4 pt-4 pb-[15px] shadow-float overflow-hidden transition-[width] duration-200 ease-out">
       <div id="hero-pill-body" className="animate-hero-in">
         <h1 className="font-display text-base leading-[1.15] font-bold whitespace-nowrap max-[440px]:whitespace-normal">
           Put your startup on the table. Literally.
         </h1>
-        <div className="mt-[13px] flex flex-wrap items-center gap-[9px]">
+        <div className="mt-[13px] flex flex-wrap items-center gap-[9px] min-[441px]:flex-nowrap">
           <ChunkyButton className="text-sm px-[18px] h-10 whitespace-nowrap shrink-0 !rounded-full !border-b-[3px] [@media(pointer:coarse)]:min-h-[44px] max-[440px]:w-full" onClick={onClaim}>
             {`Claim an element · from $${MIN_STAKE}`}
           </ChunkyButton>

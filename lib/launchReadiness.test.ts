@@ -228,7 +228,7 @@ describe("R19-8 the launch-day file stops contradicting the runbook", () => {
     const header = csv[0].split(",");
     expect(header).toEqual(["domain", "title", "pitch", "symbol", "amount_usd"]);
     const rows = csv.slice(1).map((line) => line.split(","));
-    expect(rows.length).toBe(18);
+    expect(rows.length).toBe(11);
     const seeder = src("prisma/launch-seed.ts");
     for (const row of rows) {
       // Real domains: the icon proxy needs them, and a seat carries a real

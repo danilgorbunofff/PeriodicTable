@@ -1,15 +1,15 @@
-/* Launch seed (Phase 5, spec 01-seed-instrument.md): 18 inventory seats across
- * six real developer-tool companies — one seat per element, never two, so no tile
- * carries a price ladder and every captured tile quotes exactly one dollar over
- * its holder (`MIN_STAKE` + `TAKEOVER_MARGIN`, lib/pricing.ts).
- * The six are picked to read as plausible neighbours, not as stage dressing:
- * companies a software audience knows and a general audience does not
- * (2026-09-16 — the household-name set made the board look fake to a fresh
- * visitor). Fame is not what makes a seat honest; lib/launchInventory.ts carries
- * the full note, and the About sentence is the answer a sceptic actually needs.
- * Real domains are deliberate: a tile draws its holder's icon through
- * `/api/favicon` (this site's own proxy — see faviconFor in lib/screenshots.ts),
- * so a real domain is what makes a real icon render.
+/* Launch seed (Phase 5, spec 01-seed-instrument.md): 11 inventory seats — the
+ * site's own seat on Pt (Platinum, the element the app icon is built from) and
+ * the ten platforms this site is actually built with (Next.js, React,
+ * TypeScript, Prisma, Neon, Vercel, Tailwind, Stripe, Resend, Vitest), one seat
+ * per element, never two, so no tile carries a price ladder and every captured
+ * tile quotes exactly one dollar over its holder (`MIN_STAKE` +
+ * TAKEOVER_MARGIN, lib/pricing.ts). The ten sit on standard-tier elements, not
+ * on the cultural-elite or exotic tiles (C, Si, Ti, Pt, Au, U, Hbar, Ps, Uue,
+ * DM): those stay free for buyers. Real domains are deliberate: a tile draws
+ * its holder's icon through `/api/favicon` (this site's own proxy — see
+ * faviconFor in lib/screenshots.ts), so a real domain is what makes a real icon
+ * render.
  * The seats are NOT customers: lib/launchInventory.ts is the single list, and
  * scripts/clear-launch-inventory.ts is the guarded way back out.
  * Pass --fresh to first wipe all existing rows (FK-safe order) + reset element
@@ -44,28 +44,23 @@ type SeedSeat = {
   ts: number;
 };
 
-/* One seat per element, three elements per holder, all at the floor. The
-   amounts are not restated here: a seat costs `MIN_STAKE`, and the price of
-   beating it is derived the same way the checkout derives it. */
+/* One seat per element, all at the floor. The amounts are not restated here: a
+   seat costs `MIN_STAKE`, and the price of beating it is derived the same way
+   the checkout derives it. Pt is the site's own seat (the element the app icon
+   draws); the ten below it are the platforms this site runs on, on standard
+   elements so the elite and exotic tiles stay free. */
 const SEATS: SeedSeat[] = [
-  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "C", ts: NOW - 1 * H },
-  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "Ne", ts: NOW - 21 * H },
-  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "Ti", ts: NOW - 33 * H },
-  { domain: "lemonsqueezy.com", title: "Lemon Squeezy", pitch: "Payments and merchant of record for indie software.", symbol: "Au", ts: NOW - 3 * H },
-  { domain: "lemonsqueezy.com", title: "Lemon Squeezy", pitch: "Payments and merchant of record for indie software.", symbol: "Ag", ts: NOW - 13 * H },
-  { domain: "lemonsqueezy.com", title: "Lemon Squeezy", pitch: "Payments and merchant of record for indie software.", symbol: "Cu", ts: NOW - 25 * H },
-  { domain: "cal.com", title: "Cal.com", pitch: "Open-source scheduling infrastructure.", symbol: "Si", ts: NOW - 5 * H },
-  { domain: "cal.com", title: "Cal.com", pitch: "Open-source scheduling infrastructure.", symbol: "B", ts: NOW - 17 * H },
-  { domain: "cal.com", title: "Cal.com", pitch: "Open-source scheduling infrastructure.", symbol: "Ga", ts: NOW - 29 * H },
-  { domain: "railway.app", title: "Railway", pitch: "Ship apps without wiring up the infrastructure.", symbol: "H", ts: NOW - 7 * H },
-  { domain: "railway.app", title: "Railway", pitch: "Ship apps without wiring up the infrastructure.", symbol: "He", ts: NOW - 19 * H },
-  { domain: "railway.app", title: "Railway", pitch: "Ship apps without wiring up the infrastructure.", symbol: "O", ts: NOW - 27 * H },
-  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Fe", ts: NOW - 9 * H },
-  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Co", ts: NOW - 23 * H },
-  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Ni", ts: NOW - 31 * H },
-  { domain: "replicate.com", title: "Replicate", pitch: "Run open-source models behind one API.", symbol: "DM", ts: NOW - 11 * H },
-  { domain: "replicate.com", title: "Replicate", pitch: "Run open-source models behind one API.", symbol: "U", ts: NOW - 15 * H },
-  { domain: "replicate.com", title: "Replicate", pitch: "Run open-source models behind one API.", symbol: "Pu", ts: NOW - 35 * H },
+  { domain: "periodictable.lol", title: "PeriodicTable.lol", pitch: "Put your startup on the table. Literally.", symbol: "Pt", ts: NOW - 1 * H },
+  { domain: "vercel.com", title: "Vercel", pitch: "Deploy and host the modern web.", symbol: "H", ts: NOW - 2 * H },
+  { domain: "nextjs.org", title: "Next.js", pitch: "The React framework for the web.", symbol: "N", ts: NOW - 3 * H },
+  { domain: "react.dev", title: "React", pitch: "The library for web and native user interfaces.", symbol: "Al", ts: NOW - 5 * H },
+  { domain: "typescriptlang.org", title: "TypeScript", pitch: "JavaScript with syntax for types.", symbol: "Fe", ts: NOW - 7 * H },
+  { domain: "prisma.io", title: "Prisma", pitch: "Type-safe database access for Node.js and TypeScript.", symbol: "Zr", ts: NOW - 9 * H },
+  { domain: "neon.tech", title: "Neon", pitch: "Serverless Postgres with branching.", symbol: "Xe", ts: NOW - 11 * H },
+  { domain: "tailwindcss.com", title: "Tailwind CSS", pitch: "Utility-first CSS for rapid UI development.", symbol: "W", ts: NOW - 13 * H },
+  { domain: "stripe.com", title: "Stripe", pitch: "Payments infrastructure for the internet.", symbol: "Pb", ts: NOW - 17 * H },
+  { domain: "resend.com", title: "Resend", pitch: "Email API for developers.", symbol: "Rn", ts: NOW - 21 * H },
+  { domain: "vitest.dev", title: "Vitest", pitch: "Next-generation testing framework.", symbol: "Og", ts: NOW - 25 * H },
 ];
 
 async function recompute(elementId: number) {

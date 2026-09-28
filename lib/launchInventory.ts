@@ -1,9 +1,9 @@
 /* Launch inventory (doc/phase-5-launch/01-seed-instrument.md).
 
    `prisma/launch-seed.ts` opens a small set of seats before anybody has bought
-   one, so the launch grid is not empty: real-company domains, one seat per
-   element, every seat at the $5 floor. They are NOT customers — the seed writes
-   no email, no Payment and no management token. Launch cleanup
+   one, so the launch grid is not empty: real domains, one seat per element,
+   every seat at the $5 floor. They are NOT customers — the seed writes no
+   email, no Payment and no management token. Launch cleanup
    (scripts/clear-launch-inventory.ts) removes them and refuses any row that has
    since acquired one of those real-customer signals.
 
@@ -11,29 +11,31 @@
    and the readiness tests can all read the same answer without pulling Prisma —
    and so nothing here can reach a browser bundle by accident.
 
-   Which companies, and why these ones (2026-09-16): developer-tool companies a
-   software audience recognises and a general audience does not. The first set
-   was household names, and the operator's read of the launch was right — a
-   board of marquee logos nobody paid for looks like stage dressing, which is
-   the one thing this page cannot afford to look like.
-
-   The fame of the name is not what makes a seat honest, though, and swapping in
-   quieter names does not make it honest either. What does: the About page calls
-   these seats inventory the operator opened, never paid for and never approved
-   by the company named on it, and every one of them is beatable for the same $6
-   any other tile costs. A less famous name only removes the "this must be
-   fake" reflex; the sentence and the price are the actual answer to it. */
+   Which domains, and why these ones (2026-09-28): the board opens with the
+   site's own seat on Pt and the ten platforms the site is actually built on —
+   Vercel, Next.js, React, TypeScript, Prisma, Neon, Tailwind, Stripe, Resend
+   and Vitest. They are the honest answer to "what is this made of", every one
+   of them is beatable for the same $6 any other tile costs, and none sits on a
+   cultural-elite or exotic element, so those tiles stay free for buyers. The
+   About page still calls these seats inventory the operator opened, never paid
+   for and never approved by the company named on it — swapping the names does
+   not change that sentence, and the sentence is the answer to it. */
 
 /** Every domain the launch inventory may seat. One row per element, one seat
  *  per element, all at the floor (`MIN_STAKE`, lib/pricing.ts) — so a captured
  *  tile quotes exactly one dollar over its holder and carries no ladder. */
 export const LAUNCH_INVENTORY_DOMAINS = [
-  "resend.com",
-  "lemonsqueezy.com",
-  "cal.com",
-  "railway.app",
+  "periodictable.lol",
+  "vercel.com",
+  "nextjs.org",
+  "react.dev",
+  "typescriptlang.org",
+  "prisma.io",
   "neon.tech",
-  "replicate.com",
+  "tailwindcss.com",
+  "stripe.com",
+  "resend.com",
+  "vitest.dev",
 ] as const;
 
 /** An inventory candidate plus the signals that would prove it became real. */
