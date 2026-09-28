@@ -1,10 +1,15 @@
 /* Pricing engine — single server-side truth for every dollar number
    (doc/phase-2-ledger/02-pricing-ranks.md, ROADMAP §3 + Phase 3 remediation).
-   Validators are split by intent (first join / join / top-up / take) so each
-   rule is testable in isolation. A tie is refused against every total already
-   on the board — that check runs *before* commit, so two simultaneous claims
-   can still land on the same amount (R09-3); rank order is deterministic, so
-   the resulting pair is always ordered the same way. */
+   Validators are split by intent (first join / top-up / takeover) so each rule
+   is testable in isolation. A tie is refused against every total already on the
+   board — that check runs *before* commit, so two simultaneous claims can still
+   land on the same amount (R09-3); rank order is deterministic, so the
+   resulting pair is always ordered the same way.
+
+   There are no holds: a newcomer's only way onto a claimed element is the
+   takeover (leader + TAKEOVER_MARGIN), and a holder keeps the gap rule. A
+   same-moment race of two equal payments is resolved by the deterministic rank
+   order — the earlier settled stake keeps #1 (doc/ARCHITECTURE.md). */
 
 export const MIN_STAKE = 5;
 
@@ -24,17 +29,6 @@ export const takeLeadPrice = (leaderTotal?: number) =>
 
 export const joinMin = () => MIN_STAKE;
 
-/** The smallest whole-dollar bid at or above `floor` that no total on the board
- * already holds. This is the "smallest acceptable amount" a bidder can actually
- * land (R09-6), and the amount a live take quote has to leave room below to
- * keep the tile biddable at all (R09-1). */
-export const smallestFreeAmount = (existingTotals: number[], floor: number = MIN_STAKE): number => {
-  const taken = new Set(existingTotals);
-  let amount = floor;
-  while (taken.has(amount)) amount += 1;
-  return amount;
-};
-
 export const reclaimFor = (
   leaderTotal: number | undefined,
   userTotal: number | undefined
@@ -44,18 +38,6 @@ export const reclaimFor = (
 export const validateFirstJoin = (amount: number): string | null => {
   if (!Number.isInteger(amount) || amount < 1) return "Whole dollars only, min $1 top-up.";
   if (amount < MIN_STAKE) return `First stake is $${MIN_STAKE}+.`;
-  return null;
-};
-
-/** Newcomer joining a contested tile (P0-04): any $5+ amount below the take
- * price lands on the ladder — but never tied with a total already on the board
- * (P1-02, R09-3). Concurrent claims are not visible here by design. */
-export const validateJoin = (amount: number, existingTotals: number[]): string | null => {
-  const floor = validateFirstJoin(amount);
-  if (floor) return floor;
-  if (existingTotals.includes(amount)) {
-    return ` $${amount} is already on the board — add $${TIE_CLEARANCE} to stand clear of the tie.`.trim();
-  }
   return null;
 };
 
@@ -73,35 +55,6 @@ export const validateTopUpAmount = (
   return null;
 };
 
-/** Guaranteed take: the amount must reach the reserved winning total
- * (Phase 2 reservation). Checked again at settlement. */
-export const validateTake = (amount: number, reservedTotal: number): string | null => {
-  if (!Number.isInteger(amount) || amount < 1) return "Whole dollars only, min $1 top-up.";
-  if (amount < reservedTotal) {
-    return `Add $${reservedTotal - amount} more to take #1 at the held quote of $${reservedTotal}.`;
-  }
-  return null;
-};
-
-/**
- * Legacy preview validator (client-side hint only — Modals). Preserved for
- * backward compatibility; server truth is classifyAndValidate.
- */
-export const validateTopUp = (
-  amount: number,
-  leaderTotal: number | undefined,
-  isNew: boolean
-): string | null => {
-  if (!Number.isInteger(amount) || amount < 1) return "Whole dollars only, min $1 top-up.";
-  if (isNew) {
-    if (leaderTotal == null) return validateFirstJoin(amount);
-    if (amount < MIN_STAKE) return `First join is $${MIN_STAKE}+ (or take #1 at $${takeLeadPrice(leaderTotal)}).`;
-    if (amount <= leaderTotal) return null; // join lands below #1 (tie checked server-side)
-    return null;
-  }
-  return null;
-};
-
 export type StakePath = "TAKE" | "JOIN" | "STAKE" | "RECLAIM";
 
 export type Classification =
@@ -114,8 +67,8 @@ export type Classification =
  * snapshot; the tx re-runs this on fresh reads.
  *
  * - Empty tile + newcomer → JOIN (first join, $5+)
- * - Contested + newcomer + amount >= leader+1 → TAKE (reservation)
- * - Contested + newcomer + amount < leader+1 → JOIN ($5+, no committed tie)
+ * - Claimed tile + newcomer + amount >= leader+1 → TAKE
+ * - Claimed tile + newcomer + amount < leader+1 → refused (no cheap joins)
  * - Existing holder + resulting total retakes the lead → RECLAIM
  * - Otherwise → STAKE (top-up / moat, no committed tie)
  */
@@ -135,11 +88,15 @@ export function classifyAndValidate(params: {
     return err ? { ok: false, error: err, code: "BELOW_FLOOR" } : { ok: true, path: "JOIN" };
   }
   if (isNewHere && leaderTotal != null) {
-    if (amount >= leaderTotal + 1) return { ok: true, path: "TAKE" };
-    const err = validateJoin(amount, existingTotals);
-    return err
-      ? { ok: false, error: err, code: err.includes("tie") || err.includes("taken") ? "TIE" : "BELOW_FLOOR" }
-      : { ok: true, path: "JOIN" };
+    if (amount >= leaderTotal + TAKEOVER_MARGIN) return { ok: true, path: "TAKE" };
+    // The only way onto a claimed element is to take #1: a cheaper bid would
+    // buy a rank the page never advertised, so it is refused with the price
+    // that works. A returning holder is not this branch (myPriorTotal > 0).
+    return {
+      ok: false,
+      error: `This element is claimed — taking #1 costs $${leaderTotal + TAKEOVER_MARGIN}.`,
+      code: "BELOW_FLOOR",
+    };
   }
   // Existing holder. (Own prior needs no exclusion: newTotal = prior + amount
   // with amount >= $1 can never equal prior.)

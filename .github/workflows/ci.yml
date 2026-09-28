@@ -80,7 +80,7 @@ jobs:
           npx tsx prisma/launch-seed.ts
       - name: release rehearsal — live money flows
         # The rehearsal deliberately drives the dev simulator (/api/dev/pay) so
-        # the ledger, ranking, idempotency and reservation paths run against the
+        # the ledger, ranking, idempotency and pricing paths run against the
         # same settle service without live charges. Since the R07-1/R07-2
         # hardening, the simulator exists only in a development-shaped process
         # holding NO Stripe credentials — a half-configured provider is the
@@ -95,7 +95,6 @@ jobs:
           VERCEL_ENV: development
           ADMIN_TOKEN: ci-rehearse-admin
           CRON_SECRET: ci-rehearse-cron
-          RESERVATION_TTL_MS: 2000
         run: |
           npm run start -- -p 3100 > /tmp/rehearse-server.log 2>&1 &
           echo $! > /tmp/rehearse.pid

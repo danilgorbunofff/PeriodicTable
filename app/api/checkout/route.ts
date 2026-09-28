@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PaymentPath, PaymentProvider, PaymentStatus, ReservationStatus } from "@prisma/client";
+import { PaymentPath, PaymentProvider, PaymentStatus } from "@prisma/client";
 import { logError } from "@/lib/log";
 import { prisma } from "@/lib/prisma";
-import { classifyAndValidate, joinMin, validateTake } from "@/lib/pricing";
+import { classifyAndValidate, joinMin } from "@/lib/pricing";
 import { isEmail, validateCheckoutInput } from "@/lib/validate";
 import { CHECKOUT_MSG } from "@/lib/checkoutFace";
 import { findElementBySymbol } from "@/lib/elements";
@@ -13,24 +13,16 @@ import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
 import { consentRecord, attestVersionRefusal } from "@/lib/consent";
 import { devSimulatorEnabled, paymentsLiveServer } from "@/lib/flags";
 import { findOrCreateCheckoutStartup, fingerprintCheckout } from "@/lib/startups";
-import {
-  getActiveReservation,
-  isReservationLive,
-  releaseExpiredReservations,
-  reservationConflict,
-  RESERVATION_TTL_MS,
-} from "@/lib/reservations";
 import { withTxnRetry, MONEY_TX } from "@/lib/txn";
 import { audit } from "@/lib/audit";
-import { joinSpace } from "@/lib/stakeQuote";
 import { apiRoute } from "@/lib/route";
 import { checkMoneyPath } from "@/lib/moneyPath";
 
 export const dynamic = "force-dynamic";
 
-// The quote transaction (advisory lock + reservation + payment row) runs against
-// Neon from Vercel; the default 5 s Prisma budget can expire mid-flight on a cold
-// compute resume. See MONEY_TX.
+// The quote transaction (advisory lock + payment row) runs against Neon from
+// Vercel; the default 5 s Prisma budget can expire mid-flight on a cold compute
+// resume. See MONEY_TX.
 export const maxDuration = 60;
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ POST: postCheckout });
 
@@ -126,8 +118,7 @@ async function idempotentReplay(
     });
   }
   // Same envelope as the create path (R06-9): one payment must not answer with
-  // two different bodies depending on who won the insert race, so the loser
-  // reads back the reservation it was racing for.
+  // two different bodies depending on who won the insert race.
   const checkoutUrl = await resumeCheckoutUrl(byKey, origin);
   if (!checkoutUrl) {
     // The row survives a provider failure, so a retry has something to reach
@@ -137,20 +128,10 @@ async function idempotentReplay(
       { status: 502 }
     );
   }
-  const held = await prisma.claimReservation.findUnique({ where: { paymentId: byKey.id } });
   return NextResponse.json({
     paymentId: byKey.id,
     checkoutUrl,
     provider: getProviderMode(),
-    ...(held && held.status === ReservationStatus.ACTIVE && isReservationLive(held)
-      ? {
-          reservation: {
-            reservedTotal: held.reservedTotal,
-            expiresAt: held.expiresAt.toISOString(),
-            guaranteedTake: true,
-          },
-        }
-      : {}),
   });
 }
 
@@ -299,20 +280,19 @@ async function postCheckout(req: NextRequest) {
 
   const existing = await prisma.startup.findUnique({ where: { domain } });
 
-  // Locked quote (P0-05): re-read the leaderboard under a per-element
-  // advisory lock, re-validate the price, check reservations, and create the
-  // payment (+ reservation) atomically. Retries outside the lock may be stale.
+  // Locked quote: re-read the leaderboard under a per-element advisory lock,
+  // re-validate the price, and create the payment atomically. Retries outside
+  // the lock may be stale.
   //
   // Unique-race recovery (P1-03): two concurrent checkouts can both miss the
-  // idempotency lookup or both see a free element. The loser gets P2002; the
-  // aborted tx is discarded and the winner's row is replayed — never a 500.
+  // idempotency lookup. The loser gets P2002; the aborted tx is discarded and
+  // the winner's row is replayed — never a 500.
   let quoted;
   try {
     quoted = await withTxnRetry(() =>
       prisma.$transaction(
         async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${element.id})`;
-    await releaseExpiredReservations(tx);
 
     const stakes = await tx.stake.findMany({
       where: { elementId: element.id },
@@ -323,9 +303,8 @@ async function postCheckout(req: NextRequest) {
     // surfaces exclude HIDDEN listings (lib/moderation.ts), and the displayed
     // take-lead price is derived from that filtered list
     // (app/api/elements/[sym]/route.ts) — so pricing off the unfiltered top
-    // stake could demand more than the page advertised, or classify the
-    // advertised amount as a mere join. Hidden money still counts in
-    // pool/count (deliberate policy); it just no longer sets the price.
+    // stake could demand more than the page advertised. Hidden money still
+    // counts in pool/count (deliberate policy); it just does not set the price.
     //
     // Reversed stakes (amountUsd 0) are excluded for the same reason: they are
     // kept as rows for click history, but a row the buyer can never be shown as
@@ -333,11 +312,10 @@ async function postCheckout(req: NextRequest) {
     // quoted take-#1 at $1 (takeLeadPrice(0)) instead of the $5 floor.
     const leader = stakes.find((s) => s.startup.moderationState !== "HIDDEN" && s.amountUsd > 0);
     const leaderTotal = leader?.amountUsd as number | undefined;
-    const leaderStartupId = leader?.startupId as string | undefined;
     // Row existence is not the test for "returning holder" — amount is. A fully
     // reversed stake leaves its row behind for click history, and treating that
     // as a prior holding would let a refunded bidder re-enter below the $5
-    // first-join floor (and tie a real $5 stake) via the top-up branch.
+    // first-join floor via the top-up branch.
     const myStake = existing ? stakes.find((s) => s.startupId === existing.id && s.amountUsd > 0) : undefined;
     const isNewHere = !myStake;
     const myPriorTotal = myStake ? (myStake.amountUsd as number) : 0;
@@ -345,41 +323,9 @@ async function postCheckout(req: NextRequest) {
     // hidden row is still a collision in the ledger ranking.
     const existingTotals = stakes.map((s) => s.amountUsd as number);
 
-    // Live take hold (R09-1), read *before* classification. While a rival owns
-    // this element's quote nobody else can reach the reserved total, and on a
-    // floor-priced tile the tie rule refuses the only amount left below it — so
-    // the hold is the fact that decides the bid, and it is named ahead of the
-    // rule text that used to answer with "$5 is taken — add $1".
-    const active = await getActiveReservation(tx, element.id);
-    const conflict = reservationConflict({
-      reservation: active,
-      myStartupId: existing?.id ?? null,
-      myPriorTotal,
-      addUsd: amountUsd,
-    });
-
     // Phase 3: single classify+validate source (pre-check ran unlocked; this
     // re-runs authoritatively under the lock).
     const classified = classifyAndValidate({ amount: amountUsd, leaderTotal, isNewHere, myPriorTotal, existingTotals });
-    // A malformed amount keeps its shape message — a hold cannot explain it.
-    if (conflict.conflict && (classified.ok || classified.code !== "PRICE_MOVED")) {
-      // What can this bidder actually do while the hold runs? A newcomer needs
-      // the smallest total that still lands under it; when there is none the
-      // refusal says the tile is closed instead of hinting at a wrong amount.
-      const space = isNewHere ? joinSpace(existingTotals, conflict.reservedTotal) : null;
-      return {
-        ok: false as const,
-        status: 409,
-        body: {
-          error: `This element has a held take quote at $${conflict.reservedTotal}. Refresh for a new quote.`,
-          code: "RESERVATION_CONFLICT",
-          reservedTotal: conflict.reservedTotal,
-          expiresAt: conflict.expiresAt.toISOString(),
-          ...(space?.kind === "room" ? { joinHint: space.amount } : {}),
-          ...(space?.kind === "locked" ? { joinBlocked: true as const } : {}),
-        },
-      };
-    }
     if (!classified.ok) {
       return {
         ok: false as const,
@@ -430,60 +376,18 @@ async function postCheckout(req: NextRequest) {
       },
     });
 
-    // Contested takes hold a short-lived guaranteed quote (P0-05). Empty-tile
-    // first claims need no reservation — concurrent $5 joins must succeed.
-    // NOTE: no P2002 catch here — a unique violation inside an interactive
-    // transaction poisons the whole tx. The residual insert race is handled
-    // by the outer P2002 recovery below (abort + 409).
-    let reservation: { reservedTotal: number; expiresAt: string } | null = null;
-    if (path === PaymentPath.TAKE && leaderTotal != null) {
-      const reservedTotal = leaderTotal + 1;
-      // The hold is the one promise the app makes with real money behind it:
-      // settlement refuses a short payment for a reservation
-      // (lib/settle.ts, `take-below-reserve`), so the amount must cover the
-      // reserved winning total before the row that backs the quote exists.
-      // Classification already returns TAKE only at `reservedTotal` or above,
-      // which is what keeps this check from changing any outcome (R04-3).
-      const takeErr = validateTake(amountUsd, reservedTotal);
-      if (takeErr) {
-        return { ok: false as const, status: 409, body: { error: takeErr, code: "BELOW_FLOOR", takeLead: reservedTotal } };
-      }
-      const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS);
-      await tx.claimReservation.create({
-        data: {
-          elementId: element.id,
-          startupId: startup.id,
-          paymentId: payment.id,
-          quotedLeaderTotal: leaderTotal,
-          quotedLeaderStartupId: leaderStartupId ?? null,
-          reservedTotal,
-          status: ReservationStatus.ACTIVE,
-          expiresAt,
-        },
-      });
-      reservation = { reservedTotal, expiresAt: expiresAt.toISOString() };
-    }
-
-    return { ok: true as const, payment, startupTitle: startup.title, reservation };
+    return { ok: true as const, payment, startupTitle: startup.title };
         },
         MONEY_TX
       )
     );
   } catch (e) {
     if ((e as { code?: string }).code === "P2002") {
-      // Lost a unique race (duplicate key or duplicate ACTIVE quote): replay
-      // the winner instead of 500ing (P1-03).
+      // Lost a unique race (duplicate idempotency key): replay the winner
+      // instead of 500ing (P1-03).
       const winner = await prisma.payment.findUnique({ where: { idempotencyKey } });
       if (winner) return await idempotentReplay(winner, fingerprint, req.nextUrl.origin);
-      const current = await getActiveReservation(prisma, element.id);
-      return NextResponse.json(
-        {
-          error: "This element just received a held take quote. Refresh for a new quote.",
-          code: "RESERVATION_CONFLICT",
-          ...(current ? { reservedTotal: current.reservedTotal, expiresAt: current.expiresAt.toISOString() } : {}),
-        },
-        { status: 409 }
-      );
+      throw e;
     }
     throw e;
   }
@@ -513,8 +417,5 @@ async function postCheckout(req: NextRequest) {
     paymentId: quoted.payment.id,
     checkoutUrl,
     provider: getProviderMode(),
-    ...(quoted.reservation
-      ? { reservation: { ...quoted.reservation, guaranteedTake: true } }
-      : {}),
   });
 }

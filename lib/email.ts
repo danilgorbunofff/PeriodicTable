@@ -695,9 +695,6 @@ export type ReceiptEmailParams = {
   amountUsd: number;
   rank: number;
   domain: string;
-  /** R09-2: present when the payment's take quote had lapsed before it
-   *  settled — the quoted total, so the mail can own the downgrade. */
-  lapsedTakeTotal?: number | null;
   /** R10-4: the top-up this payment added to a stake the buyer already had.
    *  The receipt's `amountUsd` is the applied total, which on a reclaim path is
    *  the whole holding rather than the increment that was charged; both are
@@ -727,7 +724,6 @@ export async function sendReceiptEmail(
     amountUsd: p.amountUsd,
     rank: p.rank,
     domain: p.domain,
-    lapsedTakeTotal: p.lapsedTakeTotal ?? null,
     topUpUsd: p.topUpUsd ?? null,
     viewUrl: `${APP_URL}/s/${encodeURIComponent(p.domain)}`,
     unsubUrl,

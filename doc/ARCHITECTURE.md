@@ -16,15 +16,15 @@ browser → POST /api/checkout → locked quote tx → provider session → pay
 
 **Checkout** (`app/api/checkout/route.ts`): guards → validate input → server-derived
 identity → idempotency lookup (fingerprint-bound replay) → advisory-locked
-quote tx (re-read leaderboard, classify+validate, reservation check, create
-startup/payment/[reservation]) → provider session (`providerCheckoutUrl`
-stored; 502 retryable on provider failure, never a dead URL).
+quote tx (re-read leaderboard, classify+validate, create startup/payment) →
+provider session (`providerCheckoutUrl` stored; 502 retryable on provider
+failure, never a dead URL).
 
 **Settlement** (`lib/settle.ts`): event-dedupe → pending recheck under an
-element advisory lock → reservation consume/expire → `applyStakeTx` (upsert,
-deterministic rerank, aggregates, activity, FirstClaim) → paid-transition
-(`stakeId` + `appliedAt` + provider audit) → outbox enqueues. Serializable
-isolation with bounded retry (`lib/txn.ts`, P2034/40001/40P01 only).
+element advisory lock → `applyStakeTx` (upsert, deterministic rerank,
+aggregates, activity, FirstClaim) → paid-transition (`stakeId` + `appliedAt` +
+provider audit) → outbox enqueues. Serializable isolation with bounded retry
+(`lib/txn.ts`, P2034/40001/40P01 only).
 
 **One payment applies at most one delta**: unique provider-event ids +
 under-lock pending recheck + cumulative upserts. Duplicates and replays are
@@ -35,10 +35,11 @@ deterministic 2xx; unexpected failures are non-2xx so providers redeliver.
 - Exactly one leader iff stakes exist; `currentLeaderId` = sole `isLeader`.
 - `totalPoolUsd` = Σ stakes; `stakeCount` = row count; ranks gap-free 1..n.
 - Rank order total: amount desc → earliest `createdAt` → id (never flips).
-- Pricing (`lib/pricing.ts`): $5 floor; contested $5+ joins land below #1;
-  ties rejected at checkout (`TIE`); reclaim delta = `(leader+1) − yours`
-  floored at $1; takes need the reserved total (`RESERVATION_CONFLICT`
-  otherwise). Settlement-order ties (validation races) resolve by createdAt.
+- Pricing (`lib/pricing.ts`): $5 floor on an empty element; a newcomer on a
+  claimed element pays the takeover price (`leader + 1`); a holder keeps the
+  discount — the reclaim delta is `(leader+1) − yours` floored at $1; ties are
+  rejected at checkout (`TIE`) and races resolve by settlement order (earlier
+  `createdAt` keeps the higher rank).
 
 ## 3. Ownership
 
@@ -54,14 +55,16 @@ so it is dormant and unreachable, and no user-facing surface may promise it.
 Every mutation writes `AuditLog`. Unsubscribe is POST-first (RFC 8058); no
 emails in URLs.
 
-## 4. Reservations (take-lead quotes, P0-05)
+## 4. Pricing (no holds)
 
-Contested takes hold one ACTIVE reservation per element (partial unique
-index), 15-min TTL (`RESERVATION_TTL_MS`, overridable for rehearsal),
-quoted leader + reserved total stored. Joins below reserve and owner top-ups
-pass; anything reaching the reserve conflicts. Expiry is lazy (readers treat
-expired as released; writers flip to EXPIRED). Settlement consumes valid
-quotes atomically, settles expired ones as ordinary stakes.
+An empty element costs `MIN_STAKE` ($5) or more. A claimed element has one
+entry price: the takeover, `leader + TAKEOVER_MARGIN`, paid in full by a
+newcomer. An existing holder keeps the discount — a top-up adds to the stake,
+and taking the lead back costs the gap to `leader + $1` (`lib/pricing.ts`
+`classifyAndValidate`). Nothing holds an element between checkout and payment:
+two equal payments can be made at the same moment, and settlement's tie order
+(amount desc, `createdAt` asc, id asc) gives the earlier-settled stake the
+higher rank.
 
 ## 5. Provider events & webhook contract
 
@@ -76,7 +79,7 @@ before settling (mismatches → operator-visible ERROR, no retry storm).
 | Migration | Content |
 |---|---|
 | `0000_baseline` | Full schema snapshot (empty-DB deploys) |
-| `0001_phase1_ownership` | Enums (lowercase labels, USING casts), nullable relational `stakeId`, `Stake.createdAt` + trust-ordered backfill, unsub dedupe, leader repair, report attribution, FirstClaim seed, partial reservation index |
+| `0001_phase1_ownership` | Enums (lowercase labels, USING casts), nullable relational `stakeId`, `Stake.createdAt` + trust-ordered backfill, unsub dedupe, leader repair, report attribution, FirstClaim seed, partial reservation index (dropped in `0014`) |
 | `0002_phase2_webhook` | `ProviderEvent` table |
 | `0003_phase3_activity` | Activity delta/result/payment linkage + backfill |
 | `0004_phase6_ops` | `Report.note` |
@@ -85,17 +88,17 @@ before settling (mismatches → operator-visible ERROR, no retry storm).
 | `0007_provider_event_attribution` | Element/startup copied onto deliveries (R08-7) |
 | `0008_email_notifications` | `EmailLog.dedupeKey`, provider status, waitlist/outreach mail |
 | `0009_data_invariants` | Six CHECK constraints on money + denormalised counters (R12-1) |
+| `0014_drop_reservations` | Drops `ClaimReservation` + `ReservationStatus`: the take-lead hold is gone |
 
 Rules: **a database is created by `prisma migrate deploy` over this directory
 and by nothing else** (R12-6) — never `prisma db push`, never a database built
 from `schema.prisma`, and never `migrate dev` against anything but a scratch
 database. `schema.prisma` is the client's type source, not the database's
-definition: the strongest constraint in `0001` (the partial unique index
-`ClaimReservation_elementId_active_key`) cannot be expressed in it at all, so a
-database built from the schema would silently lack the take-lead guard while
-`migrate diff` reports an empty difference (it does not know the index exists
-either). `lib/schema.test.ts` asserts the migrated database still carries that
-index and `0009`'s constraints. Additive + reviewed; data repairs precede the
+definition: hand-written SQL that it cannot express (a partial index, a CHECK)
+lives only in the migrations, so a database built from the schema would
+silently lack it while `migrate diff` reports an empty difference (it does not
+know those objects exist either). `lib/schema.test.ts` asserts the migrated
+database still carries them. Additive + reviewed; data repairs precede the
 constraints they serve; backfills prefer honest NULLs over guesses; `migrate
 diff` from history must stay empty (CI-adjacent check). Rollback: `migrate
 resolve --rolled-back` + Neon PITR branch (`ops/rollback.md`); restore =
@@ -209,4 +212,4 @@ without it limits are instance-local memory and fail open with a prod warning),
 `NEXT_PUBLIC_PAYMENTS_LIVE` (explicit `"true"` + both Stripe keys, else waitlist),
 `DEV_MANAGE_TOKENS` (development-only: `"1"` returns the manage token in the HTTP
 response as `__devToken`; the token is not minted otherwise — R14-7),
-`RESERVATION_TTL_MS` (rehearsal only), `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`.
+`NEXT_PUBLIC_PLAUSIBLE_DOMAIN`.

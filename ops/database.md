@@ -100,9 +100,9 @@ npx tsx prisma/launch-seed.ts --fresh             # local only
 npx tsx prisma/launch-seed.ts --fresh --allow-remote --confirm=<host>
 ```
 
-`--fresh` deletes and rewrites twelve tables (elements, stakes, payments,
-reservations, claims, click events, reports, startup/metrics rows and their
-dependents), then resets the element aggregates. Before it deletes anything it
+`--fresh` deletes and rewrites the tables it seeds (elements, stakes, payments,
+claims, click events, reports, startup/metrics rows and their dependents), then
+resets the element aggregates. Before it deletes anything it
 prints the target host, whether the host is loopback, the total row count and a
 per-table breakdown, so the log line is the evidence of what was destroyed.
 

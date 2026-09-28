@@ -1,5 +1,5 @@
 // periodictable.lol — Phase 2 ledger schema (ROADMAP §9) + Phase 1 remediation
-// (ownership, reservations, durable work). Element ids: 1..118 real, -1 Hbar,
+// (ownership, durable work). Element ids: 1..118 real, -1 Hbar,
 // 0 Ps, 119 Uue, 999 DM (no autoincrement — inserted explicitly).
 //
 // Enum labels stay lowercase (@map) so existing rows convert without rewrites
@@ -34,7 +34,8 @@ enum PrestigeTier {
   EXOTIC
 }
 
-// Payment lifecycle. CANCELED is reserved for Phase 2 (expired reservations).
+// Payment lifecycle. CANCELED is unused today (kept for historical rows and
+// any future cancellation path).
 enum PaymentStatus {
   PENDING  @map("pending")
   PAID     @map("paid")
@@ -63,14 +64,6 @@ enum PaymentProvider {
   DEV    @map("dev")
 }
 
-// Short-lived take-lead quote guarantees (Phase 2 acquires/consumes these).
-enum ReservationStatus {
-  ACTIVE   @map("active")
-  CONSUMED @map("consumed")
-  EXPIRED  @map("expired")
-  CANCELED @map("canceled")
-}
-
 // Public visibility of a startup listing (Phase 6 moderation consumes this).
 enum ModerationState {
   VISIBLE  @map("visible")
@@ -97,21 +90,20 @@ enum ProviderEventOutcome {
 }
 
 model Element {
-  id              Int                @id // 1..118, -1 Hbar, 0 Ps, 119 Uue, 999 DM
-  symbol          String             @unique
+  id              Int            @id // 1..118, -1 Hbar, 0 Ps, 119 Uue, 999 DM
+  symbol          String         @unique
   name            String
   atomicMass      String
   gridRow         Int
   gridCol         Int
   family          ChemicalFamily
-  tier            PrestigeTier       @default(STANDARD)
-  totalPoolUsd    Int                @default(0) // CHECK Element_totalPoolUsd_nonnegative — prisma/migrations/0009_data_invariants
-  stakeCount      Int                @default(0) // CHECK Element_stakeCount_nonnegative — same migration as the pool total
+  tier            PrestigeTier   @default(STANDARD)
+  totalPoolUsd    Int            @default(0) // CHECK Element_totalPoolUsd_nonnegative — prisma/migrations/0009_data_invariants
+  stakeCount      Int            @default(0) // CHECK Element_stakeCount_nonnegative — same migration as the pool total
   currentLeaderId String?
-  leader          Startup?           @relation("ElementLeader", fields: [currentLeaderId], references: [id])
+  leader          Startup?       @relation("ElementLeader", fields: [currentLeaderId], references: [id])
   stakes          Stake[]
   payments        Payment[]
-  reservations    ClaimReservation[]
   firstClaim      FirstClaim?
   auditLogs       AuditLog[]
 
@@ -120,26 +112,25 @@ model Element {
 }
 
 model Startup {
-  id              String             @id @default(cuid())
-  domain          String             @unique
-  title           String             @db.VarChar(32)
-  pitch           String             @db.VarChar(140)
+  id              String          @id @default(cuid())
+  domain          String          @unique
+  title           String          @db.VarChar(32)
+  pitch           String          @db.VarChar(140)
   url             String
-  linkType        String             @default("product") // product | social
+  linkType        String          @default("product") // product | social
   logoUrl         String
   previewImgUrl   String?
   email           String? // notification target for outbid/receipt
-  unsubToken      String             @unique @default(cuid()) // GET /api/unsubscribe?token=... clears email
-  claimedAt       DateTime           @default(now())
-  moderationState ModerationState    @default(VISIBLE)
+  unsubToken      String          @unique @default(cuid()) // GET /api/unsubscribe?token=... clears email
+  claimedAt       DateTime        @default(now())
+  moderationState ModerationState @default(VISIBLE)
   moderatedBy     String?
   moderatedReason String?
   moderatedAt     DateTime?
   restoredAt      DateTime?
   stakes          Stake[]
-  ledElements     Element[]          @relation("ElementLeader")
+  ledElements     Element[]       @relation("ElementLeader")
   payments        Payment[]
-  reservations    ClaimReservation[]
   manageTokens    ManageToken[]
   manageSessions  ManageSession[]
   firstClaims     FirstClaim[]
@@ -169,24 +160,24 @@ model Stake {
 }
 
 model Payment {
-  id                  String             @id @default(cuid())
+  id                  String          @id @default(cuid())
   stakeId             String?
-  stake               Stake?             @relation(fields: [stakeId], references: [id])
+  stake               Stake?          @relation(fields: [stakeId], references: [id])
   elementId           Int
-  element             Element            @relation(fields: [elementId], references: [id])
+  element             Element         @relation(fields: [elementId], references: [id])
   startupId           String
-  startup             Startup            @relation(fields: [startupId], references: [id])
+  startup             Startup         @relation(fields: [startupId], references: [id])
   amountUsd           Int // CHECK Payment_amountUsd_nonnegative (0009_data_invariants)
-  path                PaymentPath        @default(TAKE)
+  path                PaymentPath     @default(TAKE)
   provider            PaymentProvider
-  providerRef         String?            @unique // provider session/charge id — nullable until paid
-  providerEventId     String?            @unique // last applied provider event (Phase 2 replay guard)
+  providerRef         String?         @unique // provider session/charge id — nullable until paid
+  providerEventId     String?         @unique // last applied provider event (Phase 2 replay guard)
   providerAmount      Int? // provider-reported amount for audit (Phase 2 validates) — CHECK Payment_providerAmount_nonnegative
   providerCurrency    String? // provider-reported currency for audit (Phase 2 validates)
   providerCheckoutUrl String? // resumable provider session URL (Phase 2 writes)
-  idempotencyKey      String             @unique
+  idempotencyKey      String          @unique
   requestFingerprint  String? // sha256 of canonical request (Phase 2 binds retries)
-  status              PaymentStatus      @default(PENDING)
+  status              PaymentStatus   @default(PENDING)
   email               String? // payer email captured at checkout
   // The consent act, recorded (R16-6, R16-7): the revision of the rules the
   // payer ticked the box against, a digest of the exact words shown, and when.
@@ -195,40 +186,16 @@ model Payment {
   consentVersion      String? // rules revision attested to, as printed next to the checkbox
   consentTextHash     String? // sha256 of the statement shown (lib/consent.ts) — checkable against the copy, not stored per payment
   consentAt           DateTime? // server clock at the moment the checkbox was accepted
-  createdAt           DateTime           @default(now())
+  createdAt           DateTime        @default(now())
   paidAt              DateTime?
   appliedAt           DateTime? // stake durably applied (Phase 2 sets atomically with paid)
   failedAt            DateTime?
   refundedAt          DateTime? // refund/chargeback applied (sets REFUNDED + unwinds the stake); CHECK Payment_refundedAt_matches_status keeps it paired with the status
-  reservations        ClaimReservation[]
   auditLogs           AuditLog[]
   providerEvents      ProviderEvent[]
   activityLogs        ActivityLog[]
 
   @@index([startupId, status])
-}
-
-// Guaranteed take-lead quote: one ACTIVE reservation per element (enforced by
-// a partial unique index in the migration — Prisma has no partial indexes).
-// Phase 2 acquires/consumes these; Phase 1 only defines the record.
-model ClaimReservation {
-  id                    String            @id @default(cuid())
-  elementId             Int
-  element               Element           @relation(fields: [elementId], references: [id])
-  startupId             String
-  startup               Startup           @relation(fields: [startupId], references: [id])
-  paymentId             String            @unique
-  payment               Payment           @relation(fields: [paymentId], references: [id])
-  quotedLeaderTotal     Int // leader total at quote time (0 when tile was empty)
-  quotedLeaderStartupId String? // who led at quote time (null when tile was empty)
-  reservedTotal         Int // guaranteed winning total (leader + 1, or 5 on empty)
-  status                ReservationStatus @default(ACTIVE)
-  expiresAt             DateTime
-  createdAt             DateTime          @default(now())
-  consumedAt            DateTime?
-
-  @@index([elementId, status])
-  @@index([expiresAt])
 }
 
 // Email magic-link management (v2, not shipped): hashed one-time token per

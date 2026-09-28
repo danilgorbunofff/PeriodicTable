@@ -13,7 +13,7 @@ import {
   blockReasons,
   type InventoryStartupRow,
 } from "./launchInventory";
-import { MIN_STAKE, TAKEOVER_MARGIN, smallestFreeAmount, takeLeadPrice } from "./pricing";
+import { MIN_STAKE, TAKEOVER_MARGIN, takeLeadPrice } from "./pricing";
 
 const read = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 const domainsIn = (src: string) => new Set([...src.matchAll(/domain:\s*"([^"]+)"/g)].map((m) => m[1]));
@@ -64,11 +64,10 @@ describe("launch inventory price contract", () => {
   it("leaves every captured tile biddable at exactly one dollar over its holder", () => {
     const launch = symbolsIn(read("prisma/launch-seed.ts"));
     for (const symbol of launch) {
-      const totalsOnTile = [MIN_STAKE];
+      // The seat is the tile's only row, so the takeover quote is the floor + $1
+      // and there is no cheaper way onto the tile (a newcomer's floor is the
+      // takeover price — lib/pricing.ts).
       expect([symbol, takeLeadPrice(MIN_STAKE)]).toEqual([symbol, 6]);
-      // The next free whole dollar the client is offered is the same 6 — a
-      // ladder would push this above the takeover quote and dead-end the tile.
-      expect([symbol, smallestFreeAmount(totalsOnTile)]).toEqual([symbol, 6]);
     }
   });
 

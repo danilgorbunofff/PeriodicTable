@@ -10,7 +10,6 @@
 #   Signed webhooks use Stripe's own envelope — `stripe-signature: t=<unix>,v1=<hex>`,
 #   HMAC-SHA256 over "<t>.<raw body>"; a delivery outside the 300s tolerance is
 #   refused, and one case asserts exactly that.
-#   Expiry coverage needs RESERVATION_TTL_MS=2000 on the server (else skipped).
 #
 #   Every run writes its own record to REHEARSE_RESULT (default
 #   rehearsal-<run>.log): run id, target, commit, which optional credentials
@@ -68,7 +67,7 @@ TMPD=$(winpath "$TMPD")
 trap finish EXIT
 rec "# release rehearsal $RUN $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rec "# base=$BASE mode=$MODE commit=$(git rev-parse --short HEAD 2>/dev/null || printf unknown)"
-rec "# coverage: ADMIN_TOKEN=$([ -n "${ADMIN_TOKEN:-}" ] && printf set || printf unset) STRIPE_WEBHOOK_SECRET=$([ -n "${STRIPE_WEBHOOK_SECRET:-}" ] && printf set || printf unset) STRIPE_SECRET_KEY=$([ -n "${STRIPE_SECRET_KEY:-}" ] && printf set || printf unset) RESERVATION_TTL_MS=${RESERVATION_TTL_MS:-unset}"
+rec "# coverage: ADMIN_TOKEN=$([ -n "${ADMIN_TOKEN:-}" ] && printf set || printf unset) STRIPE_WEBHOOK_SECRET=$([ -n "${STRIPE_WEBHOOK_SECRET:-}" ] && printf set || printf unset) STRIPE_SECRET_KEY=$([ -n "${STRIPE_SECRET_KEY:-}" ] && printf set || printf unset)"
 BODY="$TMPD/body.txt"
 STATUS="$TMPD/status.txt"
 WHBODY="$TMPD/whbody.json"
@@ -166,29 +165,26 @@ call GET "/api/elements/$EMPTY"
 "$PY" -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-first.dev' and d['stakes'][0]['amount']==8, d['stakes']"
 pass "first claim applied #1 at \$8"
 
+# No cheap joins: on a claimed element a newcomer's floor is the takeover price.
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":5,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-join-1\",\"startup\":{\"title\":\"Joiner\",\"pitch\":\"Joiner pitch here now\",\"url\":\"https://rehearse-join.dev\",\"linkType\":\"product\"}}"
-[ "$(st)" = "200" ] || fail "contested join checkout" "got $(st)"
-PAYJ=$(jget "['paymentId']")
-call POST /api/dev/pay "{\"paymentId\":\"$PAYJ\",\"outcome\":\"pay\"}" > /dev/null
-call GET "/api/elements/$EMPTY"
-"$PY" -c "import json; d=json.load(open('$BODY')); ss=d['stakes']; assert len(ss)==2 and ss[0]['amount']==8 and ss[1]['domain']=='rehearse-join.dev' and ss[1]['amount']==5, ss"
-pass "contested \$5 join lands #2, leader untouched"
+[ "$(st)" = "409" ] || fail "cheap newcomer refused" "got $(st): $(cat "$BODY")"
+grep -q 'BELOW_FLOOR' "$BODY" || fail "below-floor code" "$(cat "$BODY")"
+grep -q 'taking #1 costs \$9' "$BODY" || fail "refusal names the takeover price" "$(cat "$BODY")"
+pass "a \$5 newcomer on a claimed element is refused with the takeover price"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-tie-1\",\"startup\":{\"title\":\"Tier\",\"pitch\":\"Tier pitch here now\",\"url\":\"https://rehearse-tie.dev\",\"linkType\":\"product\"}}"
-[ "$(st)" = "409" ] || fail "tie join rejected" "got $(st)"
-grep -q 'TIE' "$BODY" || fail "tie code" "$(cat "$BODY")"
-pass "tie at leader total rejected with TIE"
+[ "$(st)" = "409" ] || fail "leader-total newcomer refused" "got $(st)"
+grep -q 'BELOW_FLOOR' "$BODY" || fail "below-floor code" "$(cat "$BODY")"
+pass "a newcomer at the leader's own total is refused (must beat it)"
 
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":9,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-take-1\",\"startup\":{\"title\":\"Taker\",\"pitch\":\"Taker pitch here now\",\"url\":\"https://rehearse-take.dev\",\"linkType\":\"product\"}}"
 [ "$(st)" = "200" ] || fail "take checkout" "got $(st)"
-grep -q '"guaranteedTake":true' "$BODY" || fail "take holds reservation" "$(cat "$BODY")"
-RES_TO=$(jget "['reservation']['reservedTotal']")
-[ "$RES_TO" = "9" ] || fail "reserved total 9" "$(cat "$BODY")"
+grep -q '"checkoutUrl"' "$BODY" || fail "take returns a session" "$(cat "$BODY")"
+grep -q '"reservation"' "$BODY" && fail "no reservation on the wire" "$(cat "$BODY")"
 PAYT=$(jget "['paymentId']")
 CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":12,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-rival-1\",\"startup\":{\"title\":\"Rival\",\"pitch\":\"Rival pitch here now\",\"url\":\"https://rehearse-rival.dev\",\"linkType\":\"product\"}}"
-[ "$(st)" = "409" ] || fail "rival take conflicts" "got $(st)"
-grep -q 'RESERVATION_CONFLICT' "$BODY" || fail "conflict code" "$(cat "$BODY")"
-pass "take quote held; rival gets RESERVATION_CONFLICT"
+[ "$(st)" = "200" ] || fail "rival take is not blocked" "got $(st): $(cat "$BODY")"
+pass "two takes coexist — no hold refuses the rival"
 call POST /api/dev/pay "{\"paymentId\":\"$PAYT\",\"outcome\":\"pay\"}" > /dev/null
 call GET "/api/elements/$EMPTY"
 "$PY" -c "import json; d=json.load(open('$BODY')); assert d['stakes'][0]['domain']=='rehearse-take.dev' and d['stakes'][0]['amount']==9, d['stakes']"
@@ -213,26 +209,31 @@ pass "key reuse with different payload → IDEMPOTENCY_CONFLICT"
 
 call GET /api/elements
 EMPTY2=$("$PY" -c "import json; print([t['symbol'] for t in json.load(open('$BODY')) if t['pool']==0][0])")
-CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-first-2\",\"startup\":{\"title\":\"First2\",\"pitch\":\"First2 pitch here\",\"url\":\"https://rehearse-first2.dev\",\"linkType\":\"product\"}}"
-[ "$(st)" = "200" ] || fail "second tile setup" "got $(st)"
-PAYF2=$("$PY" -c "import json; print(json.load(open('$BODY'))['paymentId'])")
+CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":8,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-race-0\",\"startup\":{\"title\":\"Racebase\",\"pitch\":\"Racebase pitch here\",\"url\":\"https://rehearse-race0.dev\",\"linkType\":\"product\"}}"
+[ "$(st)" = "200" ] || fail "race tile setup" "got $(st)"
+PAYF2=$(jget "['paymentId']")
 call POST /api/dev/pay "{\"paymentId\":\"$PAYF2\",\"outcome\":\"pay\"}" > /dev/null
-CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":9,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-exp-1\",\"startup\":{\"title\":\"Expy\",\"pitch\":\"Expy pitch here now\",\"url\":\"https://rehearse-expy.dev\",\"linkType\":\"product\"}}"
-[ "$(st)" = "200" ] || fail "expiry take checkout" "got $(st)"
-grep -q '"guaranteedTake":true' "$BODY" || fail "expiry take holds quote first" "$(cat "$BODY")"
-PAYE=$("$PY" -c "import json; print(json.load(open('$BODY'))['paymentId'])")
-sleep 3 # outlive RESERVATION_TTL_MS=2000 (release builds set it; else this still passes as a normal take)
-call POST /api/dev/pay "{\"paymentId\":\"$PAYE\",\"outcome\":\"pay\"}"
-[ "$(st)" = "200" ] || fail "expired settle" "got $(st)"
-grep -q '"status":"paid"' "$BODY" || fail "expired payment paid" "$(cat "$BODY")"
-pass "expired reservation settles as an ordinary stake (no guaranteed crown)"
+# Two newcomers quote the same takeover price before either settles: both are
+# accepted (no hold exists), and the first one to settle keeps #1 — the ledger's
+# deterministic tie order (amount desc, createdAt asc, id asc) decides.
+CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":9,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-race-1\",\"startup\":{\"title\":\"RacerA\",\"pitch\":\"Racer A pitch here\",\"url\":\"https://rehearse-racea.dev\",\"linkType\":\"product\"}}"
+[ "$(st)" = "200" ] || fail "race checkout A" "got $(st)"
+PAYA=$(jget "['paymentId']")
+CK1 "{\"elementSym\":\"$EMPTY2\",\"amountUsd\":9,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-race-2\",\"startup\":{\"title\":\"RacerB\",\"pitch\":\"Racer B pitch here\",\"url\":\"https://rehearse-raceb.dev\",\"linkType\":\"product\"}}"
+[ "$(st)" = "200" ] || fail "race checkout B" "got $(st)"
+PAYB=$(jget "['paymentId']")
+call POST /api/dev/pay "{\"paymentId\":\"$PAYA\",\"outcome\":\"pay\"}" > /dev/null
+call POST /api/dev/pay "{\"paymentId\":\"$PAYB\",\"outcome\":\"pay\"}" > /dev/null
+call GET "/api/elements/$EMPTY2"
+"$PY" -c "import json; d=json.load(open('$BODY')); ss=d['stakes']; assert [(s['domain'], s['amount'], s['rank']) for s in ss[:2]] == [('rehearse-racea.dev',9,1),('rehearse-raceb.dev',9,2)], ss"
+pass "equal takes both settle; the earlier one keeps #1"
 
 if [ -n "${STRIPE_WEBHOOK_SECRET:-}" ]; then
   echo "== webhooks (signed) =="
-  CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":6,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-wh-1\",\"startup\":{\"title\":\"Hook\",\"pitch\":\"Hook pitch here now\",\"url\":\"https://rehearse-hook.dev\",\"linkType\":\"product\"}}"
+  CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":11,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-wh-1\",\"startup\":{\"title\":\"Hook\",\"pitch\":\"Hook pitch here now\",\"url\":\"https://rehearse-hook.dev\",\"linkType\":\"product\"}}"
   PAYW=$(jget "['paymentId']")
-  # Stripe quotes integer cents, so $6 is amount_total 600.
-  B1="{\"id\":\"evt_rehearse-$RUN-1\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-1\",\"payment_status\":\"paid\",\"amount_total\":600,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW\"}}}}"
+  # Stripe quotes integer cents, so $11 is amount_total 1100.
+  B1="{\"id\":\"evt_rehearse-$RUN-1\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-1\",\"payment_status\":\"paid\",\"amount_total\":1100,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW\"}}}}"
   sign_post /api/webhooks/stripe "$B1"
   [ "$(st)" = "200" ] || fail "webhook applied" "got $(st)"
   grep -q '"outcome":"applied"' "$BODY" || fail "applied outcome" "$(cat "$BODY")"
@@ -246,12 +247,12 @@ if [ -n "${STRIPE_WEBHOOK_SECRET:-}" ]; then
   sign_post /api/webhooks/stripe "$B2"
   grep -q '"outcome":"ignored"' "$BODY" || fail "statusless ignored" "$(cat "$BODY")"
   pass "statusless event ignored, settled payment untouched"
-  CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":7,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-wh-2\",\"startup\":{\"title\":\"Hook2\",\"pitch\":\"Hook2 pitch here now\",\"url\":\"https://rehearse-hook2.dev\",\"linkType\":\"product\"}}"
+  CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":12,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-wh-2\",\"startup\":{\"title\":\"Hook2\",\"pitch\":\"Hook2 pitch here now\",\"url\":\"https://rehearse-hook2.dev\",\"linkType\":\"product\"}}"
   PAYW2=$(jget "['paymentId']")
   B3="{\"id\":\"evt_rehearse-$RUN-3\",\"type\":\"checkout.session.expired\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-2\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}}"
   sign_post /api/webhooks/stripe "$B3"
   grep -q '"outcome":"failed"' "$BODY" || fail "failed event" "$(cat "$BODY")"
-  B4="{\"id\":\"evt_rehearse-$RUN-4\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-3\",\"payment_status\":\"paid\",\"amount_total\":700,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}}"
+  B4="{\"id\":\"evt_rehearse-$RUN-4\",\"type\":\"checkout.session.completed\",\"data\":{\"object\":{\"object\":\"checkout.session\",\"id\":\"cs_rehearse-$RUN-3\",\"payment_status\":\"paid\",\"amount_total\":1200,\"currency\":\"usd\",\"metadata\":{\"paymentId\":\"$PAYW2\"}}}}"
   sign_post /api/webhooks/stripe "$B4"
   grep -Eq '"outcome":"already-settled"' "$BODY" || fail "paid-after-failed stays terminal" "$(cat "$BODY")"
   pass "failed→paid follows the terminal state machine"
@@ -265,7 +266,7 @@ fi
 
 if [ -n "${STRIPE_SECRET_KEY:-}" ] && [ -n "${STRIPE_WEBHOOK_SECRET:-}" ]; then
   echo "== provider outage =="
-  CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":11,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-outage-1\",\"startup\":{\"title\":\"Out\",\"pitch\":\"Out pitch here now\",\"url\":\"https://rehearse-out.dev\",\"linkType\":\"product\"}}"
+  CK1 "{\"elementSym\":\"$EMPTY\",\"amountUsd\":12,\"attest\":true,\"idempotencyKey\":\"rehearse-$RUN-outage-1\",\"startup\":{\"title\":\"Out\",\"pitch\":\"Out pitch here now\",\"url\":\"https://rehearse-out.dev\",\"linkType\":\"product\"}}"
   [ "$(st)" = "502" ] || fail "outage is 502 retryable" "got $(st)"
   grep -q 'checkoutUrl' "$BODY" && fail "no dead URL on outage" "$(cat "$BODY")"
   pass "provider outage → 502, retryable, no dead URL"

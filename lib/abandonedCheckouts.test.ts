@@ -1,14 +1,13 @@
 /* R08-5 against a live database (TST8/9988 fixtures, fully cleaned up).
    The pure eligibility rule and the job's contract are pinned without a DB in
    lib/phase8.test.ts; this file is the one place that proves the sweep moves a
-   real row to CANCELED, refuses every row that could still settle, and leaves
-   the reservation alone. */
+   real row to CANCELED and refuses every row that could still settle. */
 import { hasTestDb, testPrisma } from "./testDb"; // must stay first
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { CHECKOUT_ABANDON_TTL_MS, sweepAbandonedCheckouts } from "./abandonedCheckouts";
 import { POST as abandonPOST } from "../app/api/jobs/abandoned-checkouts/route";
-import { PaymentStatus, ReservationStatus } from "@prisma/client";
+import { PaymentStatus } from "@prisma/client";
 
 const prisma = testPrisma();
 const hasDb = hasTestDb;
@@ -38,7 +37,6 @@ afterAll(async () => {
   }
   const scope = { startup: { domain: DOMAIN } };
   await prisma.auditLog.deleteMany({ where: scope });
-  await prisma.claimReservation.deleteMany({ where: scope });
   await prisma.providerEvent.deleteMany({ where: { payment: scope } });
   await prisma.payment.deleteMany({ where: scope });
   await prisma.element.deleteMany({ where: { id: T88 } });
@@ -142,31 +140,6 @@ describe.skipIf(!hasDb)("abandoned checkout sweep (R08-5)", () => {
 
     // Every candidate is already terminal, so a third pass has nothing to do.
     expect((await sweepAbandonedCheckouts({ limit: 50 })).canceled).toEqual([]);
-  });
-
-  it("leaves an expired reservation for its own TTL instead of editing it", async () => {
-    const payment = await fixturePayment({ hoursOld: 30 });
-    const startup = await prisma.startup.findUniqueOrThrow({ where: { domain: DOMAIN } });
-    const expiresAt = new Date(Date.now() - 5 * HOUR);
-    await prisma.claimReservation.create({
-      data: {
-        elementId: T88,
-        startupId: startup.id,
-        paymentId: payment.id,
-        quotedLeaderTotal: 0,
-        quotedLeaderStartupId: null,
-        reservedTotal: 5,
-        status: ReservationStatus.ACTIVE,
-        expiresAt,
-      },
-    });
-
-    const { canceled } = await sweepAbandonedCheckouts();
-
-    expect(canceled).toContain(payment.id);
-    const reservation = await prisma.claimReservation.findUniqueOrThrow({ where: { paymentId: payment.id } });
-    expect(reservation.status).toBe(ReservationStatus.ACTIVE);
-    expect(reservation.expiresAt.getTime()).toBe(expiresAt.getTime());
   });
 
   it("sweeps through the job route", async () => {

@@ -44,9 +44,9 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     q: "What does a claim cost?",
     a: [
-      `The smallest first claim on an element is $${MIN_STAKE}. After that the price is set by whoever holds it: taking an element from its current holder means beating their total by at least $${TAKEOVER_MARGIN} — in practice $1 more than they have on the element.`,
-      `A tie is refused rather than silently merged, because two equal totals would be indistinguishable: if your amount matches one already on the board, the board asks you to add $${TIE_CLEARANCE} to stand clear of the tie. If you were outbid and want the top of the element back, you pay the gap between you and the leader plus that same $${TAKEOVER_MARGIN}.`,
-      `On a crowded element you can join at any free amount at or above the floor — the amount you choose is what ranks you.`,
+      `An element nobody holds costs $${MIN_STAKE} or more to claim. Once it has a holder, the only way onto it is the takeover: your total there must reach the holder's total plus $${TAKEOVER_MARGIN} — in practice $1 more than they have on the element, paid in full when you are new to it.`,
+      `If you already hold a stake on that element you keep the discount: a top-up adds to what you have, and taking the lead back costs only the gap between you and the leader plus that same $${TAKEOVER_MARGIN}. A tie is refused rather than silently merged, because two equal totals would be indistinguishable: if your amount matches one already on the board, the board asks you to add $${TIE_CLEARANCE} to stand clear of the tie.`,
+      `Two payments of the same amount can be made at the same moment — nothing holds an element between checkout and payment — and the one that settles first keeps the higher rank. If an equal amount settles first, $${TIE_CLEARANCE} more takes the lead back.`,
     ],
   },
   {

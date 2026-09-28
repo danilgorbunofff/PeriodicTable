@@ -63,7 +63,7 @@ const text = (slug: LegalSlug) => legalCanonicalText(slug);
  * test: it is a published word asking to be re-approved. */
 const DIGESTS: Record<LegalSlug, string> = {
   about: "3f70cc2fcc460ee7b134fce775b13a1e10688605467d4bad1a738f70d6561b59",
-  rules: "a05d1b18984bcc7b649e36ec241739a7302ea5ded617bbb05e6898ec0e4b0b8f",
+  rules: "a4c91951c7a6cddcf472cfd86f71f8d8e82f71d824e2f7f66f38dbad04e3654b",
   contact: "23a1a83d8ede04b0057960e847739fca78b8c4ffcf9d0fa83cfb027474ae480d",
   privacy: "a2877416c5393f3599a3b46d6697e2e7e28df9a796aad6006e3d350d988844bf",
 };

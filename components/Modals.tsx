@@ -212,11 +212,8 @@ export function CheckoutPreview({
     domainKnown: !!domain,
     priorTotal: myPriorTotal,
     amount: Math.round(amount) || 0,
-    // R09-1: a live take quote holds #1 for someone else, so the copy below has
-    // to name it instead of promising a takeover.
-    takeQuote: data?.takeHold ?? null,
   });
-  const { priorHere, alreadyLead, need, belowNeed, takeQuoted, heldByOtherUntil, heldByOtherTotal } = quote;
+  const { alreadyLead, need } = quote;
   const classified = classifyAndValidate({
     amount: Math.round(amount) || 0,
     leaderTotal,
@@ -295,13 +292,9 @@ export function CheckoutPreview({
       : crownCopy({
           elementName: elSafe.name,
           boardComplete: data?.prices.boardComplete === true,
-          priorHere,
           alreadyLead,
           need,
           priorTotal: myPriorTotal,
-          heldUntil: heldByOtherUntil,
-          heldTotal: heldByOtherTotal,
-          existingTotals: stakeTotals,
         });
 
   async function joinWaitlist() {
@@ -612,15 +605,7 @@ export function CheckoutPreview({
       {need != null && crown && (
         <>
           <div className="mt-2 text-sm font-extrabold">{crown.lead}</div>
-          <div className="mt-1 text-xs text-mutedink">
-            {crown.joins}
-            {takeQuoted ? " Your take quote is held for 15 min once you continue." : ""}
-          </div>
-          {belowNeed && !clientErr && (
-            <div className="mt-2 rounded-2xl bg-goldwash p-3 text-xs font-bold">
-              💡 ${Math.round(amount)} tops up your stake — add ${need - Math.round(amount)} more to take #1.
-            </div>
-          )}
+          <div className="mt-1 text-xs text-mutedink">{crown.joins}</div>
         </>
       )}
       {priceMoved != null && (

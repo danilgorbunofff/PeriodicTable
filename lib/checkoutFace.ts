@@ -33,8 +33,7 @@ export const CHECKOUT_MSG = {
   pitch: "Pitch must be 2–140 characters.",
   attest: "Please confirm you own or may promote this URL.",
   humanCheck: "The human check could not load — reload or use another network.",
-  canceled:
-    "Not paid — nothing was charged. Your claim is still here, and any take quote it held stays reserved for up to 15 minutes.",
+  canceled: "Not paid — nothing was charged. Your claim is still here.",
 } as const;
 
 /** The server's `field:"url"` covers two rules — a product URL and a social
@@ -174,24 +173,6 @@ export function checkoutRefusal(status: number, body: unknown): CheckoutRefusal 
   const takeLead = typeof json.takeLead === "number" ? json.takeLead : null;
   if (status === 409 && json.code === "PRICE_MOVED" && takeLead != null) {
     return { serverErr: error ?? "Price moved. Review the new minimum.", field: null, priceMoved: takeLead };
-  }
-  if (json.code === "RESERVATION_CONFLICT" && typeof json.expiresAt === "string") {
-    // R09-1: the hold is the answer, so it is stated with the amount it refuses
-    // and the time it ends, and the rule text that used to collide with it (a
-    // tie hint) is replaced by the amount that still lands underneath.
-    const heldUntil = new Date(json.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const joinHint = typeof json.joinHint === "number" ? json.joinHint : null;
-    const tail =
-      joinHint != null
-        ? ` A $${joinHint} bid still joins the ladder.`
-        : json.joinBlocked === true
-          ? " No amount lands until that hold ends."
-          : "";
-    return {
-      serverErr: `${error ?? "This element has a held take quote."} Held until ${heldUntil}.${tail}`,
-      field: null,
-      priceMoved: null,
-    };
   }
   if (json.code === "PROVIDER_UNAVAILABLE" && typeof json.paymentId === "string") {
     // R06-7: the row exists and holds its claim, so say so with the id that

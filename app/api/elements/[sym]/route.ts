@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { takeLeadPrice, joinMin, reclaimFor } from "@/lib/pricing";
 import { apiJson, apiError, READ_CACHE, apiRoute } from "@/lib/route";
 import { findElementBySymbol } from "@/lib/elements";
-import { getActiveReservation } from "@/lib/reservations";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: getElement });
@@ -39,12 +38,6 @@ async function getElement(req: NextRequest, { params }: { params: { sym: string 
   ]);
 
   if (!element) return apiError("Element not found", { status: 404, code: "NOT_FOUND" });
-
-  // A live take hold is public information about the tile — anyone quoting a
-  // number needs it, and on a floor-priced element it is the reason the whole
-  // reachable range is refused (R09-1). Who holds it is not public, so the hold
-  // carries its amount and end time and neither the startup nor the payment.
-  const hold = await getActiveReservation(prisma, element.id);
 
   // Leader is the top LIVE bid, not simply row 0: a fully reversed stake sits
   // last with amountUsd 0, and reading it as the leader would advertise a $1
@@ -91,7 +84,6 @@ async function getElement(req: NextRequest, { params }: { params: { sym: string 
       // claim a staker the payload does not list.
       count: stakes.length,
       stakes,
-      takeHold: hold ? { reservedTotal: hold.reservedTotal, expiresAt: hold.expiresAt.toISOString() } : null,
       prices: {
         takeLead: takeLeadPrice(leaderTotal),
         joinMin: joinMin(),

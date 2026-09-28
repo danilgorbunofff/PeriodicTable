@@ -170,7 +170,6 @@ async function main() {
 
   const children: Step[] = [
     del("providerEvent", async (tx) => (await tx.providerEvent.deleteMany({ where: { payment: { startupId: { in: inventoryIds } } } })).count),
-    del("claimReservation", async (tx) => (await tx.claimReservation.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
     del("manageSession", async (tx) => (await tx.manageSession.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
     del("manageToken", async (tx) => (await tx.manageToken.deleteMany({ where: { startupId: { in: inventoryIds } } })).count),
     del("firstClaim", async (tx) =>

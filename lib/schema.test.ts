@@ -46,18 +46,6 @@ describe.skipIf(!hasTestDb)("migrated database shape (R12-6)", () => {
     await prisma.$disconnect();
   });
 
-  it("keeps the hand-written partial unique index the checkout race depends on", async () => {
-    const rows = await prisma.$queryRaw<{ tablename: string; indexdef: string }[]>`
-      SELECT tablename, indexdef FROM pg_indexes
-      WHERE indexname = 'ClaimReservation_elementId_active_key'`;
-    expect(rows).toHaveLength(1);
-    expect(rows[0].tablename).toBe("ClaimReservation");
-    // Both halves matter: UNIQUE is the race guard, the WHERE clause is what lets
-    // the next quote be taken once the previous reservation is released.
-    expect(rows[0].indexdef).toMatch(/UNIQUE/);
-    expect(rows[0].indexdef).toMatch(/WHERE .*active/);
-  });
-
   it("keeps the hand-written partial index the board's leader tabs depend on", async () => {
     // R15-4: `prisma migrate diff` cannot express a partial index, so this is
     // the assertion that keeps it from being rewritten away.

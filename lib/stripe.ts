@@ -477,7 +477,7 @@ export function stripePayloadIsPaid(payload: unknown): boolean {
  * session it belongs to stays open and payable, so treating it as failure marks
  * a recovering buyer's payment dead — and the retry that succeeds then cannot
  * settle it. An abandoned session is still caught by the expiry event, and a
- * stalled one by reservation TTL. */
+ * stalled one by the abandoned-checkouts sweep. */
 const FAILED_EVENT_TYPES = new Set([
   "checkout.session.expired",
   "checkout.session.async_payment_failed",

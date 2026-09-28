@@ -100,7 +100,6 @@ function wipeTargets(): WipeTarget[] {
   });
   return [
     t("ProviderEvent", prisma.providerEvent),
-    t("ClaimReservation", prisma.claimReservation),
     t("ManageToken", prisma.manageToken),
     t("ManageSession", prisma.manageSession),
     t("FirstClaim", prisma.firstClaim),

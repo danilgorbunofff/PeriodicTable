@@ -17,8 +17,8 @@ export type StakeKind = "stake" | "reclaim" | "join";
  * Dethrone detection feeds Phase-3 emails.
  *
  * Phase 2: accepts an outer transaction client so settlement can commit the
- * payment transition, reservation consumption, stake, aggregates, and outbox
- * rows atomically. Without `tx`, wraps itself as before.
+ * payment transition, stake, aggregates, and outbox rows atomically. Without
+ * `tx`, wraps itself as before.
  *
  * Phase 3: takes a transaction-scoped advisory lock on the element FIRST, so
  * concurrent applications for the same element serialize even when called

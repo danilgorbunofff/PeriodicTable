@@ -4,12 +4,13 @@
    a take quote promised on a board the client cannot see whole (R04-2), a
    settlement validator no code path called (R04-3), and one element reachable
    under many spellings of its symbol (R04-4). Each fix leaves exactly one place
-   that decides — lib/stakeQuote.ts, prices.boardComplete, validateTake, and
-   findElementBySymbol — and these tests hold those places to it. */
+   that decides — lib/stakeQuote.ts, prices.boardComplete, the classifier, and
+   findElementBySymbol — and these tests hold those places to it. Reservations
+   were removed after R04-3: the classifier is the only price gate left. */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { classifyAndValidate, validateTake } from "./pricing";
+import { classifyAndValidate } from "./pricing";
 
 const src = (p: string) => readFileSync(join(__dirname, "..", p), "utf8");
 const count = (haystack: string, needle: RegExp) => (haystack.match(needle) ?? []).length;
@@ -52,12 +53,8 @@ describe("R04-1 an app-minted amount keeps tracking the board", () => {
 
   it("renders the crown sentence from the live board, not a fixed '$5+' claim (R09-6)", () => {
     const modals = src(MODALS);
-    // The hold the server names in its rejection is the same hold the modal
-    // quotes, and the hold is read from the payload rather than re-derived.
-    expect(modals).toMatch(/takeQuote: data\?\.takeHold \?\? null/);
     expect(modals).toMatch(/const crown =\s*need == null\s*\?\s*null\s*:\s*crownCopy\(\{\s*elementName: elSafe\.name,/);
     expect(modals).toMatch(/boardComplete: data\?\.prices\.boardComplete === true,/);
-    expect(modals).toMatch(/heldUntil: heldByOtherUntil,\s*heldTotal: heldByOtherTotal,/);
     expect(modals).toMatch(/\{crown\.lead\}/);
     expect(modals).toMatch(/\{crown\.joins\}/);
     // The three static sentences this replaced cannot come back: the only
@@ -97,12 +94,12 @@ describe("R04-2 a concealed listing is never promised", () => {
     expect(route).not.toMatch(/moderationState: "HIDDEN"[\s\S]{0,400}(reclaim|prices:)/);
   });
 
-  it("withholds the hold sentence unless the take quote is real", () => {
+  it("never promises a hold — none exists", () => {
     const modals = src(MODALS);
     expect(modals).toMatch(/boardLoaded: !!data,/);
     expect(modals).toMatch(/boardComplete: data\?\.prices\.boardComplete === true,/);
-    expect(modals).toMatch(/takeQuoted \? " Your take quote is held for 15 min once you continue\." : ""/);
-    expect(modals).not.toMatch(/priorHere \? " Your take quote/);
+    // Reservations are gone: no hold, no quote, no 15-minute promise.
+    expect(modals).not.toMatch(/takeHold|takeQuoted|heldByOther|held for 15 min|reservation/i);
   });
 
   it("types the flag as optional, because old payloads lack it", () => {
@@ -110,17 +107,24 @@ describe("R04-2 a concealed listing is never promised", () => {
   });
 });
 
-describe("R04-3 the take hold is checked before it is created", () => {
-  it("is a guard the locked take path cannot pass without", () => {
+describe("R04-3 the price is checked before the row is written", () => {
+  it("classifies under the lock before creating the payment", () => {
     const route = src(CHECKOUT);
-    expect(route).toMatch(/import \{[^}]*validateTake[^}]*\} from "@\/lib\/pricing"/);
-    const guard = route.indexOf("validateTake(amountUsd, reservedTotal)");
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(route.indexOf("claimReservation.create"));
-    expect(route).toMatch(/code: "BELOW_FLOOR", takeLead: reservedTotal/);
+    const classify = route.indexOf("classifyAndValidate({ amount: amountUsd");
+    expect(classify).toBeGreaterThan(-1);
+    expect(classify).toBeLessThan(route.indexOf("tx.payment.create"));
+    // The refusal carries the classifier's own code and the live take price, so
+    // the modal can state the rule without implying the board moved.
+    expect(route).toMatch(/code: classified\.code/);
+    expect(route).toMatch(/takeLead: leaderTotal != null \? leaderTotal \+ 1 : joinMin\(\)/);
   });
 
-  it("cannot reject what the classifier has already accepted as a take", () => {
+  it("carries no reservation machinery any more", () => {
+    const route = src(CHECKOUT);
+    expect(route).not.toMatch(/claimReservation|RESERVATION_CONFLICT|reservedTotal|guaranteedTake|take-below-reserve/);
+  });
+
+  it("cannot accept a newcomer the classifier refused", () => {
     let takes = 0;
     for (const leaderTotal of [5, 20, 88]) {
       for (const amount of [1, 4, 5, 6, 20, 21, 22, 89, 500]) {
@@ -133,8 +137,7 @@ describe("R04-3 the take hold is checked before it is created", () => {
         });
         if (!classified.ok || classified.path !== "TAKE") continue;
         takes++;
-        // The reservation quotes leader + 1 (app/api/checkout/route.ts).
-        expect(validateTake(amount, leaderTotal + 1)).toBeNull();
+        // The only way to TAKE is to beat the leader by the margin.
         expect(amount).toBeGreaterThanOrEqual(leaderTotal + 1);
       }
     }

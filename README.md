@@ -114,14 +114,17 @@ is tested, but has no UI and production never emails the link, so it is
 deliberately dormant and unreachable. Do not advertise it until the management
 pages and delivery ship. Every mutation writes an `AuditLog` row.
 
-## Payments (take quotes + settlement)
+## Payments (pricing + settlement)
 
-Contested takeovers hold a 15-minute guaranteed quote (`ClaimReservation`,
-one ACTIVE per element). Settlement is atomic: provider-event claim,
-reservation consume, stake + aggregates, paid-transition, and outbox enqueues
-commit in one transaction (`lib/settle.ts`). Webhooks accept paid signals
-only from an explicit allowlist; statusless/unrelated events are ignored and
-recorded, never applied. Same-delivery twice applies once (event-id dedupe).
+An empty element starts at $5; a claimed element's only entry price is the
+takeover ($1 over the holder's total), and a holder pays just the gap to take
+the lead back. Nothing holds an element between checkout and payment: two equal
+payments may be made at the same moment and the earlier-settled stake keeps the
+higher rank. Settlement is atomic: provider-event claim, stake + aggregates,
+paid-transition, and outbox enqueues commit in one transaction (`lib/settle.ts`).
+Webhooks accept paid signals only from an explicit allowlist; statusless/unrelated
+events are ignored and recorded, never applied. Same-delivery twice applies once
+(event-id dedupe).
 
 ## Ledger rules
 

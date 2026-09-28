@@ -41,8 +41,6 @@ export type ReceiptPayload = {
   amountUsd: number;
   rank: number;
   domain: string;
-  /** R09-2: set when the take quote had lapsed before settlement. */
-  lapsedTakeTotal?: number | null;
   /** R10-4: set when the payment was only an increment on a stake the buyer
    * already held (reclaim), so the charge and the resulting total are stated
    * as the two different facts they are. */

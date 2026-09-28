@@ -1,23 +1,22 @@
 /**
  * Atomic payment settlement (Phase 2, P0-02).
  *
- * ONE transaction commits: provider-event claim, reservation validation /
- * consumption, stake application, rank/leader/aggregate persistence, the
- * payment paid-transition (stakeId + appliedAt), and outbox enqueues for
- * receipt / outbid / preview / analytics. A payment can no longer be marked
- * paid without its stake being durably applied — any failure between the old
- * two transactions now rolls everything back and stays retryable.
+ * ONE transaction commits: provider-event claim, stake application,
+ * rank/leader/aggregate persistence, the payment paid-transition (stakeId +
+ * appliedAt), and outbox enqueues for receipt / outbid / preview / analytics. A
+ * payment can no longer be marked paid without its stake being durably applied —
+ * any failure between the old two transactions now rolls everything back and
+ * stays retryable.
  *
  * Per-element serialization: the transaction takes a transaction-scoped
- * advisory lock on the element id, so concurrent settles (and Phase 2
- * take-checkouts, which take the same lock) cannot interleave. Full invariant
- * asserts + retry policy land in Phase 3.
+ * advisory lock on the element id, so concurrent settles (and checkouts, which
+ * take the same lock) cannot interleave. Full invariant asserts + retry policy
+ * land in Phase 3.
  */
-import { PaymentPath, PaymentStatus, ProviderEventOutcome, ReservationStatus } from "@prisma/client";
+import { PaymentPath, PaymentStatus, ProviderEventOutcome } from "@prisma/client";
 import { describeError, logInfo, logWarn } from "./log";
 import { prisma } from "./prisma";
 import { applyStakeTx, reverseStakeTx } from "./recompute";
-import { consumeReservation } from "./reservations";
 import { enqueueOutbox, drainDueWithin } from "./outbox";
 import { audit } from "./audit";
 import { withTxnRetry, MONEY_TX } from "./txn";
@@ -220,34 +219,14 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
     const applied = await withTxnRetry(() =>
       prisma.$transaction(
         async (tx) => {
-      // Serialize per element (matches checkout-take lock in Phase 2 route).
+      // Serialize per element (matches the checkout lock). A same-moment race
+      // of two equal payments is resolved here: the first transaction commits
+      // its stake, the second applies an equal total and rankStakes orders it
+      // below the earlier row (amount desc, createdAt asc, id asc).
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${payment.elementId})`;
       // Re-check pending under the lock (a concurrent settle may have won).
       const locked = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       if (locked.status !== PaymentStatus.PENDING) return null;
-
-      // Reservation: consume when valid; expire-and-continue when stale.
-      const reservation = await tx.claimReservation.findUnique({ where: { paymentId } });
-      let takeGuaranteed = false;
-      // R09-2: the figure the quote held when it lapsed. A lapsed take is still
-      // applied — the money is real and the ledger has no refund path for a
-      // PENDING row — but the downgrade is recorded and receipted at the rank
-      // the board granted, not the #1 the quote promised.
-      let lapsedTakeTotal: number | null = null;
-      if (reservation && reservation.status === "ACTIVE") {
-        if (reservation.expiresAt.getTime() <= Date.now()) {
-          await tx.claimReservation.update({
-            where: { id: reservation.id },
-            data: { status: ReservationStatus.EXPIRED },
-          });
-          lapsedTakeTotal = reservation.reservedTotal;
-        } else {
-          if (payment.amountUsd < reservation.reservedTotal) {
-            throw new Error(`take-below-reserve:${payment.amountUsd}<${reservation.reservedTotal}`);
-          }
-          takeGuaranteed = true;
-        }
-      }
 
       const result = await applyStakeTx(
         {
@@ -259,28 +238,6 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
         },
         tx
       );
-
-      if (lapsedTakeTotal != null) {
-        await audit(
-          {
-            action: "TAKE_LAPSED",
-            elementId: payment.elementId,
-            startupId: payment.startupId,
-            paymentId,
-            detail: `take-lapsed:${result.stake.rank}`,
-          },
-          tx
-        );
-      }
-
-      if (reservation && takeGuaranteed) {
-        await consumeReservation(tx, reservation.id);
-      } else if (reservation) {
-        await tx.claimReservation.update({
-          where: { id: reservation.id },
-          data: { status: ReservationStatus.EXPIRED },
-        });
-      }
 
       const element = await tx.element.findUniqueOrThrow({ where: { id: payment.elementId } });
       const payer = await tx.startup.findUniqueOrThrow({ where: { id: payment.startupId } });
@@ -320,7 +277,6 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
             rank: result.stake.rank,
             domain: payer.domain,
             ...(result.stake.amountUsd !== payment.amountUsd ? { topUpUsd: payment.amountUsd } : {}),
-            ...(lapsedTakeTotal != null ? { lapsedTakeTotal } : {}),
             // R16-5/R16-7: the two facts the receipt has to state about the
             // transaction itself — the reference that identifies the charge and
             // the day the rules revision was accepted. Both are read from the
@@ -427,9 +383,8 @@ export async function settlePayment(paymentId: string, event: SettleEvent): Prom
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     await recordEvent({ ...event, paymentId, outcome: "ERROR", detail: reason.slice(0, 300) });
-    // Deterministic validation failures (immutable amount vs reserved total,
-    // ledger-invariant asserts) can never succeed on redelivery — terminal.
-    if (reason.startsWith("take-below-reserve:") || reason.startsWith("ledger-invariant:")) {
+    // Ledger-invariant asserts can never succeed on redelivery — terminal.
+    if (reason.startsWith("ledger-invariant:")) {
       logSettle("settle-error-terminal", { paymentId, eventId: event.eventId, reason: reason.slice(0, 200) });
       return { outcome: "rejected", paymentId, reason: reason.slice(0, 300) };
     }

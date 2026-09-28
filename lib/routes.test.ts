@@ -88,8 +88,6 @@ afterAll(async () => {
     return;
   }
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
-  // Holds point at payments, so they go first (R09-1 fixtures).
-  await prisma.claimReservation.deleteMany({ where: { elementId: { in: [T6, T9] } } });
   await purgeSettledOutbox(prisma, {
     OR: [{ startup: { domain: { in: DOMAINS } } }, { startup: { domain: { startsWith: "rl-probe-" } } }],
   });
@@ -208,7 +206,9 @@ describe.skipIf(!hasDb)("read API contracts", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             elementSym: "TST6",
-            amountUsd: 5,
+            // TST6's leader holds 5,000, so a newcomer's floor is the takeover
+            // price (lib/pricing.ts) — the throttle probe has to clear it.
+            amountUsd: 5001,
             attest: true,
             idempotencyKey,
             startup: {
@@ -291,10 +291,10 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     expect(json.prices.takeLead).toBe(5001);
   });
 
-  /* R09-1: a live take hold is the fact that decides a bid, and the payload
-     has to publish it — the refusal on a floor-priced tile has no amount to
-     offer, and the client may not promise a takeover it will not get. */
-  const holdProbe = (sym: string, ip: string) => async (amountUsd: number, stamp: string) =>
+  /* The takeover floor (and the absence of holds): a newcomer on a claimed
+     element cannot buy in below #1 + $1, and nothing refuses a second bidder
+     who quotes the same price — the race is decided at settlement. */
+  const probe = (sym: string, ip: string) => async (amountUsd: number, stamp: string) =>
     checkoutPOST(
       req("/api/checkout", {
         method: "POST",
@@ -309,7 +309,7 @@ describe.skipIf(!hasDb)("read API contracts", () => {
           idempotencyKey: key(),
           startup: {
             title: `RT${stamp}`,
-            pitch: "take hold probe pitch",
+            pitch: "takeover probe pitch",
             url: `https://rl-probe-${stamp}-${key()}.dev`,
             linkType: "product",
           },
@@ -317,7 +317,7 @@ describe.skipIf(!hasDb)("read API contracts", () => {
       })
     );
 
-  it("publishes the live hold and closes a floor tile instead of hinting (R09-1)", async () => {
+  it("refuses a newcomer below the takeover price and names the price that works (R04-3)", async () => {
     const owner = await prisma.startup.upsert({
       where: { domain: "rt-hold-a.dev" },
       create: { domain: "rt-hold-a.dev", title: "Hold A", pitch: "hold fixture pitch", url: "https://rt-hold-a.dev", logoUrl: "x" },
@@ -326,78 +326,27 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     const join = await prisma.payment.create({
       data: { elementId: T9, startupId: owner.id, amountUsd: 5, path: "JOIN", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
     });
-    const settled = await settlePayment(join.id, { provider: "dev", eventId: `dev-${key()}`, eventType: "dev.test", paid: true });
-    expect(settled.outcome).toBe("applied");
+    expect((await settlePayment(join.id, { provider: "dev", eventId: `dev-${key()}`, eventType: "dev.test", paid: true })).outcome).toBe("applied");
 
-    // The leader owns the quote on a $5 tile, so the hold is minted at $6: $5
-    // is the tie and everything above it is the hold.
-    const quote = await prisma.payment.create({
-      data: { elementId: T9, startupId: owner.id, amountUsd: 6, path: "TAKE", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
-    });
-    const expiresAt = new Date(Date.now() + 10 * 60_000);
-    await prisma.claimReservation.create({
-      data: { elementId: T9, startupId: owner.id, paymentId: quote.id, quotedLeaderTotal: 5, quotedLeaderStartupId: owner.id, reservedTotal: 6, expiresAt },
-    });
-
-    // The board says so before the buyer types: this is what the modal's crown
-    // sentence reads (R09-1, R09-6).
-    const open = await elementGET(req("/api/elements/TST9"), { params: { sym: "TST9" } } as never);
-    const openJson = (await open.json()) as { count: number; stakes: { amount: number }[]; takeHold: { reservedTotal: number; expiresAt: string } | null };
-    expect(openJson.takeHold).toEqual({ reservedTotal: 6, expiresAt: expiresAt.toISOString() });
-    expect(openJson.count).toBe(openJson.stakes.length);
-    expect(openJson.stakes[0]?.amount).toBe(5);
-
-    // The refusal names the hold, and does not offer the amount the tie rule
-    // would have hinted at (it does not land either).
-    const walled = await holdProbe("TST9", "198.51.100.11")(6, "wall");
-    expect(walled.status).toBe(409);
-    const walledBody = (await walled.json()) as { code?: string; reservedTotal?: number; expiresAt?: string; joinBlocked?: boolean; joinHint?: number };
-    expect(walledBody.code).toBe("RESERVATION_CONFLICT");
-    expect(walledBody.reservedTotal).toBe(6);
-    expect(walledBody.expiresAt).toBe(expiresAt.toISOString());
-    expect(walledBody.joinBlocked).toBe(true);
-    expect(walledBody.joinHint).toBeUndefined();
-
-    // When the hold lapses the same $6 is a plain take: the tile was never
-    // closed, it was held.
-    await prisma.claimReservation.updateMany({ where: { elementId: T9 }, data: { status: "EXPIRED" } });
-    const after = await elementGET(req("/api/elements/TST9"), { params: { sym: "TST9" } } as never);
-    expect(((await after.json()) as { takeHold: unknown }).takeHold).toBeNull();
-    expect((await holdProbe("TST9", "198.51.100.12")(6, "after")).status).toBe(200);
+    // The tile is claimed at $5, so a newcomer's floor is $6 — not the $5 that
+    // used to join below the leader.
+    const post = probe("TST9", "198.51.100.11");
+    const refused = await post(5, "low");
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as { code?: string; error?: string; takeLead?: number };
+    expect(body.code).toBe("BELOW_FLOOR");
+    expect(body.error).toContain("$6");
+    expect(body.takeLead).toBe(6);
+    // The amount the refusal named is one the server accepts.
+    expect((await post(6, "ok")).status).toBe(200);
   });
 
-  it("hints an amount that still lands under a hold, and it lands (R09-1)", async () => {
-    const owner = await prisma.startup.upsert({
-      where: { domain: "rt-hold-b.dev" },
-      create: { domain: "rt-hold-b.dev", title: "Hold B", pitch: "hold fixture pitch", url: "https://rt-hold-b.dev", logoUrl: "x" },
-      update: {},
-    });
-    const leader = await prisma.startup.findUniqueOrThrow({ where: { domain: "ct-a.dev" } });
-    const quote = await prisma.payment.create({
-      data: { elementId: T6, startupId: owner.id, amountUsd: 5001, path: "TAKE", provider: "DEV", idempotencyKey: key(), status: "PENDING" },
-    });
-    await prisma.claimReservation.create({
-      data: {
-        elementId: T6,
-        startupId: owner.id,
-        paymentId: quote.id,
-        quotedLeaderTotal: 5000,
-        quotedLeaderStartupId: leader.id,
-        reservedTotal: 5001,
-        expiresAt: new Date(Date.now() + 10 * 60_000),
-      },
-    });
-
-    const post = holdProbe("TST6", "198.51.100.13");
-    // Aiming at #1 is exactly what the hold refuses.
-    const refused = await post(5001, "aim");
-    expect(refused.status).toBe(409);
-    const refusedBody = (await refused.json()) as { code?: string; joinHint?: number; joinBlocked?: boolean };
-    expect(refusedBody.code).toBe("RESERVATION_CONFLICT");
-    expect(refusedBody.joinBlocked).toBeUndefined();
-    expect(refusedBody.joinHint).toBe(5);
-    // The amount the server just printed is one the server accepts.
-    expect((await post(refusedBody.joinHint as number, "hint")).status).toBe(200);
+  it("accepts two equal takes at the same moment — no hold refuses the second (R09-1 removed)", async () => {
+    const post = probe("TST6", "198.51.100.13");
+    // Both newcomers quote the same takeover price ($5,000 leader + $1). Both
+    // are accepted; the ledger's tie order decides #1 at settlement.
+    expect((await post(5001, "race-a")).status).toBe(200);
+    expect((await post(5001, "race-b")).status).toBe(200);
   });
 
   it("keeps a fully reversed row off the board it can no longer lead (R09-4)", async () => {
@@ -510,7 +459,8 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
         headers: { "Content-Type": "application/json", "x-forwarded-for": ip },
         body: JSON.stringify({
           elementSym: "TST6",
-          amountUsd: 5,
+          // TST6's leader holds 5,000: a newcomer must clear the takeover price.
+          amountUsd: 5001,
           idempotencyKey,
           startup: { title: "R16", pitch: "consent probe pitch", url: "https://rt-r16-a.dev", linkType: "product" },
           ...body,

@@ -221,7 +221,7 @@ describe("the gates, statically (R07-1, R07-2, R07-6)", () => {
     expect(checkout).toMatch(/const money = checkMoneyPath\(\)/);
     expect(checkout).toMatch(/if \(!money\.ok\) \{[\s\S]{0,900}status: 503/);
     // Before the payment row is read, so a refused sale is refused without a
-    // query, and before the quote transaction, so no reservation is made for
+    // query, and before the quote transaction, so no payment row is written for
     // money that cannot be settled.
     expect(checkout.indexOf("checkMoneyPath()")).toBeLessThan(
       checkout.indexOf("prisma.payment.findUnique({ where: { idempotencyKey } })")
@@ -264,13 +264,18 @@ describe("the partial-configuration warning is reachable where it matters (R07-5
     // Behavioural: in production with one key set, the pre-fix order returned
     // the 403 before reaching the warning, so the operator's log — the only
     // channel that names the cause — stayed empty.
+    //
+    // The route is imported BEFORE the environment is shaped: its module graph
+    // reaches Prisma, whose client loads `.env` into `process.env` on import.
+    // Shaping first let that load put a real STRIPE_WEBHOOK_SECRET back and the
+    // pair looked complete — the shape must be applied last, and read per call.
+    const { POST } = await import("../app/api/checkout/route");
     for (const [k, v] of Object.entries(
       shape({ NODE_ENV: "production", VERCEL_ENV: "production", STRIPE_SECRET_KEY: "sk_live_x" })
     )) {
       set(k, v);
     }
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { POST } = await import("../app/api/checkout/route");
     const call = () => POST(new NextRequest("http://localhost/api/checkout", { method: "POST", body: "{}" }) as never);
 
     const paused = await call();

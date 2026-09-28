@@ -58,7 +58,7 @@ describe("the form cannot submit silently (R06-1)", () => {
   it("announces a human check that never loaded, once (R06-6)", () => {
     expect(MODALS).toMatch(/onLoadFail=\{\(\) => setHumanCheckFailed\(true\)\}/);
     expect(MODALS).toMatch(/onToken=\{\(t\) => \{[\s\S]{0,200}if \(t\) setHumanCheckFailed\(false\);/);
-    expect(MODALS).toMatch(/humanCheckFailed \? CHECKOUT_MSG\.humanCheck/);
+    expect(MODALS).toMatch(/humanCheckFailed\s*\?\s*CHECKOUT_MSG\.humanCheck/);
     // The widget prints it; the form only announces it (R06-6).
     expect(WIDGET).toMatch(/onLoadFail\?: \(\) => void;/);
     expect(WIDGET).toMatch(/setFailed\(true\);\s*\n?\s*fail\.current\?\.\(\);/);
@@ -90,7 +90,7 @@ describe("a refused response becomes a sentence (R06-3, R06-4, R06-7, R06-9)", (
   it("keeps the live floor the server quoted, and offers it back (R06-3)", () => {
     // The refusal sets `priceMoved` for a board that actually moved, and the
     // amount banner quotes that same live figure.
-    expect(MODALS).toMatch(/priceMoved != null \? `Price moved to \$\$\{priceMoved\}\.`/);
+    expect(MODALS).toMatch(/priceMoved != null\s*\?\s*`Price moved to \$\$\{priceMoved\}\.`/);
     expect(MODALS).toMatch(/Price moved to \$\{priceMoved\} — continue\?/);
     // Accepting it is a buyer edit: the field becomes theirs, so the live quote
     // stops rewriting it (lib/stakeQuote.ts) and the next submit is a new claim
@@ -136,8 +136,8 @@ describe("the route's gate order (R06-2, R06-9, R06-10)", () => {
 
   it("answers a replayed key with the envelope the first call would have (R06-9)", () => {
     const replay = ROUTE.slice(at("async function idempotentReplay"), at("async function postCheckout("));
-    expect(replay).toMatch(/provider: getProviderMode\(\),[\s\S]{0,400}guaranteedTake: true/);
-    expect(replay).toMatch(/held\.expiresAt\.toISOString\(\)/);
+    expect(replay).toMatch(/provider: getProviderMode\(\),/);
+    expect(replay).not.toMatch(/reservation|guaranteedTake|claimReservation/);
     // A key reused for a different claim is still a conflict.
     expect(replay).toMatch(/code: "IDEMPOTENCY_CONFLICT"/);
     // A row whose checkout already ended says so instead of opening nothing.
@@ -163,12 +163,12 @@ describe("the route's gate order (R06-2, R06-9, R06-10)", () => {
   });
 
   it("does not promise a hold the server may never have created (R06-8)", () => {
-    // The cancel URL carries no amount and no reservation id: the page may
+    // The cancel URL carries no amount and no quote id: the page may
     // acknowledge the claim, never a figure or a hold it cannot verify.
     const block = PAGE.slice(PAGE.indexOf("if (canceled) {"), PAGE.indexOf("if (elParam) {"));
     expect(block).not.toMatch(/hold|reserv|\$\d/i);
-    // The form, which re-reads its own reservation, carries the detail.
     expect(MODALS).toContain("CHECKOUT_MSG.canceled");
     expect(CHECKOUT_MSG.canceled).toMatch(/nothing was charged/);
+    expect(CHECKOUT_MSG.canceled).not.toMatch(/reserv|15 min|hold/i);
   });
 });

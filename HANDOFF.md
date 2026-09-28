@@ -550,10 +550,10 @@ newest production deployment, not GitHub's commit status (see the traps below).
       keeps answering 200 on purpose, so the report cannot be muted before the
       divergent case ever fires. 5 integration tests in
       `lib/reconcile.test.ts` assert the status follows `ok`, not a fixed 200.
-- [ ] **No `PENDING` expiry sweeper** (reservations self-expire, so none is
-      needed yet). Money reversals are now handled — see the 2026-09-11 entries
-      above. The `CANCELED` enum value is still never written (stale Phase 2
-      comment).
+- [ ] **No `PENDING` expiry sweeper** — stale rows are closed by
+      `/api/jobs/abandoned-checkouts` on the tick, and there is no hold left to
+      self-expire (reservations were removed 2026-09-23). Money reversals are
+      now handled — see the 2026-09-11 entries above.
 - [x] **Fixed 2026-09-11** — Grid/stats failure honesty: a blocked API must show
       error panels, never a fake all-`Unclaimed $5` / zeros. The bug was wider
       than this line implied. With `/api/stats` down, `app/page.tsx` rendered

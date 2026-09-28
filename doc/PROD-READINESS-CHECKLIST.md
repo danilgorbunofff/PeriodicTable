@@ -84,6 +84,13 @@ BASE_URL=http://localhost:3100 bash scripts/rehearse-release.sh live
 - [x] Reclaim $2 by former leader → restores #1 at $10 (cumulative) — ✅ 2026-09-11
 - [x] Same `idempotencyKey` + same payload → returns ORIGINAL `paymentId`; different payload → `409 IDEMPOTENCY_CONFLICT` — ✅ 2026-09-11
 - [x] Expired reservation (server `RESERVATION_TTL_MS=2000`, sleep 3s) settles as ordinary stake, no crown — ✅ 2026-09-11
+
+> ⚠️ **2026-09-23 — the take-hold items above are superseded.** Reservations were
+> removed (`0014_drop_reservations`): a newcomer on a claimed element now pays the
+> takeover price (no $5 joins below #1), nothing holds an element between checkout
+> and payment, and two equal payments may settle at the same moment — the earlier
+> stake keeps #1. `scripts/rehearse-release.sh` now asserts the new rules, and
+> `RESERVATION_TTL_MS` no longer exists.
 - [x] Provider outage (Whop keys set, API down) → `502`, NO `checkoutUrl` (never a dead URL) — ✅ **2026-09-12, observed live on production, not simulated.** This was the one gate the local rehearsal skips (it needs `WHOP_API_KEY` set, which flips the provider out of dev mode); it is now closed against the real provider instead: with live keys in place, `POST /api/checkout` returned **`502 {"error":"Payment provider unavailable. Try again."}`** with **no `checkoutUrl` in the body**, and the `Payment` row written inside the tx stayed **`pending` with an empty `providerCheckoutUrl`** — never a dead URL handed to a buyer, which is the whole point of the item. The provider-side cause is the `401` permission failure recorded in §6 (see the third launch blocker).
 
 > ✅ **2026-09-11 — live rehearsal is green: 18 passed, 1 skipped** (the skip above). Evidence per gate is the script's own output; run as documented under §3b. Two things are required to reproduce it, and both are easy to get wrong:

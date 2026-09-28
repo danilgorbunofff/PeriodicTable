@@ -100,14 +100,6 @@ export type ElementDetail = {
   tier: string;
   pool: number;
   count: number;
-  /**
-   * The live take quote holding this element, when one exists (R09-1). It is
-   * public — the amount and the end time only, never who holds it — because on
-   * a floor-priced tile the hold is the reason every reachable amount is
-   * refused, so a buyer needs to see it before bidding. `null`/absent means
-   * nothing is held.
-   */
-  takeHold?: { reservedTotal: number; expiresAt: string } | null;
   stakes: {
     stakeId: string;
     domain: string;
@@ -197,7 +189,6 @@ export type CheckoutResponse = {
   paymentId: string;
   checkoutUrl: string;
   provider: string;
-  reservation?: { reservedTotal: number; expiresAt: string; guaranteedTake: boolean };
 };
 
 /** Report POST response. */

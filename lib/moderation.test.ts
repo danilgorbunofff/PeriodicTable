@@ -79,8 +79,6 @@ afterAll(async () => {
   // domain-scoped audit delete below cannot see them (R10-5).
   await prisma.emailAddress.deleteMany({ where: { email: { in: ["modvis-t@example.com", "modhide-t@example.com"] } } });
   await prisma.auditLog.deleteMany({ where: { detail: { in: ["modvis-t@example.com", "modhide-t@example.com"] } } });
-  // Reservations before payments — the FK is restrictive.
-  await prisma.claimReservation.deleteMany({ where: { elementId: T7 } });
   await prisma.providerEvent.deleteMany({ where: { payment: { startup: { domain: { in: DOMAINS } } } } });
   await purgeSettledOutbox(prisma, { startup: { domain: { in: DOMAINS } } });
   await prisma.activityLog.deleteMany({ where: { domain: { in: DOMAINS } } });
@@ -158,9 +156,9 @@ describe.skipIf(!hasDb)("moderation enforcement", () => {
     // The charge must equal the advertised price. With modhide-t.dev hidden,
     // the displayed take-lead price is derived from the visible leader (12) —
     // so paying that price must actually take the lead at that same price.
-    // Pricing off the hidden 40 instead classified the advertised amount as a
-    // mere join: no reservation, and the buyer's money would not have bought
-    // the lead the page promised.
+    // Pricing off the hidden 40 instead would refuse the advertised amount as a
+    // cheap join, and the buyer's money would not have bought the lead the page
+    // promised.
     const advertised = (
       (await (await elementGET(req("/api/elements/TST7"), { params: { sym: "TST7" } } as never)).json()) as {
         prices: { takeLead: number };
@@ -181,8 +179,7 @@ describe.skipIf(!hasDb)("moderation enforcement", () => {
       })
     );
     expect(buy.status).toBe(200);
-    const bought = (await buy.json()) as { paymentId: string; reservation?: { reservedTotal: number } };
-    expect(bought.reservation?.reservedTotal).toBe(advertised);
+    const bought = (await buy.json()) as { paymentId: string };
     const boughtPayment = await prisma.payment.findUniqueOrThrow({ where: { id: bought.paymentId } });
     expect(boughtPayment.path).toBe("TAKE");
     expect(boughtPayment.amountUsd).toBe(advertised);

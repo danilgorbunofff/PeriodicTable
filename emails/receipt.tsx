@@ -1,8 +1,8 @@
 /** Receipt email template (copy lock).
  * Subject: `You're #1 in C (Carbon) 🎉` — and at any other rank
  * `You're #2 in C (Carbon)`, because a receipt reports the rank the stake
- * actually settled at (R09-2: a lapsed take is applied at its stale amount and
- * must not be receipted as the #1 it was quoted for).
+ * actually settled at (R09-2: a payment that loses a same-moment race must not
+ * be receipted as the #1 it was aimed at).
  */
 import type { ReceiptLegal } from "../lib/legal";
 import { esc } from "./escape";
@@ -13,10 +13,6 @@ export type ReceiptTemplateProps = {
   amountUsd: number;
   rank: number;
   domain: string;
-  /** Set when the payment carried a take quote that expired before it settled:
-   * the figure the quote held, so the receipt can say the rank is the board's
-   * answer rather than the quote's. */
-  lapsedTakeTotal?: number | null;
   /** R10-4: set when this payment added to a stake the buyer already held, so
    * the mail can state both the charge and the resulting position instead of
    * letting "$3" read as the whole stake. */
@@ -41,11 +37,6 @@ export function receiptSubject(p: { elementSymbol: string; elementName: string; 
 
 export function receiptHtml(p: ReceiptTemplateProps) {
   const headline = receiptSubject({ elementSymbol: p.elementSymbol, elementName: p.elementName, rank: p.rank });
-  const lapse = p.lapsedTakeTotal
-    ? `<p style="font-size:14px;color:#a4601a;background:#fff8e6;border-radius:12px;padding:12px;line-height:1.5;margin:12px 0 0;">
-        Your $${p.lapsedTakeTotal} take quote lapsed before this payment cleared, so it settled as an ordinary stake at <strong>#${p.rank}</strong>.
-      </p>`
-    : "";
   // R10-4: a reclaim payment is charged as the difference, so the receipt has to
   // say what the charge did to the position — one line per fact, never a
   // substituted number.
@@ -75,7 +66,7 @@ export function receiptHtml(p: ReceiptTemplateProps) {
       <p style="font-size:15px;color:#444;line-height:1.5;">
         ${stake}
         Every click from your tile is a verified redirect — watch 🟢 clicks delivered climb on your profile.
-      </p>${lapse}${legal}
+      </p>${legal}
       <a href="${p.viewUrl}" style="display:inline-block;margin-top:16px;background:#FFCE4B;color:#111;font-weight:800;padding:14px 28px;border-radius:999px;text-decoration:none;font-size:15px;">View your spot →</a>
       <p style="font-size:12px;color:#999;margin-top:20px;">
         it&apos;s an ad buy, not a bet ·

@@ -86,9 +86,6 @@ export async function sweepAbandonedCheckouts(
     // `failedAt` is the only "closed without money" timestamp this table has
     // (there is no canceledAt), and it is what settle's FAILED branch writes:
     // a report that reads it must not read a null as "still open".
-    // Any reservation the row held is left to expire on its own TTL — an
-    // expired hold is already a no-op for quoting and settling, and deleting
-    // rows here would edit history the audit trail refers to.
     const updated = await prisma.payment.updateMany({
       where: { id: row.id, status: PaymentStatus.PENDING },
       data: { status: PaymentStatus.CANCELED, failedAt: now },

@@ -26,9 +26,9 @@ export const AUDIT_ACTIONS = [
   "PROFILE_MODERATED",
   "PAYMENT_REVERSED",
   "CHECKOUT_ABANDONED",
-  /** R09-2: a payment whose take quote had expired settled as an ordinary
-   *  stake. Reserved for the downgrade itself — the rank it landed at rides in
-   *  `detail` as `take-lapsed:<rank>`. */
+  /** R09-2 historical: the reservation-era downgrade (a take whose 15-minute
+   *  quote had expired settled as an ordinary stake). No longer written — holds
+   *  were removed — but kept so an operator can still filter the old rows. */
   "TAKE_LAPSED",
   /** R09-7: a dethroned holder could not be told it lost #1 — no address on
    *  the startup and none on the funding payment. */
