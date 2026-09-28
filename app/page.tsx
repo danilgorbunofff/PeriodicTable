@@ -274,7 +274,7 @@ function HomeInner() {
   };
 
   return (
-    <div id="app-root" className="stage-shell relative h-screen overflow-hidden text-ink">
+    <div id="app-root" className="stage-shell relative h-screen overflow-hidden text-ink supports-[height:100dvh]:h-[100dvh]">
       <BackgroundSymbols />
       <TableCamera focusId={selected?.id ?? null}>
         <div className="periodic-object p-2">
@@ -300,7 +300,7 @@ function HomeInner() {
       </TableCamera>
 
       {/* wordmark + hero + search */}
-      <div className="absolute left-[18px] top-[18px] z-[var(--z-cards)] flex max-w-[400px] flex-col gap-2.5">
+      <div className="absolute left-[18px] top-[18px] z-[var(--z-cards)] flex max-w-[400px] max-h-[calc(100dvh-36px)] flex-col gap-2.5 overflow-y-auto">
           <div className="w-fit rounded-full bg-white px-[18px] py-2 font-display text-[22px] font-bold shadow-float">
             <span>periodictable<span className="text-money">.lol</span></span>
           </div>
@@ -330,13 +330,13 @@ function HomeInner() {
           under the legal links and swallow their clicks. 72px clears both the
           FABs (62px on mobile) and the footer (51px on desktop). */}
       {tileState === "stale" && (
-        <div className="absolute bottom-[72px] left-1/2 z-[var(--z-cards)] w-max max-w-[calc(100%-24px)] -translate-x-1/2">
+        <div className="absolute bottom-[calc(72px+var(--safe-b))] left-1/2 z-[var(--z-cards)] w-max max-w-[calc(100%-24px)] -translate-x-1/2">
           <LiveDataNotice state={tileState} onRetry={retryLiveData} />
         </div>
       )}
 
       {/* activity — desktop (minimize button collapses it to the same FAB as mobile) */}
-      <div className="absolute bottom-[18px] left-[18px] z-[var(--z-cards)] hidden md:block">
+      <div className="absolute bottom-[calc(18px+var(--safe-b))] left-[18px] z-[var(--z-cards)] hidden md:block">
         {actMin ? (
           <button
             aria-label="Live activity"
@@ -364,19 +364,19 @@ function HomeInner() {
             }
             setMobileActivityOpen(!mobileActivityOpen);
           }}
-          className="absolute bottom-[18px] left-[18px] z-[var(--z-cards)] h-11 w-11 rounded-full bg-white shadow-float grid place-items-center"
+          className="absolute bottom-[calc(18px+var(--safe-b))] left-[18px] z-[var(--z-cards)] h-11 w-11 rounded-full bg-white shadow-float grid place-items-center"
         >
           <ActivityDot dot={activityDot} />
         </button>
         {mobileActivityOpen && (
-          <div className="absolute inset-x-3 bottom-3 z-[var(--z-rail)] max-h-[70vh] overflow-auto">
+          <div className="absolute inset-x-3 bottom-[calc(12px+var(--safe-b))] z-[var(--z-rail)] max-h-[70dvh] overflow-auto">
             <ActivityCard rows={activity} state={activityState} onRetry={retryLiveData} fluid onClose={() => setMobileActivityOpen(false)} />
           </div>
         )}
       </div>
 
       {/* rail — desktop (minimize button collapses it to the same FAB as mobile) */}
-      <div className="absolute bottom-[18px] right-[18px] z-[var(--z-rail)] hidden w-[385px] max-h-[calc(100vh-36px)] lg:block">
+      <div className="absolute bottom-[calc(18px+var(--safe-b))] right-[18px] z-[var(--z-rail)] hidden w-[385px] max-h-[calc(100vh-36px)] lg:block">
         {railMin ? (
           <div className="flex justify-end">
             <button
@@ -410,13 +410,13 @@ function HomeInner() {
               if (!mobileRailOpen) setMobileActivityOpen(false);
               setMobileRailOpen(!mobileRailOpen);
             }}
-            className="absolute bottom-[18px] right-[18px] z-[var(--z-rail)] h-11 w-11 rounded-full bg-cta text-ink shadow-float grid place-items-center text-lg font-display font-bold"
+            className="absolute bottom-[calc(18px+var(--safe-b))] right-[18px] z-[var(--z-rail)] h-11 w-11 rounded-full bg-cta text-ink shadow-float grid place-items-center text-lg font-display font-bold"
           >
             ⚗️
           </button>
         )}
         {(selected || mobileRailOpen) && (
-          <div className="absolute inset-x-3 bottom-3 z-[var(--z-rail)] max-h-[70vh] overflow-auto">
+          <div className="absolute inset-x-3 bottom-[calc(12px+var(--safe-b))] z-[var(--z-rail)] max-h-[70dvh] overflow-auto">
             <RailShell>
               {selected ? (
                 <TerritoryView

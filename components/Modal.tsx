@@ -97,10 +97,10 @@ export function Modal({
   if (!open || !mounted) return null;
   const sizeClass =
     size === "md"
-      ? "max-w-md max-h-[85vh] overflow-auto"
-      : "max-w-[460px] h-[min(720px,85vh)] flex flex-col overflow-hidden";
+      ? "max-w-md max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] overflow-auto"
+      : "max-w-[460px] h-[min(720px,85vh)] supports-[height:100dvh]:h-[min(720px,85dvh)] flex flex-col overflow-hidden";
   return createPortal(
-    <div className="fixed inset-0 z-[var(--z-modal)] grid place-items-center p-4">
+    <div className="fixed inset-0 z-[var(--z-modal)] grid items-end sm:items-center justify-items-center p-4 pb-[calc(16px+var(--safe-b))] sm:pb-4">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-modal-backdrop" onClick={() => onCloseRef.current()} />
       <div
         ref={dialogRef}

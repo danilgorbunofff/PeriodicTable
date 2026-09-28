@@ -12,6 +12,9 @@
   --z-skip: 65;
   --z-modal: 70;
   --z-toast: 80;
+  /* Home-indicator inset for the bottom-anchored chrome (0 unless the viewport
+     opts into `viewport-fit=cover`; the fallback keeps calc() valid regardless). */
+  --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
 html,

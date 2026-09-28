@@ -45,7 +45,7 @@ export function HeroCard({
 
   if (folded) {
     return (
-      <Card className="w-[179px] max-w-[calc(100vw-36px)] rounded-[18px] px-3 py-3 shadow-float overflow-hidden transition-[width] duration-200 ease-out">
+      <Card className="w-[179px] [@media(pointer:coarse)]:w-auto max-w-[calc(100vw-36px)] rounded-[18px] px-3 py-3 shadow-float overflow-hidden transition-[width] duration-200 ease-out">
         <div className="flex items-center gap-[9px] flex-nowrap animate-hero-in" id="hero-pill-body">
           <IconBtn label="Board" onClick={onBoard}>🏆</IconBtn>
           <IconBtn label="How it works" onClick={onHow}>i</IconBtn>
@@ -69,21 +69,26 @@ export function HeroCard({
         <h1 className="font-display text-base leading-[1.15] font-bold whitespace-nowrap max-[440px]:whitespace-normal">
           Put your startup on the table. Literally.
         </h1>
-        <div className="mt-[13px] flex items-center gap-[9px] flex-nowrap">
-          <ChunkyButton className="text-sm px-[18px] h-10 whitespace-nowrap shrink-0 !rounded-full !border-b-[3px] [@media(pointer:coarse)]:min-h-[44px]" onClick={onClaim}>
+        <div className="mt-[13px] flex flex-wrap items-center gap-[9px]">
+          <ChunkyButton className="text-sm px-[18px] h-10 whitespace-nowrap shrink-0 !rounded-full !border-b-[3px] [@media(pointer:coarse)]:min-h-[44px] max-[440px]:w-full" onClick={onClaim}>
             {`Claim an element · from $${MIN_STAKE}`}
           </ChunkyButton>
-          <IconBtn label="Board" onClick={onBoard}>🏆</IconBtn>
-          <IconBtn label="How it works" onClick={onHow}>i</IconBtn>
-          <IconBtn label="Search" active={searchOpen} onClick={onSearchToggle} id="chrome-search-toggle">🔍</IconBtn>
-          <IconBtn
-            label="Fold panel"
-            aria-expanded={true}
-            aria-controls="hero-pill-body"
-            onClick={() => setFolded(true)}
-          >
-            <FoldChevron open={true} />
-          </IconBtn>
+          {/* The icon row wraps under the CTA when the card is too narrow (the
+              old nowrap row was clipped by the card's overflow-hidden: the fold
+              chevron on desktop, two to three icons on a phone). */}
+          <div className="flex items-center gap-[9px] max-[440px]:w-full max-[440px]:justify-center">
+            <IconBtn label="Board" onClick={onBoard}>🏆</IconBtn>
+            <IconBtn label="How it works" onClick={onHow}>i</IconBtn>
+            <IconBtn label="Search" active={searchOpen} onClick={onSearchToggle} id="chrome-search-toggle">🔍</IconBtn>
+            <IconBtn
+              label="Fold panel"
+              aria-expanded={true}
+              aria-controls="hero-pill-body"
+              onClick={() => setFolded(true)}
+            >
+              <FoldChevron open={true} />
+            </IconBtn>
+          </div>
         </div>
       </div>
     </Card>

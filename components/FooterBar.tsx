@@ -11,7 +11,7 @@ import { LEGAL_LINKS } from "../lib/legal";
  */
 export function FooterBar() {
   return (
-    <div className="absolute z-[var(--z-cards)] bottom-[18px] left-1/2 -translate-x-1/2 max-md:bottom-5">
+    <div className="absolute z-[var(--z-cards)] bottom-[calc(18px+var(--safe-b))] left-1/2 -translate-x-1/2 max-md:bottom-[calc(20px+var(--safe-b))]">
       <nav aria-label="Legal" className="bg-white/90 backdrop-blur rounded-full shadow-float px-4 py-1.5 text-[11px] font-bold text-mutedink flex items-center gap-3 whitespace-nowrap max-md:px-3 max-md:gap-2 [@media(pointer:coarse)]:py-0">
         {/* The min-h-[44px] targets make the pill 44px tall on touch and no
             taller: the py is dropped under the same media query so the pill's

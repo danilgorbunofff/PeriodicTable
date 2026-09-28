@@ -273,12 +273,12 @@ export default async function Profile({ params }: { params: { domain: string } }
           })}
         </div>
 
-        <div className="mt-6 rounded-card p-6 flex items-center gap-4 flex-wrap shadow-card" style={{ background: "linear-gradient(180deg,#FFEFC1,#FFCE4B)" }}>
+        <div className="mt-6 rounded-card p-6 flex flex-col items-center gap-3 text-center shadow-card sm:flex-row sm:text-left" style={{ background: "linear-gradient(180deg,#FFEFC1,#FFCE4B)" }}>
           <div>
             <div className="font-display text-lg font-bold">Start your own empire</div>
             <div className="text-sm">{`Grab a seat on any element — from $${MIN_STAKE}.`}</div>
           </div>
-          <Link href="/" className="ml-auto bg-visit text-white font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm">Claim</Link>
+          <Link href="/" className="bg-visit text-white font-extrabold rounded-btn px-5 h-11 leading-[44px] text-sm sm:ml-auto">Claim</Link>
         </div>
         <div className="text-center text-[11px] text-mutedink mt-4">
           Public page · standings are live. Anyone can list any link — a listing doesn&apos;t imply the company added it.

@@ -42,9 +42,12 @@ export function Avatar({
     <img
       src={href}
       alt=""
+      // A native image drag (long-press on touch, mouse drag) would cancel the
+      // board's pointer/touch gestures, so the icon must never start one.
+      draggable={false}
       style={dims}
       onError={() => setFailed(true)}
-      className={`shrink-0 ${rounded} ${className}`}
+      className={`shrink-0 select-none [-webkit-user-drag:none] ${rounded} ${className}`}
     />
   );
 }
