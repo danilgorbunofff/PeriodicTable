@@ -121,6 +121,10 @@ export function CheckoutPreview({
   const [priceMoved, setPriceMoved] = useState<number | null>(null);
   const [waitErr, setWaitErr] = useState<string | null>(null);
   const [waitBusy, setWaitBusy] = useState(false);
+  // The app state holds the amount as a number, but the field has to hold the
+  // buyer's raw text: a cleared field is mid-edit, not a $0 stake, and a
+  // controlled numeric value would snap it back to "0".
+  const [amountText, setAmountText] = useState(() => (amount ? String(amount) : ""));
   // Token handed to us by the widget's callback. Preferred over scraping the
   // hidden field: the DOM can hold a stale or empty input from a previous render.
   const turnstileRef = useRef<string | null>(null);
@@ -226,6 +230,9 @@ export function CheckoutPreview({
   // first-join floor, a tie, a taken slot), so it marks the amount field the
   // same way the shape checks above mark theirs.
   const badAmount = clientErr != null;
+  // An empty field is mid-edit, so it stays quiet live like the other empty
+  // required fields and only marks once a submit was tried.
+  const showAmount = badAmount && (submitTried || amountText !== "" || serverField?.field === "amount");
   // All-at-once gate: empty required fields stay quiet live (bad* is false on
   // "") but join the error map once a submit was tried, so one click marks
   // every missing field instead of one per click.
@@ -280,6 +287,12 @@ export function CheckoutPreview({
     if (Math.round(amount) === liveAmount) return;
     onReconcile(liveAmount);
   }, [open, amountMinted, liveAmount, amount, onReconcile]);
+  // App-driven writes (minted reconciliation, chips, "Use $N") land in `amount`,
+  // so mirror them back into the text — unless the write is just the parse of
+  // what the buyer typed, in which case the raw text wins ("", "007").
+  useEffect(() => {
+    setAmountText((t) => (Number(t) === amount ? t : amount ? String(amount) : ""));
+  }, [amount]);
 
   if (!elSafe) return null;
   const effectiveTitle = title.trim() || domain || "";
@@ -593,11 +606,16 @@ export function CheckoutPreview({
             <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-mutedink">$</span>
             <IcyInput
               id="co-amount" name="co-amount" type="number" min={1} required
-              value={amount}
-              onChange={(e) => { onAmount(Number(e.target.value)); setServerField(null); }}
-              aria-invalid={badAmount}
-              aria-describedby={badAmount ? "co-amount-error" : undefined}
-              className={badAmount ? `pl-8 ${INVALID_FIELD}` : "pl-8"}
+              value={amountText}
+              onChange={(e) => {
+                const v = e.target.value;
+                setAmountText(v);
+                onAmount(v === "" ? 0 : Number(v) || 0);
+                setServerField(null);
+              }}
+              aria-invalid={showAmount}
+              aria-describedby={showAmount ? "co-amount-error" : undefined}
+              className={showAmount ? `pl-8 ${INVALID_FIELD}` : "pl-8"}
             />
           </div>
         </div>
@@ -633,7 +651,7 @@ export function CheckoutPreview({
           );
         })}
       </div>
-      {badAmount && <div id="co-amount-error" className="mt-2 text-xs text-red-700 font-bold">{clientErr}</div>}
+      {showAmount && <div id="co-amount-error" className="mt-2 text-xs text-red-700 font-bold">{clientErr}</div>}
       {serverErr && <div className="mt-2 text-xs text-red-700 font-bold">{serverErr}</div>}
       <input
         type="text"
