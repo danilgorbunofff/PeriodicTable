@@ -197,7 +197,7 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     expect(missing.status).toBe(404);
     expect(((await missing.json()) as { error?: string }).error).toBeTruthy();
   });
-  it("checkout enforces 5 attempts per IP per hour, and replays a key for free (R06-2)", async () => {
+  it("does not cap new attempts per IP, and replays a key for free (R06-2)", async () => {
     const stamp = Date.now();
     const probe = (i: number | string, idempotencyKey: string, extra: Record<string, unknown> = {}) =>
       checkoutPOST(
@@ -207,7 +207,7 @@ describe.skipIf(!hasDb)("read API contracts", () => {
           body: JSON.stringify({
             elementSym: "TST6",
             // TST6's leader holds 5,000, so a newcomer's floor is the takeover
-            // price (lib/pricing.ts) — the throttle probe has to clear it.
+            // price (lib/pricing.ts).
             amountUsd: 5001,
             attest: true,
             idempotencyKey,
@@ -222,8 +222,7 @@ describe.skipIf(!hasDb)("read API contracts", () => {
         })
       );
 
-    // A mistyped receipt address is refused by the shape checks *before* the
-    // throttle, so it costs the buyer none of their hourly attempts (R06-2).
+    // A mistyped receipt address is still refused by the pure shape checks.
     const mistyped = await probe("bad", key(), { email: "a@b" });
     expect(mistyped.status).toBe(400);
     expect(((await mistyped.json()) as { field?: string }).field).toBe("email");
@@ -232,19 +231,18 @@ describe.skipIf(!hasDb)("read API contracts", () => {
     const first = await probe(0, firstKey);
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as Record<string, unknown>;
+    // The per-IP cap was removed (2026-09-28): many NEW attempts in a row all
+    // pass. Abuse control is the $5 floor, Turnstile and the payment gate.
     const statuses = [first.status];
-    for (let i = 1; i < 6; i++) statuses.push((await probe(i, key())).status);
-    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+    for (let i = 1; i < 8; i++) statuses.push((await probe(i, key())).status);
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 200, 200, 200]);
 
-    // The throttle must not swallow a retry of a payment the buyer already
-    // owns: the key resolves before the limiter, a replay writes nothing, and
-    // the answer is the envelope the first call returned (R06-2, R06-9).
+    // A retry of a payment the buyer already owns still replays: the key
+    // resolves first and the answer is the envelope the first call returned
+    // (R06-2, R06-9).
     const replay = await probe(0, firstKey);
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
-
-    // …while a genuinely new attempt is still refused.
-    expect((await probe("after", key())).status).toBe(429);
   });
   it("prices any spelling of a symbol as the one canonical element (R04-4)", async () => {
     // `Hbar` is authored mixed-case in the inventory, so upper-casing it would

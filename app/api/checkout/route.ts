@@ -7,7 +7,6 @@ import { isEmail, validateCheckoutInput } from "@/lib/validate";
 import { CHECKOUT_MSG } from "@/lib/checkoutFace";
 import { findElementBySymbol } from "@/lib/elements";
 import { createStripeCheckoutSession, getProviderMode, stripePartiallyConfigured } from "@/lib/stripe";
-import { rateLimitAsync } from "@/lib/rateStore";
 import { clientIp } from "@/lib/ip";
 import { verifyTurnstile, honeypotCaught, attestValid } from "@/lib/abuse";
 import { consentRecord, attestVersionRefusal } from "@/lib/consent";
@@ -251,30 +250,18 @@ async function postCheckout(req: NextRequest) {
 
   // Idempotency FIRST (P1-03): resolve the key before any mutable operation.
   // Matching retries return the stored payment (+ resumable URL); key reuse
-  // with a different payload is rejected. The lookup also precedes the rate
-  // limiter (R06-2): a replay writes nothing, so it must not spend the buyer's
-  // hourly attempt budget — otherwise an interrupted buyer who retries the key
-  // of a payment they already own is answered 429 and never reaches their row.
+  // with a different payload is rejected. A replay writes nothing, so it must
+  // never be refused by anything downstream — an interrupted buyer retrying the
+  // key of a payment they already own must reach their own row.
   const byKey = await prisma.payment.findUnique({ where: { idempotencyKey } });
   if (byKey) {
     return await idempotentReplay(byKey, fingerprint, req.nextUrl.origin);
   }
 
-  // Abuse: 5 NEW checkout attempts / IP / hour (spec 03). 429, never 500. The
-  // bot gates and the pure shape checks run first, so the throttle sits in
-  // front of every row-creating path and behind none that only reads.
-  //
-  // Phase 14: fails CLOSED on a rate-store outage (R14-2). This is the money
-  // path — an outage that silently lifts the only per-source bound on
-  // row-creating requests is a worse answer than a retryable 429.
-  if (
-    !(await rateLimitAsync(`checkout:${ip}`, 5, 3_600_000, {
-      onStoreError: "closed",
-    }))
-  ) {
-    return NextResponse.json({ error: "Too many checkout attempts. Try again later." }, { status: 429 });
-  }
-
+  // No per-IP checkout cap (product decision, 2026-09-28): the $5 floor,
+  // Turnstile, the honeypot and the payment gate are the abuse controls; the
+  // cap only ever throttled a legitimate tester sharing one bucket with their
+  // own walkthrough. The dev-only simulator keeps its own budget.
   const element = await prisma.element.findUnique({ where: { symbol: elementSymbol } });
   if (!element) return NextResponse.json({ error: "Element not found." }, { status: 404 });
 

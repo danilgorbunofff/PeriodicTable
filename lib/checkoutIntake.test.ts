@@ -125,13 +125,14 @@ describe("the route's gate order (R06-2, R06-9, R06-10)", () => {
     expect(at("const input = validateCheckoutInput(")).toBeLessThan(at("fingerprintCheckout("));
   });
 
-  it("replays a key before the throttle can refuse it (R06-2)", () => {
+  it("resolves a replay key before anything that costs or writes (R06-2)", () => {
     const lookup = at("prisma.payment.findUnique({ where: { idempotencyKey } })");
     expect(ROUTE).toMatch(/const byKey = await prisma\.payment\.findUnique[\s\S]{0,120}if \(byKey\) \{[\s\S]{0,80}return await idempotentReplay\(byKey, fingerprint, req\.nextUrl\.origin\);/);
-    expect(lookup).toBeLessThan(at("rateLimitAsync(`checkout:${ip}`"));
-    // …and the limiter still stands in front of every row-creating path.
-    expect(at("rateLimitAsync(`checkout:${ip}`")).toBeLessThan(at("prisma.element.findUnique({ where: { symbol: elementSymbol } })"));
-    expect(at("rateLimitAsync(`checkout:${ip}`")).toBeLessThan(at("prisma.$transaction("));
+    expect(lookup).toBeLessThan(at("prisma.element.findUnique({ where: { symbol: elementSymbol } })"));
+    expect(lookup).toBeLessThan(at("prisma.$transaction("));
+    // The per-IP checkout cap was removed by product decision (2026-09-28), so
+    // nothing may refuse a replay — the key resolves first and is replayed.
+    expect(ROUTE).not.toMatch(/rateLimitAsync\(`checkout:/);
   });
 
   it("answers a replayed key with the envelope the first call would have (R06-9)", () => {
