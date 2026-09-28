@@ -54,7 +54,7 @@ export const SERVICE_TERM_SENTENCE = `Stakes never expire, and the board is comm
  * `lib/legalDocs.ts` changes — the digest in `lib/legalContent.test.ts` fails the
  * suite if you forget.
  */
-export const LEGAL_UPDATED = "2026-09-23";
+export const LEGAL_UPDATED = "2026-09-28";
 
 /** The wording a stake is bought under — stored with a payment, sent by the
  * checkout modal, and compared by the checkout route. Never rendered. */
@@ -81,40 +81,6 @@ export const LEGAL_LINKS = [
  * them is how a payer ends up disputing a charge instead of asking about it. */
 export const SUPPORT_EMAIL = "info@periodictable.lol";
 
-/** The receipt's tax line (R16-4). The checkout adds no tax — prices are the
- * full amount charged — so this is a statement of fact, not a preference.
- *
- * The invariant behind it: if tax collection is ever enabled (Stripe's
- * `automatic_tax`, a rate table, anything that adds to the total), this line and
- * the receipt's amount are both wrong until `Payment` grows tax columns and the
- * checkout writes them. Nothing else in the receipt may claim a tax figure the
- * database does not have. */
-export const RECEIPT_TAX_LINE = "No tax was added to this charge.";
-
-/** Everything the receipt says about the transaction as a legal document: who
- * sold it, what the card statement shows, the tax position, the day the rules
- * were accepted and where to read them, the payment reference, and where to
- * write before disputing. Assembled by `receiptLegal()` in `lib/operator.ts`,
- * which is where the deployment's configured values enter; every field is
- * nullable because a receipt must omit an unknown value rather than print a
- * blank as a fact. */
-export type ReceiptLegal = {
-  /** "Legal entity, established in X" — omitted when the operator is unset. */
-  seller: string | null;
-  /** What the card statement shows. Omitted when unset or not a descriptor
-   * Stripe would accept, since printing a value the processor rewrites is
-   * worse than printing nothing. */
-  descriptor: string | null;
-  taxLine: string;
-  taxId: string | null;
-  rulesUrl: string;
-  /** The day consent was recorded, or null for a payment that predates the
-   * record — in which case the receipt does not claim one. */
-  rulesAcceptedAt: string | null;
-  reference: string | null;
-  billing: string;
-};
-
 /** The sentence the buyer affirms at checkout. Rendered verbatim — with the
  * `CONSENT_LINK_TEXT` words linked — and hashed into `lib/consent.ts`, so the
  * words shown and the words recorded cannot drift (R16-6, R16-7). Short on
@@ -122,7 +88,7 @@ export type ReceiptLegal = {
  * to, so repeating them here doubles the agreement rather than strengthening
  * it. */
 export const CONSENT_STATEMENT =
-  "I am 18+ and I own or may promote this URL. I accept the rules & terms.";
+  "I am 18+ and I accept the rules & terms.";
 
 /** The linked words inside `CONSENT_STATEMENT`, and where they point. */
 export const CONSENT_LINK_TEXT = "rules & terms";

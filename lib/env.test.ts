@@ -186,11 +186,12 @@ describe("getProdConfigReport", () => {
     UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
     UPSTASH_REDIS_REST_TOKEN: "x",
     RESEND_WEBHOOK_SECRET: "whsec_VGVzdFNlY3JldA==",
-    // R16-5: a *fully configured* production deployment names its operator. The
-    // identity variables are advisory (they never fail `ok`), so this fixture
-    // states the whole environment rather than only the variables the site
-    // cannot serve without. Four of them, and no more: the documents publish no
-    // operator, so the only values left are the ones a receipt has to name.
+    // R16-5: a *fully configured* production deployment records its operator.
+    // The identity variables are advisory (they never fail `ok`), so this
+    // fixture states the whole environment rather than only the variables the
+    // site cannot serve without. Four of them, and no more: the documents publish
+    // no operator, and the mails stopped printing one (2026-09-28), so these are
+    // the operator's own record rather than a payer-facing fact.
     OPERATOR_NAME: "Example Media Ltd",
     OPERATOR_COUNTRY: "England and Wales",
     OPERATOR_TAX_ID: "GB000000000",
@@ -268,9 +269,10 @@ describe("getProdConfigReport", () => {
       delete anonymous[key as keyof Env];
     }
 
-    // Two findings for four unset variables, because only two of them reach a
-    // payer: the name and the country are printed on a receipt *if* they exist
-    // and nothing breaks when they do not, so they raise nothing at all.
+    // Two findings for four unset variables, because only two of them change
+    // anything an operator would act on: the name and the country are recorded
+    // only and nothing breaks when they are absent, so they raise nothing at
+    // all.
     const report = getProdConfigReport(fakeEnv(anonymous));
     expect(report.findings.map((f) => [f.key, f.severity])).toEqual([
       ["OPERATOR_DESCRIPTOR", "operator"],

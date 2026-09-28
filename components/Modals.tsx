@@ -12,7 +12,7 @@ import { CONSENT_LINK_HREF, CONSENT_LINK_TEXT, CONSENT_STATEMENT, CONSENT_VERSIO
 import { MIN_STAKE, TAKEOVER_MARGIN, classifyAndValidate } from "../lib/pricing";
 import { FAQ_LABEL, FAQ_PATH } from "../lib/faq";
 import { stakeQuote, crownCopy } from "../lib/stakeQuote";
-import { domainFromUrl, domainFromSocial, isEmail } from "../lib/validate";
+import { domainFromUrl, isEmail, normalizeUrl, socialIdentityFromUrl } from "../lib/validate";
 import {
   CHECKOUT_MSG,
   checkoutRefusal,
@@ -184,14 +184,14 @@ export function CheckoutPreview({
   const badEmail = emailShapeBad(email);
   const badTitle = titleShapeBad(title);
   const badPitch = pitchShapeBad(pitch);
-  const domain =
-    tab === "url"
-      ? url.includes("://")
-        ? domainFromUrl(url)
-        : null
-      : url.startsWith("@")
-        ? domainFromSocial(url)
-        : null;
+  // Identity is derived the same way the server derives it (lib/validate.ts):
+  // a product URL is its host, a social URL is host + path, and both go through
+  // the same normalization so a pasted link without a scheme prices correctly.
+  const domain = (() => {
+    const normalized = normalizeUrl(url);
+    if (!normalized) return null;
+    return tab === "social" ? socialIdentityFromUrl(normalized) : domainFromUrl(normalized);
+  })();
   const isNewHere = !domain || !data?.stakes.some((s) => s.domain === domain && s.amount > 0);
   // Client-side preview of the server rule (Phase 3 classifyAndValidate);
   // the server re-validates authoritatively under lock.
@@ -414,7 +414,7 @@ export function CheckoutPreview({
           turnstileToken,
           idempotencyKey,
           startup: {
-            url: tab === "url" ? url : `https://${domain}`,
+            url,
             linkType: tab === "url" ? "product" : "social",
             domain,
             title: effectiveTitle.slice(0, 32),
@@ -513,20 +513,20 @@ export function CheckoutPreview({
       <div className="mt-3 bg-icy rounded-full p-1 grid grid-cols-2 text-sm font-bold" role="group" aria-label="Link type">
         {(["url", "social"] as const).map((t) => (
           <button key={t} type="button" aria-pressed={tab === t} onClick={() => { setTab(t); setServerField(null); }} className={`rounded-full py-2 [@media(pointer:coarse)]:min-h-[44px] ${tab === t ? "bg-white shadow" : "text-mutedink"}`}>
-            {t === "url" ? "🌐 Product URL" : "@ Social"}
+            {t === "url" ? "🌐 Product URL" : "🔗 Social URL"}
           </button>
         ))}
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <div>
           <label htmlFor="co-url" className="mb-1 block text-[11px] font-extrabold text-mutedink">
-            {tab === "url" ? "Product URL" : "Social handle"}
+            {tab === "url" ? "Product URL" : "Social URL"}
           </label>
           <IcyInput
             id="co-url" name="co-url" required
             value={url}
             onChange={(e) => { setUrl(e.target.value); setServerField(null); }}
-            placeholder={tab === "url" ? "https://yourstartup.com" : "@yourhandle"}
+            placeholder={tab === "url" ? "https://yourstartup.com" : "https://instagram.com/yourpage"}
             aria-invalid={showUrl}
             aria-describedby={showUrl ? "co-url-error" : undefined}
             className={showUrl ? INVALID_FIELD : undefined}
@@ -537,12 +537,12 @@ export function CheckoutPreview({
             </div>
           )}        </div>
         <div>
-          <label htmlFor="co-title" className="mb-1 block text-[11px] font-extrabold text-mutedink">Startup name</label>
+          <label htmlFor="co-title" className="mb-1 block text-[11px] font-extrabold text-mutedink">{tab === "url" ? "Startup name" : "Account name"}</label>
           <IcyInput
             id="co-title" name="co-title" required
             value={title}
             onChange={(e) => { setTitle(e.target.value); setServerField(null); }}
-            placeholder="Startup name (2–32 chars)"
+            placeholder={tab === "url" ? "Startup name (2–32 chars)" : "Account name (2–32 chars)"}
             maxLength={32}
             aria-invalid={showTitle}
             aria-describedby={showTitle ? "co-title-error" : undefined}

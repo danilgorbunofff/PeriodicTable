@@ -67,9 +67,32 @@ export function domainFromUrl(url: string): string | null {
   }
 }
 
-export function domainFromSocial(handle: string): string {
-  const h = handle.trim().replace(/^@/, "").toLowerCase();
-  return h ? h + ".social" : "";
+/** Upper bound on a social identity. Kept bounded because the identity is
+ *  stored in `Startup.domain` and printed on public payloads; a pasted social
+ *  link is a profile, not a document. */
+export const SOCIAL_IDENTITY_MAX = 100;
+
+/**
+ * The identity a social URL belongs to: `host + path` (query and hash dropped,
+ * trailing slashes trimmed, `www.` stripped, bare-host links stay host-only).
+ *
+ * Identity is the domain, so a per-account listing needs the account in the
+ * identity — `instagram.com/a` and `instagram.com/b` are different listings,
+ * while `?`/`#` are not part of an account. Mirrors the old `@handle` design,
+ * where each handle was its own listing.
+ */
+export function socialIdentityFromUrl(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  const path = u.pathname.replace(/\/+$/, "").toLowerCase();
+  const identity = path && path !== "/" ? `${host}${path}` : host;
+  if (identity.length > SOCIAL_IDENTITY_MAX) return null;
+  return identity;
 }
 
 const BLOCKED_DOMAINS = ["localhost", "127.0.0.1", "0.0.0.0", "example.com", "periodictable.lol"];
@@ -109,18 +132,17 @@ export function validateCheckoutInput(input: {
   if (pitch.length < 2) return { ok: false, error: "Pitch must be at least 2 characters.", field: "pitch" };
   if (pitch.length > 140) return { ok: false, error: "Pitch must be 140 characters max.", field: "pitch" };
 
+  // A social URL is any public link (Instagram, YouTube, TikTok…): the identity
+  // is host + path, so each account is its own listing and the stored URL is
+  // the link itself. Same normalization and blocked-host rules as product URLs.
   if (linkType === "social") {
-    // Accept a raw handle ("@foo", "foo") or the client's URL form
-    // ("https://foo.social") — the server derives canonical identity either way.
-    let handle = (input.url ?? "").trim().replace(/^@/, "");
-    const socialUrl = handle.match(/^https?:\/\/([a-zA-Z0-9._]+)\.social\/?$/i);
-    if (socialUrl) handle = socialUrl[1];
-    if (!/^[a-zA-Z0-9._]{2,30}$/.test(handle))
-      return { ok: false, error: "Enter a valid @handle (letters, numbers, dots, underscores).", field: "url" };
-    const domain = domainFromSocial(handle);
-    if (!domain || isBlockedDomain(domain))
-      return { ok: false, error: "Enter a valid @handle.", field: "url" };
-    return { ok: true, url: `https://x.com/${handle}`, domain, title, pitch, linkType };
+    const url = normalizeUrl(input.url ?? "");
+    if (!url) return { ok: false, error: "Enter a full URL — e.g. https://instagram.com/yourpage", field: "url" };
+    const host = domainFromUrl(url);
+    if (!host || isBlockedDomain(host)) return { ok: false, error: "That link is not allowed.", field: "url" };
+    const domain = socialIdentityFromUrl(url);
+    if (!domain) return { ok: false, error: "That link is too long.", field: "url" };
+    return { ok: true, url, domain, title, pitch, linkType };
   }
 
   const url = normalizeUrl(input.url ?? "");

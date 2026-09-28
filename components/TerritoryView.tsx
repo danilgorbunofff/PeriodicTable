@@ -13,6 +13,7 @@ export function TerritoryView({
   onStake,
   onExpand,
   expanded,
+  boost,
 }: {
   el: ElementNode;
   onClose: () => void;
@@ -20,11 +21,14 @@ export function TerritoryView({
   onExpand?: () => void;
   /** Rendered inside the fullscreen-ish expand overlay: drop own header controls, Modal supplies the close affordance. */
   expanded?: boolean;
+  /** Poll every 2s for ~15s after a checkout returns (`?paid=`), so the buyer's
+   * own view shows the settled stake instead of waiting for the 30s tick. */
+  boost?: boolean;
 }) {
   const { data, error, mutate } = useSWR<ElementDetail>(`/api/elements/${el.symbol}`, (url: string) =>
     fetchJson(url, isElementDetail)
   , {
-    refreshInterval: 30000,
+    refreshInterval: boost ? 2000 : 30000,
   });
   const loading = !data && !error;
   // P1-08: failure is NEVER rendered as business state. Error without data

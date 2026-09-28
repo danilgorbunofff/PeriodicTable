@@ -50,10 +50,12 @@ describe("submitBlocked — one sentence for every refusal (R06-1)", () => {
     expect(blocked()).toBeNull();
   });
 
-  it("asks for the URL when the handle resolved no domain", () => {
-    // `@acme` typed on the social tab with no `@` stripped resolves nothing:
+  it("asks for the URL when the pasted link resolved no domain", () => {
+    // A shape-valid URL whose identity could not be derived (or a bare string):
     // the server would 400 on the same field, so the client says it first.
-    expect(blocked({ tab: "social", url: "acme", domain: null })?.message).toBe(CHECKOUT_MSG.handle);
+    expect(blocked({ tab: "social", url: "https://instagram.com/acme", domain: null })?.message).toBe(
+      CHECKOUT_MSG.social
+    );
     expect(blocked({ url: "acme.dev", domain: null })?.message).toBe(CHECKOUT_MSG.url);
   });
 
@@ -103,16 +105,15 @@ describe("field shape — the same rules the server enforces (R06-10)", () => {
     expect(emailShapeBad("a@b")).toBe(true);
   });
 
-  it("checks a product URL for a scheme, and a handle for the domain it resolves", () => {
+  it("checks both tabs for a full URL, because both accept any link", () => {
     expect(urlShapeBad("url", "https://acme.dev")).toBe(false);
     expect(urlShapeBad("url", "http://acme.dev")).toBe(false);
     expect(urlShapeBad("url", "acme.dev")).toBe(true);
-    expect(urlShapeBad("social", "@acme")).toBe(false);
-    expect(urlShapeBad("social", "acme")).toBe(false);
-    // The handle rule itself is `domainFromSocial`'s (and the server's): this
-    // shape check only proves a handle can be embedded as a URL at all, which
-    // is why `submitBlocked` also refuses when no domain came back (R06-1).
-    expect(urlShapeBad("social", "@a b")).toBe(false);
+    // A social listing is a pasted link too (Instagram, YouTube, …): the same
+    // shape rule, with the message following the tab for its example (R06-5).
+    expect(urlShapeBad("social", "https://instagram.com/acme")).toBe(false);
+    expect(urlShapeBad("social", "instagram.com/acme")).toBe(true);
+    expect(urlShapeBad("social", "@acme")).toBe(true);
   });
 
   it("holds the lengths the server's schema holds", () => {
@@ -130,9 +131,9 @@ describe("field shape — the same rules the server enforces (R06-10)", () => {
   });
 
   it("follows the tab the buyer is on (R06-5)", () => {
-    // The server answers one `field:"url"` for two different rules.
+    // One shape rule, two examples: the social sentence names a social URL.
     expect(urlMessage("url")).toBe(CHECKOUT_MSG.url);
-    expect(urlMessage("social")).toBe(CHECKOUT_MSG.handle);
+    expect(urlMessage("social")).toBe(CHECKOUT_MSG.social);
   });
 
   it("renders exactly the fields the modal has nodes for (R06-4)", () => {

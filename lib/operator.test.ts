@@ -1,20 +1,15 @@
-/* R16-11: the receipt's legal block, and the blanks it refuses to invent.
+/* R16-11: the operator identity the configuration report keeps track of.
 
    Doc 16 §5.8 found zero occurrences of the operator's identity anywhere in the
    product, and §5.6 found a receipt with no seller, no tax line, no descriptor
-   and no reference. `receiptLegal()` is the fix: one function that assembles
-   those facts from deployment configuration, and that omits an unset value
-   instead of printing a placeholder a payer cannot act on.
-
-   The published posture is now the narrower one: nothing prints the operator's
-   identity to a visitor at all, so the identity exists for exactly one audience
-   — the payer looking at a card charge. That is what the tests below pin: the
-   descriptor bounds, the omission rule, and the advisories that make a missing
-   identity visible to the operator rather than to a disputing customer. */
+   and no reference. The receipt's legal block that once printed those facts was
+   removed 2026-09-28 (the mail is a confirmation; the rules page carries the
+   terms), so what is left to hold is the configuration itself: the descriptor
+   bounds, the omission rule, and the advisories that make a missing identity
+   visible to the operator rather than to a disputing customer. */
 import { describe, it, expect } from "vitest";
 import { OPERATOR_ENV, descriptorIsValid } from "./operator";
 import * as operator from "./operator";
-import { RECEIPT_TAX_LINE, SUPPORT_EMAIL } from "./legal";
 
 /* `NodeJS.ProcessEnv` demands `NODE_ENV` (`next-env.d.ts` augments the global to
    `"development" | "production" | "test"`), while every case below is a partial
@@ -24,8 +19,6 @@ type Env = Record<string, string | undefined>;
 const penv = (env: Env = {}): NodeJS.ProcessEnv => env as unknown as NodeJS.ProcessEnv;
 const operatorInfo = (env: Env = {}) => operator.operatorInfo(penv(env));
 const operatorAdvisories = (env: Env = {}) => operator.operatorAdvisories(penv(env));
-const receiptLegal = (args: Omit<Parameters<typeof operator.receiptLegal>[0], "env"> & { env?: Env }) =>
-  operator.receiptLegal({ ...args, env: penv(args.env) });
 
 const FULL: Env = {
   OPERATOR_NAME: "Example Labs Ltd",
@@ -80,62 +73,8 @@ describe("descriptorIsValid", () => {
   });
 });
 
-describe("receiptLegal", () => {
-  it("carries the tax position and the one mailbox a payer can write to (R16-4, R16-7)", () => {
-    const legal = receiptLegal({ rulesUrl: "https://www.periodictable.lol/legal/rules", env: FULL });
-    expect(legal.taxLine).toBe(RECEIPT_TAX_LINE);
-    expect(legal.rulesUrl).toBe("https://www.periodictable.lol/legal/rules");
-    expect(legal.billing).toBe(SUPPORT_EMAIL);
-    expect(legal.reference).toBeNull();
-    expect(legal.rulesAcceptedAt).toBeNull();
-  });
-
-  it("prints no rules version, because the documents are not versioned", () => {
-    const legal = receiptLegal({ rulesUrl: "/legal/rules", env: FULL });
-    expect(legal).not.toHaveProperty("rulesVersion");
-    expect(JSON.stringify(legal)).not.toMatch(/2026-09-16/);
-  });
-
-  it("names the seller and the descriptor from the configuration the receipt needs (R16-5)", () => {
-    const legal = receiptLegal({ rulesUrl: "/legal/rules", env: FULL, reference: "pi_123" });
-    expect(legal.seller).toBe("Example Labs Ltd, established in Testland");
-    expect(legal.descriptor).toBe("PERIODICTABLE.LOL");
-    expect(legal.taxId).toBe("TEST-12345");
-    expect(legal.reference).toBe("pi_123");
-  });
-
-  it("omits an unset identity instead of printing a placeholder to a payer", () => {
-    const legal = receiptLegal({ rulesUrl: "/legal/rules", env: {} });
-    expect(legal.seller).toBeNull();
-    expect(legal.descriptor).toBeNull();
-    expect(legal.taxId).toBeNull();
-    // The one thing that is always stated, because it is always true.
-    expect(legal.taxLine).toBe(RECEIPT_TAX_LINE);
-    expect(JSON.stringify(legal)).not.toContain("not published in this deployment");
-  });
-
-  it("drops a descriptor Stripe would rewrite, rather than publishing one nobody will see", () => {
-    const legal = receiptLegal({ rulesUrl: "/legal/rules", env: { ...FULL, OPERATOR_DESCRIPTOR: "periodictable" } });
-    expect(legal.descriptor).toBeNull();
-  });
-
-  it("names the seller without a country when only the name is set", () => {
-    const legal = receiptLegal({ rulesUrl: "/legal/rules", env: { OPERATOR_NAME: "Example Labs Ltd" } });
-    expect(legal.seller).toBe("Example Labs Ltd");
-  });
-
-  it("records the day consent was given, at day precision", () => {
-    const legal = receiptLegal({
-      rulesUrl: "/legal/rules",
-      consentAt: new Date("2026-09-16T23:59:59.000Z"),
-      env: FULL,
-    });
-    expect(legal.rulesAcceptedAt).toBe("2026-09-16");
-  });
-});
-
 describe("operatorAdvisories", () => {
-  it("lists the two things a payer's receipt cannot do without", () => {
+  it("lists the two configuration gaps that decide whether a charge is recognisable", () => {
     const advisories = operatorAdvisories({});
     expect(advisories.map((a) => a.key)).toEqual([OPERATOR_ENV.descriptor, OPERATOR_ENV.taxId]);
     for (const a of advisories) expect(a.reason.length).toBeGreaterThan(20);

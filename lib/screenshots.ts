@@ -17,9 +17,16 @@ export function upstreamFaviconUrl(domain: string, size = 64): string {
 
 /** What a page puts in an `<img src>` for a listing's icon: this site's own
  *  proxy, never the icon service (R16-3). Relative on purpose — the same string
- *  works for a browser, for `next/og` and for a stored `Startup.logoUrl`. */
+ *  works for a browser, for `next/og` and for a stored `Startup.logoUrl`.
+ *
+ *  The icon service speaks hosts, and a social listing's identity is
+ *  `host + account path` (`instagram.com/yourpage`), so everything after the
+ *  first `/` is dropped here: the stored logo of a new listing, the OG image and
+ *  the activity feed all ask for the host's icon. The favicon route accepts that
+ *  host when any listing (product or social) publishes it. */
 export function faviconFor(domain: string, size = 64): string {
-  return `/api/favicon?domain=${encodeURIComponent(domain)}&sz=${size}`;
+  const host = domain.split("/")[0] || domain;
+  return `/api/favicon?domain=${encodeURIComponent(host)}&sz=${size}`;
 }
 
 /** The icon service's URL, as stored on rows written before the proxy existed

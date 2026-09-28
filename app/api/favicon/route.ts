@@ -26,9 +26,10 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS } = apiRoute({ GET: favico
  *
  * Not an open proxy: the upstream host is constructed in `lib/screenshots.ts`
  * (no caller-supplied host is ever fetched), only known sizes are accepted, and
- * the domain must belong to a listing in this database. Anything else is
- * answered with the local placeholder rather than an error — this is an `<img
- * src>`, where a generic picture beats a broken one.
+ * the host must belong to a listing in this database — product listings are
+ * their host, social listings are `host + path`, so a host match accepts
+ * either. Anything else is answered with the local placeholder rather than an
+ * error — this is an `<img src>`, where a generic picture beats a broken one.
  */
 
 /** Sizes the table actually asks for (`Avatar` 20/24/32/48, hover 128). */
@@ -43,10 +44,13 @@ async function favicon(req: Request) {
 
   if (!domain || !ALLOWED_SIZES.has(size)) return placeholder(req);
 
-  // One indexed lookup: the icon service is reached only for a domain we
-  // actually publish. `count` rather than `findUnique` because the question is
-  // yes/no and the row is not needed.
-  const known = await prisma.startup.count({ where: { domain } }).catch(() => 0);
+  // One indexed lookup: the icon service is reached only for a host this site
+  // actually publishes — the host itself (a product listing) or the host of a
+  // social listing, whose identity is `host + account path`. `count` rather
+  // than `findUnique` because the question is yes/no and the row is not needed.
+  const known = await prisma.startup
+    .count({ where: { OR: [{ domain }, { domain: { startsWith: `${domain}/` } }] } })
+    .catch(() => 0);
   if (known === 0) return placeholder(req);
 
   const upstream = await fetch(upstreamFaviconUrl(domain, size), {

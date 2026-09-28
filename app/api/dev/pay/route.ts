@@ -48,12 +48,10 @@ async function postDevPay(req: NextRequest) {
   if (!devSimulatorEnabled()) {
     return NextResponse.json({ error: "Simulator disabled on this deployment." }, { status: 403 });
   }
-  // Budget per IP, per hour. Deliberately looser than checkout's 5/hour (R11-4
-  // proposed "the same limiter"): this route exists to be called repeatedly
-  // while a developer rehearses a flow, and a 5/hour cap would break the tool
-  // it protects on the first morning of testing. The finding is that no bound
-  // existed — a script could settle payments as fast as it could write, which
-  // `15` showed flattening one element.
+  // Budget per IP, per hour. This route exists to be called repeatedly while a
+  // developer rehearses a flow, so the cap is deliberately generous. The finding
+  // (R11-4) was that no bound existed at all — a script could settle payments as
+  // fast as it could write, which doc 15 showed flattening one element.
   const ip = clientIp(req.headers);
   if (!(await rateLimitAsync(`devpay:${ip}`, 30, 3_600_000))) {
     return apiError("Too many requests. Try again later.", { status: 429, code: "RATE_LIMITED" });

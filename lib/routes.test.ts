@@ -31,7 +31,7 @@ const HIDDEN = "helemprobe.dev";
 // R16-3: the icon proxy only serves a domain that is on the table, so this
 // fixture is a listing and nothing else.
 const LISTING = "rt-listing.dev";
-const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN, "rt-hold-a.dev", "rt-hold-b.dev", "rt-zero-t.dev", "rt-r16-a.dev", LISTING];
+const DOMAINS = ["ct-a.dev", "ct-b.dev", HIDDEN, "rt-hold-a.dev", "rt-hold-b.dev", "rt-zero-t.dev", "rt-r16-a.dev", LISTING, "instagram.com/rt-social-probe"];
 // A different buyer IP: the checkout throttle is per client per hour, and the
 // rate-limit fixture above spends a full bucket of its own.
 const IP16 = "203.0.113.16";
@@ -514,9 +514,11 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
 
   it("serves listing icons through our own server and degrades to a local picture (R16-3)", async () => {
     const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(png, { headers: { "content-type": "image/png" } })
-    );
+    // A fresh Response per call: a body can be read once, and this test now
+    // serves two listings (a product host and a social host).
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(png, { headers: { "content-type": "image/png" } }));
     try {
       const ok = await faviconGET(req(`/api/favicon?domain=${LISTING}&sz=64`));
       expect(ok.status).toBe(200);
@@ -526,6 +528,26 @@ describe.skipIf(!hasDb)("phase 16: consent and the icon proxy", () => {
       // The one place the icon service is named is this server-side call.
       expect(spy).toHaveBeenCalledTimes(1);
       expect(String(spy.mock.calls[0]?.[0])).toBe(upstreamFaviconUrl(LISTING, 64));
+
+      spy.mockClear();
+      // A social listing's identity is host + account path. The host's icon is
+      // served for it — the identity itself would be refused by the host guard.
+      const SOCIAL = "instagram.com/rt-social-probe";
+      await prisma.startup.upsert({
+        where: { domain: SOCIAL },
+        create: { domain: SOCIAL, title: "Rt Social", pitch: "social fixture pitch", url: `https://${SOCIAL}`, linkType: "social", logoUrl: faviconFor(SOCIAL) },
+        update: {},
+      });
+      const social = await faviconGET(req("/api/favicon?domain=instagram.com&sz=64"));
+      expect(social.status).toBe(200);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]?.[0])).toBe(upstreamFaviconUrl("instagram.com", 64));
+      // The hostile neighbour of that host is still refused: the prefix match
+      // requires the account path, not a lookalike domain.
+      spy.mockClear();
+      const lookalike = await faviconGET(req("/api/favicon?domain=instagram.com.evil.dev&sz=64"));
+      expect(lookalike.status).toBe(302);
+      expect(spy.mock.calls.length).toBe(0);
 
       spy.mockClear();
       const placeholder = async (query: string, label: string) => {

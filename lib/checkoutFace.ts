@@ -27,29 +27,24 @@ export function fieldHasRenderer(field: string): boolean {
 
 export const CHECKOUT_MSG = {
   url: "Enter a full URL starting with https://",
-  handle: "Enter a valid @handle (letters, numbers, dots, underscores).",
+  social: "Enter a full URL — e.g. https://instagram.com/yourpage",
   email: "That email doesn't look right.",
   title: "Name must be 2–32 characters.",
   pitch: "Pitch must be 2–140 characters.",
-  attest: "Please confirm you own or may promote this URL.",
+  attest: "Please confirm you are 18+ and accept the rules & terms.",
   humanCheck: "The human check could not load — reload or use another network.",
   canceled: "Not paid — nothing was charged. Your claim is still here.",
 } as const;
 
-/** The server's `field:"url"` covers two rules — a product URL and a social
- *  handle — so the client's fallback sentence has to follow the tab the buyer
- *  is on (R06-5). */
+/** The `field:"url"` sentence follows the tab: a product URL and a social URL
+ *  share the same shape rule but different examples (R06-5). */
 export function urlMessage(tab: CheckoutTab): string {
-  return tab === "url" ? CHECKOUT_MSG.url : CHECKOUT_MSG.handle;
-}
-
-function socialHandle(url: string): string {
-  return `https://x.com/${url.replace(/^@/, "")}`;
+  return tab === "url" ? CHECKOUT_MSG.url : CHECKOUT_MSG.social;
 }
 
 export function urlShapeBad(tab: CheckoutTab, url: string): boolean {
   if (url.length === 0) return false;
-  return !/^https?:\/\/.+\..+/.test(tab === "url" ? url : socialHandle(url));
+  return !/^https?:\/\/.+\..+/.test(url);
 }
 
 export function emailShapeBad(email: string): boolean {

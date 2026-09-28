@@ -71,6 +71,12 @@ function HomeInner() {
   // Remembers a minimized rail across an element detour: opening an element
   // pops the rail open, closing it restores the minimized state.
   const railWasMin = useRef(false);
+  // True for ~15s after a checkout returns (`?paid=`): the buyer's own board
+  // polls every 2s instead of 30s so the new stake appears within seconds of
+  // the webhook settling (the settle lands after the redirect, so the one-shot
+  // revalidate on load is too early — lib/route.ts READ_CACHE).
+  const [paidBoost, setPaidBoost] = useState(false);
+  const boostTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeElement = useCallback(() => {
     setSelected(null);
@@ -81,21 +87,21 @@ function HomeInner() {
   }, []);
   const [expandOpen, setExpandOpen] = useState(false);
 
-  // live table data (30s poll)
+  // live table data (30s poll; 2s for ~15s after a checkout returns)
   const {
     data: tiles,
     error: tilesError,
     mutate: mutateTiles,
-  } = useSWR<Tile[]>("/api/elements", fetchJson, { refreshInterval: 30000 });
+  } = useSWR<Tile[]>("/api/elements", fetchJson, { refreshInterval: paidBoost ? 2000 : 30000 });
   const {
     data: statsData,
     error: statsError,
     mutate: mutateStats,
   } = useSWR<StatsResponse>("/api/stats", (url: string) => fetchJson(url, isStatsResponse), {
-    refreshInterval: 30000,
+    refreshInterval: paidBoost ? 2000 : 30000,
   });
   const { data: activity, error: activityError, mutate: mutateActivity } = useSWR<ActivityRow[]>("/api/activity?limit=6", (url: string) => fetchJson(url, isActivityRows), {
-    refreshInterval: 30000,
+    refreshInterval: paidBoost ? 2000 : 30000,
   });
 
   const claims: Record<string, Claim> = {};
@@ -128,6 +134,12 @@ function HomeInner() {
       mutateTiles();
       mutateStats();
       mutateActivity();
+      // The webhook may not have settled yet (it lands after the redirect), so
+      // poll the board at 2s for ~15s; the row appears the moment the settle
+      // commits instead of at the next 30s tick.
+      if (boostTimer.current) clearTimeout(boostTimer.current);
+      setPaidBoost(true);
+      boostTimer.current = setTimeout(() => setPaidBoost(false), 15_000);
     }
     if (canceled) {
       // The provider's cancel_url. Nothing was charged and the pending row
@@ -380,7 +392,7 @@ function HomeInner() {
         ) : (
           <RailShell>
             {selected ? (
-              <TerritoryView el={selected} onClose={closeElement} onStake={openStake} onExpand={() => setExpandOpen(true)} />
+              <TerritoryView el={selected} onClose={closeElement} onStake={openStake} onExpand={() => setExpandOpen(true)} boost={paidBoost} />
             ) : (
               <WorldOrder onExpand={() => setExpandOpen(true)} onMinimize={() => { railWasMin.current = true; setRailMin(true); }} />
             )}
@@ -412,6 +424,7 @@ function HomeInner() {
                   onClose={closeElement}
                   onStake={openStake}
                   onExpand={() => setExpandOpen(true)}
+                  boost={paidBoost}
                 />
               ) : (
                 <WorldOrder onClose={() => setMobileRailOpen(false)} onExpand={() => setExpandOpen(true)} />
@@ -439,6 +452,7 @@ function HomeInner() {
               openStake(el, amount);
             }}
             expanded
+            boost={paidBoost}
           />
         ) : (
           <WorldOrder expanded onClose={() => setExpandOpen(false)} />

@@ -27,6 +27,16 @@ describe("previews", () => {
     expect(faviconFor("weird domain.com")).toContain(encodeURIComponent("weird domain.com"));
   });
 
+  it("asks for the HOST's icon, not a social identity's account path", () => {
+    // A social listing's identity is host + path; the icon service only speaks
+    // hosts, so the path is dropped before the proxy is asked (the route
+    // accepts the host when any product or social listing publishes it).
+    expect(faviconFor("instagram.com/yourpage")).toBe("/api/favicon?domain=instagram.com&sz=64");
+    expect(previewFor({ domain: "instagram.com/yourpage" })).toBe("/api/favicon?domain=instagram.com&sz=128");
+    // A host-only identity is unchanged.
+    expect(faviconFor("acme.dev")).toBe("/api/favicon?domain=acme.dev&sz=64");
+  });
+
   it("names the upstream only on the server side", () => {
     // The proxy route needs the real URL; nothing else may use it.
     expect(upstreamFaviconUrl("acme.com", 64)).toBe("https://www.google.com/s2/favicons?domain=acme.com&sz=64");

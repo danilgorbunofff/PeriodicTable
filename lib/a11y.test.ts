@@ -422,7 +422,10 @@ describe("R05-5 background polling pauses (static)", () => {
   });
   it("the four polling surfaces still refresh, and say so when they cannot", () => {
     for (const p of ["app/page.tsx", "components/ActivityCard.tsx", "components/TerritoryView.tsx", "components/WorldOrder.tsx"]) {
-      expect(src(p), p).toMatch(/refreshInterval: 30000/);
+      // The steady cadence is 30s; page/TerritoryView raise it to 2s for ~15s
+      // after a checkout returns (`?paid=` boost), so the interval is an
+      // expression rather than a bare literal on those two.
+      expect(src(p), p).toMatch(/refreshInterval[\s\S]{0,40}30000/);
     }
     expect(src("lib/liveState.ts")).toMatch(/live updates are paused/);
   });

@@ -34,7 +34,7 @@ export function requestId(): string {
  * R15-1 (2026-09-16): the browser-facing directive used to be whatever the
  * edge rewrote it to (`public, max-age=0, must-revalidate`), so a repeat view
  * or a remount always cost a round trip. It now carries a window of its own —
- * `max-age=5`, deliberately *below* the 30 s `refreshInterval` every consumer
+ * `max-age=3`, deliberately *below* the 30 s `refreshInterval` every consumer
  * of these routes polls at (`app/page.tsx`, `components/TerritoryView.tsx`,
  * `components/WorldOrder.tsx`, `components/ActivityCard.tsx`). That is the
  * whole safety argument: a cache entry can never outlive the poll that would
@@ -43,10 +43,17 @@ export function requestId(): string {
  * answered without a request. `lib/readCache.test.ts` asserts the inequality
  * against the client's own literal, so raising this number past the poll
  * interval fails the suite rather than the board.
+ *
+ * 2026-09-28: the edge window came down from `s-maxage=10` to `5` so a paid
+ * buyer's own board reflects the settlement within seconds instead of up to
+ * ten; `?paid=` additionally runs a 15 s boost that polls these routes every
+ * 2 s (app/page.tsx), which is the one deliberate case where a poll is shorter
+ * than the browser window — the boost trades a cached round trip for the
+ * promise of the row appearing, and reverts to the 30 s cadence afterwards.
  */
 export const READ_CACHE = {
-  "Cache-Control": "public, max-age=5, s-maxage=10, stale-while-revalidate=30",
-  "Vercel-CDN-Cache-Control": "s-maxage=10, stale-while-revalidate=30",
+  "Cache-Control": "public, max-age=3, s-maxage=5, stale-while-revalidate=15",
+  "Vercel-CDN-Cache-Control": "s-maxage=5, stale-while-revalidate=15",
 } as const;
 
 export function apiJson<T>(data: T, init?: ResponseInit & { code?: string }): NextResponse {

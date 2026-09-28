@@ -39,7 +39,6 @@ import {
   LEGAL_LINKS,
   LEGAL_SLUGS,
   LEGAL_UPDATED,
-  RECEIPT_TAX_LINE,
   SUPPORT_EMAIL,
   type LegalSlug,
 } from "./legal";
@@ -196,11 +195,9 @@ describe("legal corpus", () => {
     const rules = text("rules");
     expect(rules).toContain(TAX_SENTENCE);
     expect(rules).toContain(DESCRIPTOR_SENTENCE);
-    // The receipt's line is the same fact from the payer's side: no tax was
-    // added, because the merchant of record remits it out of the price. The two
-    // must not contradict — a receipt that added tax it never charged, or a
-    // rules page silent about who remits it, is the failure mode here.
-    expect(RECEIPT_TAX_LINE).toContain("No tax was added");
+    // The receipt's tax line and the operator's descriptor were removed from the
+    // mails (2026-09-28), so the rules page is now the only surface that states
+    // the position — and it must state it without a contradiction to clean up.
     expect(rules).toContain("it determines and remits that tax");
   });
 

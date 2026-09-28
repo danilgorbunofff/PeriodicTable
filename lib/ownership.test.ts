@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { validateCheckoutInput, validateProfileInput } from "./validate";
+import { validateCheckoutInput, validateProfileInput, SOCIAL_IDENTITY_MAX } from "./validate";
 import { fingerprintCheckout } from "./startups";
 import { hashToken, normalizeEmail } from "./manage";
 
@@ -23,32 +23,59 @@ describe("canonical identity is server-derived", () => {
       expect(r.url.startsWith("https://")).toBe(true);
     }
   });
-  it("social accepts a raw handle", () => {
+  it("social identity is the account: host + path, scheme optional", () => {
     const r = validateCheckoutInput({
-      url: "@foobar",
+      url: "https://Instagram.com/FooBar/?hl=en#bio",
       linkType: "social",
       title: "Foo",
       pitch: "Social first",
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.domain).toBe("foobar.social");
-      expect(r.url).toBe("https://x.com/foobar");
+      // Query and hash are not part of an account; case and the trailing slash
+      // are folded the same way the product path folds a host.
+      expect(r.domain).toBe("instagram.com/foobar");
+      expect(r.url).toBe("https://instagram.com/FooBar/?hl=en#bio");
     }
-  });
-  it("social accepts the client's https://handle.social URL form", () => {
-    const r = validateCheckoutInput({
-      url: "https://foobar.social",
+    const bare = validateCheckoutInput({
+      url: "youtube.com/@Foo",
       linkType: "social",
       title: "Foo",
       pitch: "Social first",
     });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.domain).toBe("foobar.social");
+    expect(bare.ok).toBe(true);
+    if (bare.ok) expect(bare.domain).toBe("youtube.com/@foo");
   });
-  it("social still rejects garbage", () => {
+  it("two accounts on one platform are two listings", () => {
+    const a = validateCheckoutInput({ url: "https://instagram.com/a", linkType: "social", title: "Acct A", pitch: "pitch one" });
+    const b = validateCheckoutInput({ url: "https://instagram.com/b", linkType: "social", title: "Acct B", pitch: "pitch two" });
+    expect(a.ok && a.domain).toBe("instagram.com/a");
+    expect(b.ok && b.domain).toBe("instagram.com/b");
+  });
+  it("a social link with no path is the host alone, like a product URL", () => {
+    const r = validateCheckoutInput({ url: "https://bsky.app", linkType: "social", title: "Bsky", pitch: "Social first" });
+    expect(r.ok && r.domain).toBe("bsky.app");
+  });
+  it("social rejects garbage and blocked hosts", () => {
     expect(validateCheckoutInput({ url: "https://", linkType: "social", title: "F", pitch: "x" }).ok).toBe(false);
     expect(validateCheckoutInput({ url: "not a handle!!", linkType: "social", title: "Fo", pitch: "ok pitch" }).ok).toBe(false);
+    // The same identity guard as the product path: this site is not a listing.
+    expect(validateCheckoutInput({ url: "https://www.periodictable.lol/x", linkType: "social", title: "Fo", pitch: "ok pitch" }).ok).toBe(false);
+  });
+  it("refuses a social identity longer than the stored maximum", () => {
+    const long = `https://instagram.com/${"a".repeat(SOCIAL_IDENTITY_MAX)}`;
+    const r = validateCheckoutInput({ url: long, linkType: "social", title: "Long", pitch: "ok pitch" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/too long/i);
+    // One character shorter than the bound is a listing.
+    const fits = validateCheckoutInput({
+      url: `https://instagr.am/${"a".repeat(SOCIAL_IDENTITY_MAX - "instagr.am/".length)}`,
+      linkType: "social",
+      title: "Fits",
+      pitch: "ok pitch",
+    });
+    expect(fits.ok).toBe(true);
+    if (fits.ok) expect(fits.domain.length).toBe(SOCIAL_IDENTITY_MAX);
   });
   it("checkout route ignores body.startup.domain (static contract)", () => {
     const src = readFileSync(join(__dirname, "..", "app", "api", "checkout", "route.ts"), "utf8");
