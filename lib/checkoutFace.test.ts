@@ -15,7 +15,7 @@ import {
 } from "./checkoutFace";
 import { isEmail } from "./validate";
 
-/* Review 06 (doc/review/06-checkout-before-payment.md) — the claim form's two
+/* Review 06 — the claim form's two
    refusals without a browser: the gate that stops a submit before a request is
    made, and the branch that turns a refused response into the sentence the
    buyer reads. The modal needs a DOM to render and this repo has no DOM suite

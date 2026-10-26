@@ -58,8 +58,8 @@ describe("R03-1 the dataset has one home", () => {
     expect(roadmap).not.toMatch(/EXOTIC POD cols 7-10/);
   });
 
-  it("names one seed source in the phase-0 docs", () => {
-    expect(src("doc/phase-0-foundation/02-element-seed-data.md")).toMatch(
+  it("names one seed source in the element-data doc", () => {
+    expect(src("doc/ELEMENT-DATA.md")).toMatch(
       /Single source of truth `lib\/elements\.ts` with all 122 nodes/
     );
     expect(src("prisma/seed.ts")).toMatch(/import \{ ELEMENTS \} from "\.\.\/lib\/elements"/);

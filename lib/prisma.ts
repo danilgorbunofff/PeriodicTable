@@ -33,7 +33,7 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 //     dedicated connection for their duration and are untouched by
 //     transaction-mode pooling, so they need no extra knob here;
 //   · if a migration ever fails on advisory locks, add `directUrl` (the direct
-//     endpoint) for migrations instead of un-pooling the app — HANDOFF.md:660.
+//     endpoint) for migrations instead of un-pooling the app.
 // The actual runtime ceiling is only provable against production: U12-2
 // (`SHOW max_connections` plus `SELECT count(*) FROM pg_stat_activity`).
 export const prisma =

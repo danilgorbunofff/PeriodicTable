@@ -1,4 +1,4 @@
-/** Analytics (Phase 5, spec 01-seed-instrument.md; gate R18-13).
+/** Analytics (Phase 5; gate R18-13).
  *
  * Plausible pageviews plus the seven funnel events below. Nothing here sends
  * anything unless the deployment configured a domain AND this browser granted

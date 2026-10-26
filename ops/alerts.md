@@ -3,8 +3,7 @@
 Index and auth: `ops/README.md`. This file answers `R18-9` (every failure class
 had no owner and no alarm), `R18-12` (the status codes a monitor reads were never
 written down for the monitor) and `R18-15` (a runbook that says "check the logs"
-has to say how long they last). Written by the phase-18 fix pass
-(`doc/review/18-observability-analytics-alerts.md`, 2026-09-16).
+has to say how long they last). Written in the observability pass (2026-09-16).
 
 ## The two status codes, verbatim for the monitor
 
@@ -61,7 +60,7 @@ and 500 on the page.
 The channel and the recipient are the operator's to name — the repository cannot
 know an address, and inventing one is worse than the blank. That answer is
 decision **`D18-2`** (the alert channel, its recipient list and the thresholds)
-in `doc/review/FINDINGS.md`; **`D18-5`** is whether a monitor runs at all, at
+in the findings register; **`D18-5`** is whether a monitor runs at all, at
 what interval, over which URLs, and **`D18-6`** is who is on call. Until those are
 recorded, this table is the **signals**: what fires, at what threshold, and which
 runbook acts on it.

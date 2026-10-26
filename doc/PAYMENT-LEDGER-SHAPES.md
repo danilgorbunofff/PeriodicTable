@@ -1,6 +1,6 @@
 # The `Payment` table, read by someone who is not the operator
 
-`doc/review/20-post-launch-and-debt.md` R20-4 and R20-5. The rule this file
+The R20-4 and R20-5 findings became this file. The rule this file
 exists for: a reader who is handed a `psql` prompt (`DATABASE_URL`) meets twelve
 rows in five shapes, six of them dead, and nothing in the table says which is
 which or which of them was ever revenue. Reading them wrong is easy and the
@@ -8,8 +8,8 @@ consequences are the kind that are found months later, so they are written down
 here in one place.
 
 **Provenance, and how to re-check it.** The counts below are the read-only
-inventory taken **2026-09-14 12:30 UTC** against production Neon, recorded in
-`doc/PROD-READINESS-CHECKLIST.md` §7 ("Production inventory re-read"). No later
+inventory taken **2026-09-14 12:30 UTC** against production Neon (`ops/launch.md`
+records the "Production inventory re-read"). No later
 read exists, and nothing in this file is a fresh count. Re-run the query at the
 end before quoting a row count from it.
 
@@ -79,7 +79,7 @@ The six `pending` rows with no `providerRef` (shapes 1 and 2) are inert: no mone
 moved, no session exists, nothing can apply them. They are **kept deliberately**
 today, because they are the only record that those checkouts were attempted. The
 decision — clear them or leave them — is the operator's, and it is recorded in
-`doc/review/FINDINGS.md`; while it is open, an operator run that quotes the table
+the operations log; while it is open, an operator run that quotes the table
 says so up front rather than letting a reader count twelve rows as activity. If
 they are ever cleared, the deletion is reversible-by-record: keep the ids and the
 statement in the run's own notes.

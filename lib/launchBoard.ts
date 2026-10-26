@@ -1,4 +1,4 @@
-/* Launch board reading (doc/phase-5-launch/01-seed-instrument.md).
+/* Launch board reading.
 
    The launch claim is a price claim: the seeded inventory opens one seat per
    element at the floor, so a captured tile carries no ladder and the price of

@@ -80,7 +80,7 @@ describe("launch inventory price contract", () => {
   });
 
   it("keeps the seed list in the spreadsheet at the same price", () => {
-    const rows = read("doc/phase-5-launch/seed-list.csv").trim().split("\n").slice(1);
+    const rows = read("prisma/launch-seed-list.csv").trim().split("\n").slice(1);
     expect(rows.length).toBe(symbolsIn(read("prisma/launch-seed.ts")).length);
     for (const row of rows) expect([row.split(",")[3], Number(row.split(",")[4])]).toEqual([row.split(",")[3], MIN_STAKE]);
   });

@@ -1,6 +1,6 @@
 /** Launch cleanup: remove the inventory seats `prisma/launch-seed.ts` opened on
  *  the grid, so a brand-new territory map does not read as "taken" by real
- *  companies that never claimed anything (HANDOFF §1).
+ *  companies that never claimed anything.
  *
  *  Dry run by default. Provenance-guarded: a candidate is only touched when it
  *  still looks exactly as the seed left it — no notification email, no payment,

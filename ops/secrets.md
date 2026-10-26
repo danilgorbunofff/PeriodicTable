@@ -15,9 +15,9 @@ bad Resend key looks like), `database.md` (`DATABASE_URL`).
   and not the other produces the "config is fine but the clock stopped" failure —
   `README.md` §"The clock and the alarm" is the cross-check.
 - Never paste a secret into a file in this repository. There is no secret in
-  `ops/` by design, and `doc/review/16-legal-privacy-tax.md` records the custody
+  `ops/` by design, and the legal and privacy notes record the custody
   expectation: who holds the console logins, and who can rotate without the
-  original holder, is **operator decision D12** (`doc/review/FINDINGS.md`).
+  original holder, is **operator decision D12**.
 - Rotate one secret at a time and confirm each before starting the next.
 
 ## `STRIPE_WEBHOOK_SECRET` (with overlap)
@@ -173,7 +173,7 @@ never reach `EmailSuppression` — the buyer-facing consequence is in
 
 ## The rest of the map
 
-Six rows of `doc/review/17-operator-tooling-and-runbooks.md` §5.8 have no
+Six rows of the operator-tooling register §5.8 have no
 procedure worth a section of their own, because the rotation *is* the change.
 They are listed here so the map is complete and nobody has to guess which console
 or which order applies.

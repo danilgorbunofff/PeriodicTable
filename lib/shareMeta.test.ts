@@ -1,4 +1,4 @@
-/* Phase 1 acceptance (doc/review/01-discovery-and-unfurl.md §8): the board
+/* Phase 1 acceptance (§8): the board
    unfurls, every entity self-canonicalises, and the surface a crawler reads
    (robots, sitemap, tile hrefs) points at the same host. The tags are asserted
    against the object the layout ships; the wiring that can only be seen in the

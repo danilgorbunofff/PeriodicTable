@@ -2,7 +2,7 @@
 ### Phase 7 remediation artifact. Code is truth; this file is the map.
 
 Product: King-of-the-Hill staking ads on a 122-tile periodic table.
-Visual twins spec: `doc/DESIGN-SYSTEM.md`. Release gates: `doc/project-review/plan.md`.
+Visual twins spec: `doc/DESIGN-SYSTEM.md`. Release gates: `ops/launch.md`.
 Executable proof: `scripts/rehearse-release.sh` (live + paused) + `npm test`.
 
 ---

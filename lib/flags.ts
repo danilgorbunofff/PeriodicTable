@@ -1,4 +1,4 @@
-/** Launch flags (Phase 5, spec 02-launch-gate-runbook.md + Phase 0 hardening).
+/** Launch flags (Phase 5 + Phase 0 hardening; see `ops/launch.md`).
  * Production is fail-closed: payments are live ONLY when explicitly enabled
  * (PAYMENTS_LIVE=true) AND the provider is fully configured (Stripe key+secret).
  * Partial provider config or an absent flag disables payments instead of

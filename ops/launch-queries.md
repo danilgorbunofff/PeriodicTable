@@ -1,7 +1,4 @@
-# 03 — Launch week: the questions, and the query that answers each
-
-**Parent:** Phase 5 README · **Written for:** `doc/review/20-post-launch-and-debt.md`
-R20-12 (and R20-13's trigger-metric pointer), 2026-09-16.
+# Launch week: the questions, and the query that answers each
 
 Launch week is the only cohort that will ever see the board before anyone knew
 what it was. That window closes whether or not anyone is watching, so what
@@ -17,11 +14,11 @@ dashboard to build, because the queries work today and a dashboard does not.
   is an *outbound* click, not a `tile_click`: the two are different events on
   purpose, and the client-side seven (`tile_click`, `drawer_open`, `search_submit`,
   `checkout_start`, `checkout_paid`, `reclaim_click`, `go_click`) are informative
-  only (R18-14).
+  only.
 - **Plausible is the only reader of the seven, and it is switched off** until
-  `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` is set (R19-1, U19-3). Until then every
-  client-side question below is answered by its server-side proxy, and the proxy is
-  named for each one instead of being left as "ask Plausible".
+  `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` is set. Until then every client-side question
+  below is answered by its server-side proxy, and the proxy is named for each one
+  instead of being left as "ask Plausible".
 
 Run each query with `psql "$DATABASE_URL"`; the enums are lowercase in the
 database and uppercase in the API (`doc/PAYMENT-LEDGER-SHAPES.md`).
@@ -29,10 +26,9 @@ database and uppercase in the API (`doc/PAYMENT-LEDGER-SHAPES.md`).
 ## Q1 — Which channel produced the first stakes?
 
 **The app records no channel.** There is no `utm_` capture, no referrer column and
-no signup source anywhere (R19-9 found zero `utm_` strings repo-wide), so this is
-the one question here the database cannot answer by itself. What it *can* do is
-tell you **who** arrived; the channel is matched by hand, once, while the list is
-still short enough to match by hand.
+no signup source anywhere, so this is the one question here the database cannot
+answer by itself. What it *can* do is tell you **who** arrived; the channel is
+matched by hand, once, while the list is still short enough to match by hand.
 
 ```sh
 psql "$DATABASE_URL" -c "
@@ -47,8 +43,8 @@ ORDER BY p.\"paidAt\";"
 
 - Rows whose `domain` is in `LAUNCH_INVENTORY_DOMAINS` (`lib/launchInventory.ts`)
   are the seed, not a customer. The `ARRAY[...]` literal in Q4 below is that same
-  list typed out — if the seed list ever changes, the literal is what goes stale, and the
-  copy in this file is the one to update with it.
+  list typed out — if the seed list ever changes, the literal is what goes stale,
+  and the copy in this file is the one to update with it.
 - For every other row: find the domain in whatever outbound log was kept for the
   launch (a file, a thread, a spreadsheet — write it on day one, because day three
   is too late), and in Plausible's referrer report once the script serves.
@@ -162,35 +158,34 @@ FROM \"Element\";"
 ```
 
 `colonization %` is `colonized_elements / 122`, and `total_pool_usd` is the growth
-number the roadmap tracks (`doc/ROADMAP.md:433-434`). Read it on day 1 and day 7 of
+number the roadmap tracks (`doc/ROADMAP.md`). Read it on day 1 and day 7 of
 launch week, not continuously.
 
-## The v2 triggers, and where each one is read (R20-13)
+## The v2 triggers, and where each one is read
 
 The v2 rule is "start an item only when its trigger metric hits **and** the MVP
-funnel is stable for two weeks" (`doc/phase-6-v2/README.md:6`). The second half
-needs a stable funnel reading, which is the read in Q2 above; the triggers:
+funnel is stable for two weeks". The second half needs a stable funnel reading,
+which is the read in Q2 above; the triggers:
 
 | Trigger | Where it is read today | Where it should be read |
 | --- | --- | --- |
-| Reclaim email CTR > 15 % (`01-badges-alerts-api.md:7`) | **Nowhere.** The client-side `reclaim_click` needs Plausible live (R19-1). A server-side substitute that works today: reclaim payments — `Payment.path = 'reclaim'` and `status = 'paid'` — over `OUTBID_EMAIL` deliveries recorded in `EmailLog`/`OutboxEvent`. It measures conversions, not clicks, so it reads **low** and a passing number is a stronger signal than the trigger asks for. | Plausible's saved view for `reclaim_click` over the `outbid` mail's campaign/source, once R19-1 closes |
-| On-chain settlement revisit at `$50k` pool (`:12`) | `total_pool_usd` in the north-star query above | Same, plus a dated note in `doc/phase-6-v2/README.md` when the number is non-zero — a `$0` pool six months out is a question about the product's path, not a v2 note |
-| Funnel stable for two weeks | `/api/admin/ops` `funnel` + Q2 | Plausible's funnel view over `tile_click → drawer_open → checkout_start → checkout_paid`, once R19-1 closes |
+| Reclaim email CTR > 15 % | **Nowhere.** The client-side `reclaim_click` needs Plausible live. A server-side substitute that works today: reclaim payments — `Payment.path = 'reclaim'` and `status = 'paid'` — over `OUTBID_EMAIL` deliveries recorded in `EmailLog`/`OutboxEvent`. It measures conversions, not clicks, so it reads **low** and a passing number is a stronger signal than the trigger asks for. | Plausible's saved view for `reclaim_click` over the `outbid` mail's campaign/source, once the script is live |
+| On-chain settlement revisit at `$50k` pool | `total_pool_usd` in the north-star query above | Same, plus a dated note when the number is non-zero — a `$0` pool six months out is a question about the product's path, not a v2 note |
+| Funnel stable for two weeks | `/api/admin/ops` `funnel` + Q2 | Plausible's funnel view over `tile_click → drawer_open → checkout_start → checkout_paid`, once the script is live |
 
-**Owed, not done, when R19-1 closes** (R20-13's two maintenance items, review date
-`2026-12-31`): name the saved Plausible views next to each trigger in
-`doc/phase-6-v2/README.md`, so the rule is checkable by someone other than the
-person who wrote it, and re-read the `$50k` threshold against the pool that
-actually accrued.
+**Owed, not done, when analytics goes live** (review date `2026-12-31`): name the
+saved Plausible views next to each trigger, so the rule is checkable by someone
+other than the person who wrote it, and re-read the `$50k` threshold against the
+pool that actually accrued.
 
 ## Open decision — what a claimed tile's number means
 
-Unmade as of 2026-09-16, and cheap to make either way. A tile's face states one
-number (`lib/tileFace.ts`): on an unclaimed tile it is the `$5` floor, which is
-also the price of taking it, and on a claimed tile it is what the holder paid
-(`title` and aria name: `"C Carbon · #1 $5"`, `"claimed, leader pays $5"`). The
-buyer's actual price — the holder's total plus `TAKEOVER_MARGIN` — appears on
-`/elements/[sym]` (`take #1 for $6`) and in the claim modal, one click later.
+Unmade and cheap to make either way. A tile's face states one number
+(`lib/tileFace.ts`): on an unclaimed tile it is the `$5` floor, which is also the
+price of taking it, and on a claimed tile it is what the holder paid (`title` and
+aria name: `"C Carbon · #1 $5"`, `"claimed, leader pays $5"`). The buyer's actual
+price — the holder's total plus `TAKEOVER_MARGIN` — appears on `/elements/[sym]`
+(`take #1 for $6`) and in the claim modal, one click later.
 
 With every seat seeded at the floor the two readings collapse (`$5` held, `$6` to
 beat), so nothing is wrong on screen; the ambiguity only returns the day a tile

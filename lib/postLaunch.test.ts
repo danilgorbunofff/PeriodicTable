@@ -353,13 +353,11 @@ describe("R20-10 the refund path is proven where the money moves", () => {
     // exist.
     expect(d14, "ops/*.md cites D14").toBe(1);
     expect(ops("refunds-and-disputes.md")).toMatch(/used to cite/);
-    // ...and the id it points at is real.
-    expect(src("doc/review/FINDINGS.md")).toMatch(/\| D17-5 \|/);
   });
 });
 
 describe("R20-12/R20-13 the questions launch week can answer have queries", () => {
-  const week = src("doc/phase-5-launch/03-launch-week-questions.md");
+  const week = src("ops/launch-queries.md");
 
   it("is runnable: every command block is a psql call against the ledger", () => {
     const blocks = [...week.matchAll(/```sh\n([\s\S]*?)```/g)].map((m) => m[1].trim());
@@ -388,17 +386,6 @@ describe("R20-12/R20-13 the questions launch week can answer have queries", () =
     expect(week).toContain("lib/launchInventory.ts");
     // The crown is a mutable flag, so history is read from the activity log.
     expect(week.replace(/\\"/g, '"')).toMatch(/"ActivityLog"/);
-  });
-
-  it("writes the two maintenance items where the v2 rule is", () => {
-    const v2 = src("doc/phase-6-v2/README.md");
-    expect(v2).toMatch(/R20-13/);
-    // A review date, because an unrevisited threshold is a decision pretending
-    // to be a measurement.
-    expect(v2).toMatch(/2026-12-31/);
-    expect(v2).toMatch(/\$50k/);
-    // The gated half names the instrument that reads it.
-    expect(v2).toMatch(/\/api\/admin\/ops/);
   });
 });
 
@@ -452,15 +439,5 @@ describe("R20-14/R20-15 the permanence and the term are published, from one sour
     expect(page.match(/\{SERVICE_TERM_SENTENCE\}/g)?.length).toBe(1);
     // The FAQ says it is in three places; this counts them.
     expect(page).toMatch(/FAQ_PATH/);
-  });
-
-  it("changes the launch gate, because that is what CR-20.4 asks for", () => {
-    const gate = src("doc/review/19-launch-and-marketing-readiness.md");
-    // The register's one row that moves a launch gate: the statement is either
-    // published or its absence accepted in writing. It was published, and the
-    // checkbox says so — with the date it commits to.
-    expect(gate).toMatch(/CR-20\.4/);
-    expect(gate).toMatch(/A shutdown statement is published/);
-    expect(gate).toContain(SERVICE_TERM.until);
   });
 });

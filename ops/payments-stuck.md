@@ -21,7 +21,7 @@ Read four fields (the full body is documented in the route and in `webhooks.md`)
 | --- | --- |
 | `ok` | `false` = at least one of `divergent`/`unapplied`/`aggregate` is non-zero. This is the one that pages. |
 | `unapplied.count` | A delivery ended in ERROR and was never superseded, on a payment still `PENDING` (money captured, nothing applied) or still `PAID` (a reversal that never unwound). **This is the stuck-payment shape.** |
-| `divergent.count` | A `PAID` row whose stored provider figure contradicts the charge. Impossible by construction — if it is non-zero, stop and read `doc/review/08-settlement-and-ledger-integrity.md`. |
+| `divergent.count` | A `PAID` row whose stored provider figure contradicts the charge. Impossible by construction — if it is non-zero, stop and read `ops/payments-stuck.md`'s divergent section. |
 | `stale.count` | `PENDING` past the 24 h session lifetime: no delivery is coming. Operator work, listed with `providerCheckoutUrl`. |
 
 A 503 with `ok:false` is the same answer with an alarm attached; the body still
@@ -107,7 +107,7 @@ next responder needs the provider event id, not a narrative.
 - Reconcile rides the ten-minute tick, which is not ten minutes in practice
   (measured 5 % of nominal, worst gap 6 h 40 m). A stuck payment can therefore sit
   until the next tick that actually runs. The alarm channel's adequacy is
-  `doc/review/18`'s finding, not this runbook's.
+  the observability pass's finding, not this runbook's.
 - `unverified.count` (a `PAID` row the provider never stated an amount for) is
   advisory and has a recorded baseline in `.github/workflows/outbox-tick.yml`. A
   rise is new coverage gap, not new money.

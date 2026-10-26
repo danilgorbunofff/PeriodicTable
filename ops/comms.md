@@ -7,7 +7,7 @@ wind-down notice below (R20-15, the one message with a date the rules page
 promises).
 
 **Where the message goes, who writes it and which channel carries it is operator
-decision D16** (`doc/review/FINDINGS.md`). The repo cannot create an account for
+decision D16**. The repo cannot create an account for
 you. What it can do is fix the *content* in advance so no one is drafting under
 pressure, and make sure the one sentence a customer needs is on hand — the
 product records everything the message has to assert.

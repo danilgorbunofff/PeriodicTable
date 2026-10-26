@@ -1,4 +1,4 @@
-/* Review 06 (doc/review/06-checkout-before-payment.md) — the intake path's
+/* Review 06 — the intake path's
    wiring, pinned without a browser. The decisions themselves are pure and live
    in lib/checkoutFace.ts (tested next door); a Next.js client component and a
    route handler still need a DOM and a database, and this repo has neither in

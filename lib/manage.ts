@@ -21,8 +21,8 @@
  *   (R10-2).
  * - Raw tokens are returned by requestManageToken ONLY under the development
  *   app env. `!isProduction()` was the previous test, and it was wrong: a
- *   preview deployment reports preview, not production, and per
- *   doc/PROD-READINESS-CHECKLIST.md l.16 the preview class may point at the
+ *   preview deployment reports preview, not production, and a preview
+ *   deployment's class may point at the
  *   production database — so the "dev convenience" handed out working tokens
  *   for real listings.
  * - R14-7: that development check is now one of two gates. `getAppEnv()` is a

@@ -41,7 +41,7 @@ Users browse and pan the table, inspect elements, compare bidders, search for st
 
 - Product and interaction requirements: `doc/ROADMAP.md`
 - Current visual authority: `doc/DESIGN-SYSTEM.md`
-- Exotic category definitions: `doc/phase-0-foundation/02-element-seed-data.md`
+- Exotic category definitions: `doc/ELEMENT-DATA.md`
 - Current exotic capsule and tile implementation: `components/PeriodicGrid.tsx`, `components/Tile.tsx`, and `app/globals.css`
 - No testimonials, customer claims, or performance benchmarks are available and none should be fabricated.
 

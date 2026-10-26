@@ -3,10 +3,9 @@
 
 > **Tagline:** "Put your startup on the table. Literally."
 > **Concept:** Every chemical element is an open, multi-tenant leaderboard ranked by total stake. Startups plant their flag from $5, take the #1 Crown, get outbid, and top-up to reclaim. Visually and logically identical to worldmap.lol, but on an 18-column periodic canvas with 122 nodes.
-> **Source inputs:** `*.txt` master spec (333 lines, v1) + `/images/` reference set (15x worldmap.lol screenshots, 09:40–09:56).
+> **Source inputs:** `*.txt` master spec (333 lines, v1) + a 15-screenshot worldmap.lol reference set.
 > **Doc location:** `/doc/ROADMAP.md` — product & architecture authority.
 > **Visual authority:** `/doc/DESIGN-SYSTEM.md` (post-review). If this file and DESIGN-SYSTEM conflict on look, **DESIGN-SYSTEM wins**.
-> **Audit:** `/doc/REVIEW.md` — what was wrong vs the 15 worldmap.lol screenshots.
 >
 > **Amendment (2026-09-15):** the payment provider is **Stripe**, not Whop. The
 > Whop API key could never be granted `create_checkout_session` scope, so the
@@ -30,7 +29,7 @@
 
 ---
 
-## 1. What worldmap.lol Does Right (Distilled from `/images/` References)
+## 1. What worldmap.lol Does Right (Distilled from the Reference Screenshots)
 
 Analyzed all 15 screenshots. These are the patterns we must replicate 1:1 in look, feel, and logic:
 
@@ -188,7 +187,7 @@ Metal / glass / cosmic shaders are **Phase 6**, not MVP. Worldmap paints every t
 - Exotic: same porcelain + pastel as a neighboring family (or icy `#F2F7FC`) + caption `EXOTIC`
 
 ### 5.3 Bespoke finishes — NOT MVP
-Parked in `doc/phase-6-v2/02-monetization-shaders.md`. Shipping them in Phase 4 would break the worldmap twin.
+Parked for a v2 pass. Shipping them in Phase 4 would break the worldmap twin.
 
 ---
 

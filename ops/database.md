@@ -126,8 +126,8 @@ payment ledger, and it also destroys the evidence a dispute response needs
 Neon keeps history; the product keeps no backup of its own. The recovery
 mechanics belong to the provider (branching / point-in-time restore from the
 Neon console), and the *retention window we rely on* — the point-in-time we can
-still reach, and who may authorise a restore — is **operator decision D11**
-(`doc/review/FINDINGS.md`, phase 17). Until that is written down, assume nothing
+still reach, and who may authorise a restore — is **operator decision D11**.
+Until that is written down, assume nothing
 about how far back you can go; ask before promising a restore to a customer.
 
 Procedure once the window is known (and generally, in this order):
@@ -148,9 +148,9 @@ Procedure once the window is known (and generally, in this order):
 ### The drill (owed — R20-11)
 
 Steps 1–4 above are a plan, and a plan is not evidence that the window is real.
-Doc 12 asked for "a written, dated restore drill result — not a plan to do one"
-(`00-REVIEW-PLAN.md:127`); `doc/review/12`'s UNKNOWN U12-1 carries the same gap,
-and doc 20's R20-11 is the register's copy of it. The drill is **owed by
+Doc 12 asked for "a written, dated restore drill result — not a plan to do one";
+the earlier review's UNKNOWN U12-1 carries the same gap,
+and R20-11 is the register's copy of it. The drill is **owed by
 2026-10-15**, before the first real payment, and until someone has run it this
 file will not claim a recovery point — the same honesty rule as the outage-drill
 screenshot (`:45`, U17-3).

@@ -1,4 +1,4 @@
-/* Launch inventory (doc/phase-5-launch/01-seed-instrument.md).
+/* Launch inventory.
 
    `prisma/launch-seed.ts` opens a small set of seats before anybody has bought
    one, so the launch grid is not empty: real domains, one seat per element,

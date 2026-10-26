@@ -80,7 +80,7 @@ Index and auth: `ops/README.md`. This file is about undoing a *deploy*; a paymen
   (`refunds-and-disputes.md`, `D17-5`) and happen *per payment*, never as part of a
   moderation call.
 - The throttle behind intake is per-instance unless Upstash is configured — an open
-  production finding, and D15 (`doc/review/FINDINGS.md`). Do not assume a rate limit
+  production finding, and D15. Do not assume a rate limit
   is protecting the report path during a distributed wave.
 
 ## Rehearsal records

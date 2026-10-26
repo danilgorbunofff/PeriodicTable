@@ -184,7 +184,7 @@ describe("R19-7 one address for every job, published once", () => {
 });
 
 describe("R19-8 the launch-day file stops contradicting the runbook", () => {
-  const gate = src("doc/phase-5-launch/02-launch-gate-runbook.md");
+  const gate = src("ops/launch.md");
 
   it("names the provider the product uses, and no other", () => {
     expect(gate).toMatch(/Stripe/);
@@ -224,7 +224,7 @@ describe("R19-8 the launch-day file stops contradicting the runbook", () => {
   });
 
   it("the seed list describes the rows the seeder actually writes", () => {
-    const csv = src("doc/phase-5-launch/seed-list.csv").trim().split("\n");
+    const csv = src("prisma/launch-seed-list.csv").trim().split("\n");
     const header = csv[0].split(",");
     expect(header).toEqual(["domain", "title", "pitch", "symbol", "amount_usd"]);
     const rows = csv.slice(1).map((line) => line.split(","));
@@ -241,7 +241,7 @@ describe("R19-8 the launch-day file stops contradicting the runbook", () => {
     }
     const symbols = [...seeder.matchAll(/symbol: "([^"]+)"/g)].map((m) => m[1]).sort();
     expect(rows.map((row) => row[3]).sort()).toEqual(symbols);
-    expect(src("doc/phase-5-launch/seed-list.csv")).not.toMatch(/aurum\.fi|acme\.dev|hydro\.dev/);
+    expect(src("prisma/launch-seed-list.csv")).not.toMatch(/aurum\.fi|acme\.dev|hydro\.dev/);
   });
 });
 
@@ -270,7 +270,7 @@ describe("R19-9 the card credits the account, when an account exists", () => {
   });
 
   it("records the tagging convention the launch posts must follow", () => {
-    const runbook = src("doc/phase-5-launch/02-launch-gate-runbook.md");
+    const runbook = src("ops/launch.md");
     expect(runbook).toMatch(/utm_source=&utm_medium=&utm_campaign=launch/);
   });
 });

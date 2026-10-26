@@ -34,7 +34,7 @@ jobs:
       # this number is new: the step annotates the run with ::warning:: instead of
       # the old behaviour, where the only copy of that number was a log line nobody
       # read. Raise it in the same commit as the manual cross-check that accounts
-      # for the new rows, and note the reading in doc/PROD-READINESS-CHECKLIST.md.
+      # for the new rows, and note the reading in `ops/launch.md`.
       # It is a warning and not a failure on purpose: an `unverified` row is PAID
       # and correct, so it is a coverage gap in this report, not money loss.
       RECONCILE_UNVERIFIED_BASELINE: "0"
@@ -131,7 +131,7 @@ jobs:
           div=$(jq -r '.divergent.count // 0' "$RUNNER_TEMP/reconcile.json" 2>/dev/null || echo '?')
           un=$(jq -r '.unapplied.count // 0' "$RUNNER_TEMP/reconcile.json" 2>/dev/null || echo '?')
           if [ "$code" != "200" ] || [ "$div" != "0" ] || [ "$un" != "0" ]; then
-            echo "::error::/api/jobs/reconcile HTTP $code — divergent=${div:-?} unapplied=${un:-?}. Real money: read the body above, settle a captured-but-unapplied charge by hand and correct any divergent PAID row (doc/review/08-settlement-and-ledger-integrity.md)."
+            echo "::error::/api/jobs/reconcile HTTP $code — divergent=${div:-?} unapplied=${un:-?}. Real money: read the body above, settle a captured-but-unapplied charge by hand and correct any divergent PAID row (see ops/payments-stuck.md)."
             exit 1
           fi
           # The third failing block needs no check here: `aggregate` drift fails

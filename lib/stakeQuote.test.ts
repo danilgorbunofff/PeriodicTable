@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { stakeQuote, crownCopy } from "./stakeQuote";
 import { classifyAndValidate, takeLeadPrice, reclaimFor } from "./pricing";
 
-/* Review 04 (doc/review/04-element-detail-and-pricing.md) — the checkout form's
+/* Review 04 — the checkout form's
    money claims, tested without a browser: the figure the app wrote into the
    amount field (R04-1), the price the copy may state (R04-2, R09-6), and the
    neutral wording (no prior-holder personalization, no holds). */

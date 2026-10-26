@@ -15,7 +15,7 @@ Two rules frame everything here:
   without two explicit flags (`database.md`).
 
 **Who may approve a refund, from which console, and what the standard response to
-a chargeback is — operator decision `D17-5`** (`doc/review/FINDINGS.md`; `17`'s own
+a chargeback is — operator decision `D17-5`** (`17`'s own
 decision list numbers it `D14`, which is what this file used to cite). This runbook
 does not invent that answer; it gives the steps and the evidence once the decision
 says to proceed.

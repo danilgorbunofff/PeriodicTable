@@ -3,8 +3,8 @@
 The procedures for running periodictable.lol. Everything here assumes no UI:
 the operator surface is the authenticated `/api/admin/*` and `/api/jobs/*`
 endpoints and a shell. Started as
-the Phase 17 fix pass (`doc/review/17-operator-tooling-and-runbooks.md`), which
-measured how much of the plan's runbook list had no procedure written at all —
+the operator-tooling pass, which measured how much of the plan's runbook list had
+no procedure written at all —
 this file is the index for what now exists, and each runbook names the finding
 it answers.
 
@@ -32,6 +32,13 @@ closes them: R17-7's operator half is the last section of `takedown.md` (a buyer
 profile edit, with no client to make it — that form is phase `09`), and R17-8 was
 already closed in the product by R14-9's `OUTBOX_RETRY` audit row, which this pass
 gave the `actorRef` rule below.
+
+## Launch
+
+- `launch.md` — the launch gate: every checkbox that had to be true before the
+  first real payment, plus the deploy/pause procedure.
+- `launch-queries.md` — the SQL that answers the launch-week questions against
+  the production ledger.
 
 ## Auth, once
 
@@ -103,6 +110,6 @@ export CRON_SECRET=…   # /api/jobs/*    — workers and reports
   there is no reason to run it against production. See `database.md`.
 - The operator-only answers (on-call hours, credential custody, refund authority,
   the PITR window, the status page, Upstash) are recorded as decisions
-  `D10–D18` in `doc/review/FINDINGS.md`. Where a runbook needs one, it names the
+  `D10–D18` in the findings register. Where a runbook needs one, it names the
   decision instead of inventing the answer — `alerts.md` does this for the alert
   channel (`D18-2`), the monitor (`D18-5`) and the pager (`D18-6`).

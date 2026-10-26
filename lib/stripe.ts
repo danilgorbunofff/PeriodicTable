@@ -495,7 +495,7 @@ export function stripePayloadIsFailed(payload: unknown): boolean {
  * the buyer being turned down, and the register should be able to say so.
  *
  * The distinction matters because this event is not in the endpoint's
- * subscribed event list (see PROD-READINESS-CHECKLIST.md): if it is ever
+ * subscribed event list (see ops/launch.md): if it is ever
  * subscribed, the delivery must arrive already classified rather than falling
  * into "unrelated-event" and looking like a stream we do not act on. */
 const DECLINED_EVENT_TYPES = new Set(["payment_intent.payment_failed"]);

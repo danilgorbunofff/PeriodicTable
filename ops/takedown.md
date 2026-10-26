@@ -55,7 +55,7 @@ and the report queue is a **pull** surface that notifies nobody
    `X-Report-Queue-Open`, `-Overdue` (0 whenever the promise holds, so **this is
    the one to act on**), `-Promise-Hours` (72), and `-Oldest-Hours`/`-Oldest-At`.
    The headers, not the body: the body stays a bare array so it pipelines
-   (`doc/review/16` R16-12).
+   (`R16-12`).
 
 2. **Page through it, oldest last.** The list is newest-first, `take: 50`, and a
    fifth of an abuse wave can hide the oldest reports — the ones ageing toward

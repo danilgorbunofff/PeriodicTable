@@ -1,4 +1,4 @@
-/* Phase 2 acceptance (doc/review/02-shell-and-static-surfaces.md §8): every dead
+/* Phase 2 acceptance (§8): every dead
    end is the product's own screen — wordmark, one h1, a legal nav, a way back —
    and both 404 shapes render inside the app shell instead of Next's bare
    `__next_error__` document (R02-1, R02-2), with route and root boundaries that

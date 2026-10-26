@@ -1,4 +1,4 @@
-/* Launch seed (Phase 5, spec 01-seed-instrument.md): 11 inventory seats — the
+/* Launch seed (Phase 5): 11 inventory seats — the
  * site's own seat on Pt (Platinum, the element the app icon is built from) and
  * the ten platforms this site is actually built with (Next.js, React,
  * TypeScript, Prisma, Neon, Vercel, Tailwind, Stripe, Resend, Vitest), one seat
@@ -172,7 +172,7 @@ async function main() {
     if (!existing) {
       // clicksDelivered and city stay empty on purpose: a seat nobody bought
       // has not sent any traffic, and the seed does not invent a city for a
-      // company that never told us one (doc/phase-5-launch/seed-list.csv).
+      // company that never told us one (prisma/launch-seed-list.csv).
       await prisma.stake.create({
         data: { elementId: element.id, startupId: startup.id, amountUsd: MIN_STAKE, clicksDelivered: 0 },
       });

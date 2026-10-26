@@ -1,5 +1,5 @@
 /* Pricing engine — single server-side truth for every dollar number
-   (doc/phase-2-ledger/02-pricing-ranks.md, ROADMAP §3 + Phase 3 remediation).
+   (ROADMAP §3 + Phase 3 remediation).
    Validators are split by intent (first join / top-up / takeover) so each rule
    is testable in isolation. A tie is refused against every total already on the
    board — that check runs *before* commit, so two simultaneous claims can still
